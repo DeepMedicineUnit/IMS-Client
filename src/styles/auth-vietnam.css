@@ -1,0 +1,445 @@
+/* Auth Vietnam Theme CSS */
+
+/* Container and Background */
+.auth-vietnam-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  background-color: #f8f9fa;
+}
+
+.vietnam-pattern-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.9)),
+                    url('/public/assets/pattern-bg.png');
+  background-size: cover;
+  opacity: 0.1;
+  z-index: -2;
+}
+
+.dragon-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url('/public/assets/dragon-overlay.png');
+  background-position: bottom right;
+  background-repeat: no-repeat;
+  background-size: 40%;
+  opacity: 0.05;
+  z-index: -1;
+}
+
+/* Map Panel (Left Side) */
+.vietnam-map-panel {
+  height: 100vh;
+  background: linear-gradient(135deg, #d40000 0%, #8b0000 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  padding: 2rem;
+}
+
+.vietnam-map-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.vietnam-map {
+  width: 180px;
+  height: auto;
+  margin-bottom: 1.5rem;
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.5));
+}
+
+.vietnam-map-stars {
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100px;
+  height: 60px;
+  display: flex;
+  justify-content: center;
+}
+
+.vietnam-map-star {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  background-color: #ffde00;
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+  animation: twinkle 3s infinite;
+}
+
+.vietnam-map-star:nth-child(1) { top: 0; left: 50%; transform: translateX(-50%); }
+.vietnam-map-star:nth-child(2) { top: 10px; left: 20px; width: 15px; height: 15px; animation-delay: 0.5s; }
+.vietnam-map-star:nth-child(3) { top: 10px; right: 20px; width: 15px; height: 15px; animation-delay: 0.7s; }
+.vietnam-map-star:nth-child(4) { top: 30px; left: 30px; width: 12px; height: 12px; animation-delay: 0.3s; }
+.vietnam-map-star:nth-child(5) { top: 30px; right: 30px; width: 12px; height: 12px; animation-delay: 0.9s; }
+
+@keyframes twinkle {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+
+.vietnam-map-ancient-script {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100px;
+  background-image: url('/public/assets/ancient-script.png');
+  background-size: contain;
+  background-position: bottom;
+  background-repeat: repeat-x;
+  opacity: 0.2;
+}
+
+/* Auth Form */
+.auth-vietnam-form-container {
+  width: 100%;
+  max-width: 500px;
+  padding: 2rem;
+  opacity: 0;
+  transition: opacity 0.5s ease-in-out;
+}
+
+.auth-vietnam-fade-in {
+  opacity: 1;
+}
+
+.auth-vietnam-form {
+  background-color: #ffffff;
+  border-radius: 10px;
+  padding: 2rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  position: relative;
+}
+
+.auth-vietnam-form-title {
+  text-align: center;
+  color: #d40000;
+  margin-bottom: 1.5rem;
+  font-weight: 700;
+  font-size: 1.8rem;
+}
+
+/* Mobile Header */
+.auth-vietnam-mobile-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.auth-vietnam-mobile-logo {
+  width: 80px;
+  height: auto;
+  margin-bottom: 0.5rem;
+}
+
+.auth-vietnam-mobile-title {
+  font-size: 1.5rem;
+  color: #d40000;
+  font-weight: 700;
+  margin: 0;
+}
+
+/* Step Progress */
+.auth-vietnam-step-progress {
+  margin-bottom: 2rem;
+}
+
+.auth-vietnam-progress-bar {
+  height: 6px;
+  background-color: #e9ecef;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.auth-vietnam-progress-bar-inner {
+  height: 100%;
+  background: linear-gradient(90deg, #d40000, #ff4d4d);
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.auth-vietnam-step-indicators {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.auth-vietnam-step-indicator {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background-color: #e9ecef;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: #6c757d;
+  transition: all 0.3s ease;
+}
+
+.auth-vietnam-step-indicator.active {
+  background-color: #d40000;
+  color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(212, 0, 0, 0.2);
+}
+
+.auth-vietnam-step-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+}
+
+.auth-vietnam-step-label {
+  width: 33.333%;
+  text-align: center;
+  color: #6c757d;
+  transition: all 0.3s ease;
+}
+
+.auth-vietnam-step-label.active {
+  color: #d40000;
+  font-weight: 600;
+}
+
+/* Alerts */
+.auth-vietnam-alert {
+  padding: 1rem;
+  border-radius: 5px;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: flex-start;
+}
+
+.auth-vietnam-alert.error {
+  background-color: #fff5f5;
+  border-left: 4px solid #ff3b3b;
+  color: #d40000;
+}
+
+.auth-vietnam-alert.success {
+  background-color: #f0fff4;
+  border-left: 4px solid #48bb78;
+  color: #2f855a;
+}
+
+.auth-vietnam-alert-icon {
+  margin-right: 0.75rem;
+  font-size: 1.2rem;
+  line-height: 1.5;
+}
+
+/* Step Form */
+.auth-vietnam-step-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.auth-vietnam-step-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background-color: #f8f9fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  color: #d40000;
+  margin: 0 auto 1rem;
+  border: 2px solid rgba(212, 0, 0, 0.2);
+}
+
+.auth-vietnam-step-description {
+  text-align: center;
+  margin-bottom: 1.5rem;
+  color: #6c757d;
+}
+
+/* Input Groups */
+.auth-vietnam-input-group {
+  margin-bottom: 1.5rem;
+}
+
+.auth-vietnam-input-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: #495057;
+}
+
+.auth-vietnam-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth-vietnam-input-icon {
+  position: absolute;
+  left: 1rem;
+  color: #6c757d;
+}
+
+.auth-vietnam-input {
+  width: 100%;
+  padding: 0.75rem 1rem 0.75rem 2.5rem;
+  border: 1px solid #ced4da;
+  border-radius: 5px;
+  transition: all 0.3s ease;
+}
+
+.auth-vietnam-input:focus {
+  outline: none;
+  border-color: #d40000;
+  box-shadow: 0 0 0 3px rgba(212, 0, 0, 0.1);
+}
+
+.auth-vietnam-password-toggle {
+  position: absolute;
+  right: 1rem;
+  background: none;
+  border: none;
+  color: #6c757d;
+  cursor: pointer;
+  padding: 0;
+}
+
+.auth-vietnam-verification-code {
+  letter-spacing: 2px;
+  font-size: 1.2rem;
+  text-align: center;
+  padding-left: 2.5rem;
+}
+
+/* Submit Button */
+.auth-vietnam-submit-btn {
+  background: linear-gradient(90deg, #d40000, #ff4d4d);
+  color: #ffffff;
+  border: none;
+  border-radius: 5px;
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.auth-vietnam-submit-btn:hover {
+  background: linear-gradient(90deg, #b30000, #ff3333);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(212, 0, 0, 0.2);
+}
+
+.auth-vietnam-submit-btn:disabled {
+  background: #cccccc;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Links */
+.auth-vietnam-links {
+  margin-top: 1.5rem;
+}
+
+.auth-vietnam-link {
+  color: #d40000;
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  display: inline-flex;
+  align-items: center;
+}
+
+.auth-vietnam-link:hover {
+  color: #b30000;
+  text-decoration: underline;
+}
+
+.auth-vietnam-link-text {
+  margin-bottom: 1rem;
+}
+
+.auth-vietnam-divider {
+  margin: 1.5rem 0;
+  border-top: 1px solid #e9ecef;
+}
+
+/* Contact Section */
+.auth-vietnam-contact {
+  margin-top: 1.5rem;
+}
+
+.auth-vietnam-contact-title {
+  font-size: 0.9rem;
+  color: #495057;
+  margin-bottom: 0.75rem;
+  text-align: center;
+}
+
+.auth-vietnam-contact-item {
+  margin-bottom: 0.5rem;
+  text-align: center;
+}
+
+.auth-vietnam-contact-link {
+  color: #495057;
+  text-decoration: none;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+}
+
+.auth-vietnam-contact-link:hover {
+  color: #d40000;
+}
+
+.auth-vietnam-contact-icon {
+  margin-right: 0.5rem;
+  color: #d40000;
+}
+
+/* Profile Page Specific Styles */
+.profile-vietnam-container {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  opacity: 0;
+  transition: opacity 0.5s ease-in-out;
+}
+
+/* Responsive Styles */
+@media (max-width: 767.98px) {
+  .auth-vietnam-form {
+    padding: 1.5rem;
+  }
+  
+  .auth-vietnam-step-label {
+    font-size: 0.7rem;
+  }
+}

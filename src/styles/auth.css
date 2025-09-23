@@ -1,0 +1,202 @@
+/* Auth Form Styles */
+.auth-form-container {
+  max-width: 500px;
+  margin: 2rem auto;
+  opacity: 0;
+  transition: opacity 0.5s ease-in-out;
+}
+
+.fade-in {
+  opacity: 1;
+}
+
+.auth-form {
+  background-color: #ffffff;
+  border-radius: 10px;
+  padding: 2rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  position: relative;
+}
+
+.auth-logo {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.auth-logo h2 {
+  color: #d40000;
+  font-weight: 700;
+}
+
+.auth-heading {
+  text-align: center;
+  color: #343a40;
+  margin-bottom: 1.5rem;
+  font-weight: 600;
+}
+
+.auth-footer {
+  margin-top: 1.5rem;
+  text-align: center;
+}
+
+.auth-footer a {
+  color: #d40000;
+  text-decoration: none;
+}
+
+.auth-footer a:hover {
+  text-decoration: underline;
+}
+
+/* Step Progress */
+.step-progress {
+  margin-bottom: 2rem;
+}
+
+.progress {
+  height: 6px;
+  border-radius: 3px;
+}
+
+.progress-bar {
+  background: linear-gradient(90deg, #d40000, #ff4d4d);
+  transition: width 0.5s ease;
+}
+
+.step-indicators {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.5rem;
+}
+
+.step-indicator {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background-color: #e9ecef;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: #6c757d;
+  transition: all 0.3s ease;
+}
+
+.step-indicator.active {
+  background-color: #d40000;
+  color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(212, 0, 0, 0.2);
+}
+
+.step-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
+}
+
+.step-label {
+  width: 33.333%;
+  text-align: center;
+  color: #6c757d;
+  transition: all 0.3s ease;
+}
+
+.step-label.active {
+  color: #d40000;
+  font-weight: 600;
+}
+
+/* Step Form */
+.step-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background-color: #f8f9fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  color: #d40000;
+  margin: 0 auto 1rem;
+  border: 2px solid rgba(212, 0, 0, 0.2);
+}
+
+.step-description {
+  text-align: center;
+  margin-bottom: 1.5rem;
+  color: #6c757d;
+}
+
+/* Verification Code Input */
+.verification-code {
+  letter-spacing: 2px;
+  font-size: 1.2rem;
+  text-align: center;
+}
+
+/* Profile Page */
+.profile-card {
+  background-color: #ffffff;
+  border-radius: 10px;
+  padding: 2rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  opacity: 0;
+  transition: opacity 0.5s ease-in-out;
+}
+
+.profile-card.fade-in {
+  opacity: 1;
+}
+
+/* Password Strength */
+.password-strength-bar {
+  margin-top: 0.75rem;
+}
+
+.password-requirements {
+  margin-top: 0.75rem;
+  padding-left: 0.5rem;
+}
+
+.password-requirements small {
+  margin-bottom: 0.25rem;
+}
+
+/* Bootstrap Overrides */
+.btn-primary {
+  background: linear-gradient(90deg, #d40000, #ff4d4d);
+  border-color: #d40000;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(90deg, #b30000, #ff3333);
+  border-color: #b30000;
+}
+
+.btn-primary:disabled {
+  background: #cccccc;
+  border-color: #bbbbbb;
+}
+
+.input-group-text {
+  background-color: #f8f9fa;
+  color: #6c757d;
+}
+
+.form-control:focus {
+  border-color: #d40000;
+  box-shadow: 0 0 0 0.25rem rgba(212, 0, 0, 0.25);
+}
+
+/* Responsive Adjustments */
+@media (max-width: 767.98px) {
+  .auth-form {
+    padding: 1.5rem;
+  }
+  
+  .step-label {
+    font-size: 0.7rem;
+  }
+}

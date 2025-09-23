@@ -1,0 +1,534 @@
+/* Styles for vertical sidebar navbar */
+.vertical-navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  width: 70px;
+  background-color: #fff;
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+  z-index: 1040;
+  transition: width 0.3s ease;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 20px;
+}
+
+.vertical-navbar:hover,
+.vertical-navbar.expanded {
+  width: 220px;
+}
+
+.vertical-navbar .navbar-brand {
+  padding: 15px 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  height: 70px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Logo khi không hover */
+.vertical-navbar .navbar-brand .logo-small {
+  width: 39px;
+  height: 35px;
+  transition: opacity 0.3s ease;
+  opacity: 1;
+  position: absolute;
+  left: 17.5px;
+}
+
+/* Logo khi hover */
+.vertical-navbar .navbar-brand .logo-large {
+  height: 2.2rem;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  position: absolute;
+  left: 15px;
+}
+
+/* Hiển thị logo lớn khi hover */
+.vertical-navbar:hover .navbar-brand .logo-small,
+.vertical-navbar.expanded .navbar-brand .logo-small {
+  opacity: 0;
+
+}
+
+.vertical-navbar:hover .navbar-brand .logo-large,
+.vertical-navbar.expanded .navbar-brand .logo-large {
+  opacity: 1;
+}
+
+.vertical-navbar .navbar-brand .brand-text {
+  opacity: 0;
+  white-space: nowrap;
+  transition: opacity 0.3s ease;
+  margin-left: 45px;
+}
+
+.vertical-navbar:hover .navbar-brand .brand-text,
+.vertical-navbar.expanded .navbar-brand .brand-text {
+  opacity: 1;
+}
+
+.vertical-navbar .nav-menu {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 10px 0;
+}
+
+.nav-icon-link {
+  display: flex;
+  align-items: center;
+  padding: 10px 15px;
+  margin: 3px 5px;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+  color: #555;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.nav-icon-link i {
+  font-size: 1.2rem;
+  min-width: 24px;
+  text-align: center;
+  transition: transform 0.2s;
+  margin-right: 10px;
+}
+
+.nav-icon-link .nav-text {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  font-size: 0.9rem;
+}
+
+.vertical-navbar:hover .nav-icon-link .nav-text,
+.vertical-navbar.expanded .nav-icon-link .nav-text {
+  opacity: 1;
+}
+
+.nav-icon-link.active {
+  background-color: #f0f7ff;
+  color: #0d6efd;
+  font-weight: 500;
+}
+
+.nav-icon-link:hover {
+  background-color: #f8f9fa;
+  color: #0d6efd;
+}
+
+/* Main content adjustment */
+.main-content {
+  margin-left: 70px;
+  transition: margin-left 0.3s ease;
+  min-height: 100vh;
+  padding-top: 20px;
+}
+
+/* Hide the old main-content when using top header */
+.main-content-with-header ~ .main-content {
+  display: none;
+}
+
+/* Dropdown styles for vertical navbar */
+.nav-dropdown {
+  position: relative;
+}
+
+/* Thêm mũi tên chỉ xuống cho menu dropdown */
+.nav-dropdown .nav-icon-link::after {
+  content: "\F282";
+  font-family: "bootstrap-icons";
+  margin-left: auto;
+  transition: transform 0.3s;
+  font-size: 0.8rem;
+  opacity: 0;
+}
+
+.vertical-navbar:hover .nav-dropdown .nav-icon-link::after,
+.vertical-navbar.expanded .nav-dropdown .nav-icon-link::after {
+  opacity: 1;
+}
+
+/* Xoay mũi tên khi menu dropdown được mở */
+.nav-dropdown .nav-icon-link.active::after {
+  transform: rotate(180deg);
+}
+
+/* Menu dropdown - Xổ xuống thay vì sang phải khi hover vào sidebar */
+.vertical-navbar:hover .nav-dropdown .dropdown-menu,
+.vertical-navbar.expanded .nav-dropdown .dropdown-menu {
+  position: static;
+  left: 0;
+  top: auto;
+  margin-top: 5px;
+  margin-left: 35px;
+  width: calc(100% - 40px);
+  box-shadow: none;
+  border-left: 2px solid #e9ecef;
+  padding-left: 10px;
+  display: none;
+}
+
+.vertical-navbar:hover .nav-dropdown .dropdown-menu.show,
+.vertical-navbar.expanded .nav-dropdown .dropdown-menu.show {
+  display: block;
+  animation: fadeInDown 0.3s ease;
+}
+
+/* Menu dropdown - Hiển thị sang phải khi không hover vào sidebar */
+.nav-dropdown .dropdown-menu {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  margin-top: 10px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border: none;
+  padding: 8px 0;
+  display: none;
+  min-width: 200px;
+  background-color: #fff;
+  z-index: 1050;
+}
+
+.nav-dropdown .dropdown-menu.show {
+  display: block;
+}
+
+/* User controls dropdown - hiển thị bên cạnh navbar ở dưới bên phải của các nút */
+.user-controls .nav-dropdown .dropdown-menu {
+  position: absolute;
+  top: 0;
+  bottom: auto;
+  left: 70px;
+  right: auto;
+  transform: translateY(0);
+  margin-top: 0;
+}
+
+.vertical-navbar:hover .user-controls .nav-dropdown .dropdown-menu,
+.vertical-navbar.expanded .user-controls .nav-dropdown .dropdown-menu {
+  left: 220px;
+}
+
+.dropdown-item {
+  padding: 8px 16px;
+  font-size: 14px;
+  color: #444;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.dropdown-item:hover,
+.dropdown-item.active {
+  background-color: rgba(79, 70, 229, 0.1);
+  color: #4f46e5;
+}
+
+.dropdown-divider {
+  height: 0;
+  margin: 0.5rem 0;
+  overflow: hidden;
+  border-top: 1px solid #e9ecef;
+}
+
+/* User controls at the bottom of sidebar - Hidden when using top header */
+.user-controls {
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+  padding: 10px 0;
+  margin-top: auto;
+  position: relative;
+  display: none; /* Hide user controls in sidebar when using top header */
+}
+
+.user-controls .nav-icon-link {
+  margin: 2px 5px;
+}
+
+.control-item {
+  position: relative;
+}
+
+/* Popup menu for notifications and messages - hiển thị bên cạnh navbar ở dưới bên phải của các nút */
+.popup-menu {
+  position: fixed;
+  bottom: 20px;
+  left: 70px;
+  right: auto;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 300px;
+  max-width: 400px;
+  max-height: 80vh;
+  overflow-y: auto;
+  z-index: 1060;
+  display: none;
+}
+
+.vertical-navbar:hover .popup-menu,
+.vertical-navbar.expanded .popup-menu {
+  left: 220px;
+}
+
+.popup-menu.show {
+  display: block;
+  animation: fadeIn 0.2s ease;
+}
+
+.popup-menu-header {
+  padding: -5px 6px;
+  border-bottom: 1px solid #e9ecef;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.popup-menu-body {
+  padding: 12px 16px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.popup-menu-footer {
+  padding: 10px 16px;
+  border-top: 1px solid #e9ecef;
+  text-align: center;
+}
+
+.close-popup {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  color: #6c757d;
+}
+
+.close-popup:hover {
+  color: #343a40;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 500px; }
+}
+
+/* Đảm bảo các menu không bị che khuất khi ở cuối sidebar */
+.user-controls .control-item:nth-child(1) .popup-menu {
+  bottom: 120px;
+}
+
+.user-controls .control-item:nth-child(2) .popup-menu {
+  bottom: 80px;
+}
+
+.user-controls .control-item:nth-child(3) .popup-menu,
+.user-controls .control-item:nth-child(3) .dropdown-menu {
+  bottom: 40px;
+}
+
+/* Thay đổi menu dropdown để xổ xuống thay vì sang phải khi ở mobile */
+@media (max-width: 992px) {
+  .vertical-navbar {
+    width: 0;
+    transform: translateX(-100%);
+  }
+  
+  .vertical-navbar.show {
+    width: 250px;
+    transform: translateX(0);
+  }
+  
+  .main-content {
+    margin-left: 0;
+  }
+  
+  .mobile-toggle {
+    display: block;
+    position: fixed;
+    top: 15px;
+    left: 15px;
+    z-index: 1050;
+    background-color: #fff;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  }
+  
+  .vertical-navbar .nav-icon-link .nav-text {
+    opacity: 1;
+  }
+  
+  .vertical-navbar .navbar-brand .brand-text {
+    opacity: 1;
+    margin-left: 45px;
+  }
+  
+  /* Hiển thị cả hai logo trên mobile */
+  .vertical-navbar.show .navbar-brand .logo-small {
+    opacity: 0;
+  }
+  
+  .vertical-navbar.show .navbar-brand .logo-large {
+    opacity: 1;
+  }
+  
+  .nav-dropdown .dropdown-menu {
+    position: static;
+    box-shadow: none;
+    padding-left: 15px;
+    border-left: 1px solid #e9ecef;
+    margin-left: 15px;
+    transform: none !important;
+  }
+  
+  .popup-menu {
+    position: fixed;
+    width: 90%;
+    left: 5%;
+    right: 5%;
+    top: 50%;
+    transform: translateY(-50%) !important;
+    max-width: none;
+    margin-bottom: 0;
+    bottom: auto;
+  }
+  
+  /* Đảm bảo dropdown menu hiển thị đúng trên mobile */
+  .user-controls .nav-dropdown .dropdown-menu {
+    position: static;
+    width: 100%;
+    left: 0;
+    right: 0;
+    transform: none !important;
+    margin-bottom: 0;
+  }
+  
+  /* Hiển thị mũi tên trên mobile */
+  .nav-dropdown .nav-icon-link::after {
+    opacity: 1;
+  }
+}
+
+/* Upgrade button styles */
+.upgrade-button {
+  position: relative;
+  transition: transform 0.3s ease;
+  margin: 10px auto;
+  width: 40px;
+  height: 40px;
+  display: block;
+}
+
+.upgrade-button:hover {
+  transform: scale(1.1);
+}
+
+.upgrade-button::after {
+  content: "Nâng cấp ADMIN";
+  position: absolute;
+  top: 120%;
+  left: -120%;
+  transform: translateY(-50%);
+  background-color: rgba(0, 0, 0, 0.068);
+  color: rgb(255, 0, 242);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 15px;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  margin-top: 5px;
+}
+
+.upgrade-button:hover::after {
+  opacity: 1;
+  visibility: visible;
+} 
+
+/* Mobile bottom navigation */
+.mobile-bottom-navbar {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 30px;
+  background-color: #fff;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+  z-index: 1050;
+  justify-content: space-around;
+  align-items: center;
+  padding: 0 10px;
+}
+
+.mobile-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 33.33%;
+  height: 100%;
+  color: #555;
+  text-decoration: none;
+  position: relative;
+}
+
+.mobile-nav-item i {
+  font-size: 1.5rem;
+}
+
+.mobile-nav-item .badge {
+  position: absolute;
+  top: 5px;
+  right: calc(50% - 15px);
+  font-size: 0.65rem;
+  padding: 0.2em 0.45em;
+  min-width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #fc0000;
+  color: #fff;
+}
+
+@media (max-width: 992px) {
+  .mobile-bottom-navbar {
+    display: flex;
+  }
+  
+  /* Add padding to main content to account for bottom navbar */
+  .main-content {
+    padding-bottom: 60px;
+  }
+  
+  /* Hide vertical navbar controls on mobile since we have bottom nav */
+  .vertical-navbar .user-controls {
+    display: none;
+  }
+}
+

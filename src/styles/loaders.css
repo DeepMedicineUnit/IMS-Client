@@ -1,0 +1,61 @@
+/* Blob Loader Animation */
+.blob-loaders-blob-alt-7 {
+  width: 112px;
+  height: 112px;
+  display: grid;
+  padding: 11.2px;
+  margin: 0 auto;
+}
+
+.blob-loaders-blob-alt-7:before,
+.blob-loaders-blob-alt-7:after {
+  content: "";
+  grid-area: 1 / 1;
+  width: 44.8px;
+  height: 44.8px;
+  background: #131da4;
+  animation: blob-loaders-blob-alt-7-anim 2.0s infinite;
+}
+
+.blob-loaders-blob-alt-7:after {
+  animation-delay: -1.0s;
+}
+
+@keyframes blob-loaders-blob-alt-7-anim {
+  0% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(100%, 0);
+  }
+  50% {
+    transform: translate(100%, 100%);
+  }
+  75% {
+    transform: translate(0, 100%);
+  }
+  100% {
+    transform: translate(0, 0);
+  }
+}
+
+/* Loader container */
+.loader-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
+  flex-direction: column;
+}
+
+.loader-text {
+  margin-top: 15px;
+  font-size: 16px;
+  color: #666;
+}
+
+
+
+
+
+
