@@ -8,7 +8,7 @@ const TopHeader = () => {
   const { currentUser, isLoggedIn, logout } = useAuth();
   const navigate = useNavigate();
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
-  const [notifications, setNotifications] = useState(5); // Mock notification count
+  const [notifications, setNotifications] = useState(0); // Mock notification count
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [invoiceCount, setInvoiceCount] = useState(5); // Mock invoice count
 
