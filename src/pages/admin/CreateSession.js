@@ -568,7 +568,19 @@ const CreateSession = () => {
     setCurrentEditSessionId(session.id);
     
     // Ensure default values for coordinates in location monitoring
-    const monitoringOptions = JSON.parse(JSON.stringify(session.monitoringOptions || formData.monitoringOptions));
+    let sessionMonitoringOptions = session.monitoring_options || session.monitoringOptions || formData.monitoringOptions;
+    
+    // Parse monitoring_options if it's a string
+    if (typeof sessionMonitoringOptions === 'string') {
+      try {
+        sessionMonitoringOptions = JSON.parse(sessionMonitoringOptions);
+      } catch (error) {
+        console.error('Error parsing monitoring_options:', error);
+        sessionMonitoringOptions = formData.monitoringOptions;
+      }
+    }
+    
+    const monitoringOptions = JSON.parse(JSON.stringify(sessionMonitoringOptions));
     
     // Set default coordinates if not present
     if (!monitoringOptions.location) {

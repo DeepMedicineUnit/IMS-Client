@@ -2465,6 +2465,11 @@
   color: white;
 }
 
+.dark-mode .monitoring-icon.attendance {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  color: white;
+}
+
 .dark-mode .no-monitoring {
   color: var(--text-tertiary);
 }

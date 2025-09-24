@@ -128,7 +128,17 @@ const EditSession = () => {
           };
           
           // Get monitoring options from the server or use defaults
-          const serverMonitoringOptions = session.monitoring_options || {};
+          let serverMonitoringOptions = session.monitoring_options || {};
+          
+          // Parse monitoring_options if it's a string
+          if (typeof serverMonitoringOptions === 'string') {
+            try {
+              serverMonitoringOptions = JSON.parse(serverMonitoringOptions);
+            } catch (error) {
+              console.error('Error parsing monitoring_options:', error);
+              serverMonitoringOptions = {};
+            }
+          }
           
           // Check if the location matches any predefined hospital
           const locationIndex = predefinedLocations.findIndex(loc => 

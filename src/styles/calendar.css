@@ -852,6 +852,11 @@
   color: white;
 }
 
+.monitoring-icon.attendance {
+  background: linear-gradient(135deg, #6f42c1 0%, #5a32a3 100%);
+  color: white;
+}
+
 .monitoring-icon:hover {
   transform: scale(1.1);
   box-shadow: 0 4px 8px rgba(0,0,0,0.2);

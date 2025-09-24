@@ -144,11 +144,25 @@ const SessionList = () => {
         const response = await api.get('/sessions');
         if (response.data.success) {
           console.log('Sessions data:', response.data.data);
-          // Cập nhật trạng thái dựa trên ngày và thời gian
-          const updatedSessions = response.data.data.map(session => ({
-            ...session,
-            calculatedStatus: calculateSessionStatus(session)
-          }));
+          // Cập nhật trạng thái dựa trên ngày và thời gian và parse monitoring_options
+          const updatedSessions = response.data.data.map(session => {
+            // Parse monitoring_options if it's a string
+            let parsedMonitoringOptions = session.monitoring_options;
+            if (typeof session.monitoring_options === 'string') {
+              try {
+                parsedMonitoringOptions = JSON.parse(session.monitoring_options);
+              } catch (error) {
+                console.error('Error parsing monitoring_options for session', session.id, ':', error);
+                parsedMonitoringOptions = null;
+              }
+            }
+            
+            return {
+              ...session,
+              monitoring_options: parsedMonitoringOptions,
+              calculatedStatus: calculateSessionStatus(session)
+            };
+          });
           setSessions(updatedSessions);
         } else {
           toast.error('Không thể tải danh sách buổi học');
@@ -672,10 +686,28 @@ const SessionList = () => {
                               <i className="fas fa-microphone"></i>
                             </div>
                           )}
+                          {session.monitoring_options?.attendance?.before_session?.enabled && (
+                            <div className="monitoring-icon attendance" title="Điểm danh trước buổi học">
+                              <i className="fas fa-clock"></i>
+                            </div>
+                          )}
+                          {session.monitoring_options?.attendance?.during_session?.enabled && (
+                            <div className="monitoring-icon attendance" title="Điểm danh trong buổi học">
+                              <i className="fas fa-user-check"></i>
+                            </div>
+                          )}
+                          {session.monitoring_options?.attendance?.after_session?.enabled && (
+                            <div className="monitoring-icon attendance" title="Điểm danh sau buổi học">
+                              <i className="fas fa-user-times"></i>
+                            </div>
+                          )}
                           {!session.monitoring_options?.webcam?.enabled && 
                            !session.monitoring_options?.audio?.enabled && 
                            !session.monitoring_options?.location?.enabled && 
-                           !session.monitoring_options?.file_upload?.enabled && (
+                           !session.monitoring_options?.file_upload?.enabled &&
+                           !session.monitoring_options?.attendance?.before_session?.enabled &&
+                           !session.monitoring_options?.attendance?.during_session?.enabled &&
+                           !session.monitoring_options?.attendance?.after_session?.enabled && (
                             <span className="no-monitoring">Không có</span>
                           )}
                         </div>
