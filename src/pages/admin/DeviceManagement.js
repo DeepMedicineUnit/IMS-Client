@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Container, Row, Col, Card, Table, Button, Badge, Alert, Spinner, Form, InputGroup, Pagination, Nav, Tab, Modal, Switch } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'react-toastify';
@@ -51,6 +51,10 @@ const DeviceManagement = () => {
     block_login_with_different_mac: null
   });
   const [userMacPolicyLoading, setUserMacPolicyLoading] = useState(false);
+  
+  // Auto-refresh states
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
+  const autoRefreshIntervalRef = useRef(null);
 
   // Fetch devices with MAC addresses - only show students who have logged in and have MAC
   const fetchDevices = async (isRefresh = false) => {
@@ -84,6 +88,28 @@ const DeviceManagement = () => {
     }
   };
 
+  // Fetch devices silently (without loading state)
+  const fetchDevicesSilently = async () => {
+    try {
+      setIsAutoRefreshing(true);
+      setError('');
+
+      const response = await api.get(`/users/devices?page=${currentPage}&limit=10&search=${searchTerm}&status=active`);
+      if (response.data.success) {
+        setDevices(response.data.data);
+        setTotalPages(response.data.pagination.totalPages);
+        setTotalDevices(response.data.pagination.totalItems);
+        
+        setLinkedDevices(response.data.data.length);
+        setUnlinkedDevices(0);
+      }
+    } catch (error) {
+      console.error('Error fetching devices silently:', error);
+    } finally {
+      setIsAutoRefreshing(false);
+    }
+  };
+
   useEffect(() => {
     fetchDevices();
   }, [currentPage, filterStatus]);
@@ -94,6 +120,26 @@ const DeviceManagement = () => {
       fetchAttendanceRecords();
     }
   }, [attendanceCurrentPage, activeTab]);
+
+  // Auto-refresh data every 30 seconds
+  useEffect(() => {
+    // Start auto-refresh interval
+    autoRefreshIntervalRef.current = setInterval(() => {
+      if (activeTab === 'devices') {
+        fetchDevicesSilently();
+      } else if (activeTab === 'attendance') {
+        fetchAttendanceRecordsSilently();
+      }
+    }, 30000); // 30 seconds
+
+    // Clean up interval on unmount
+    return () => {
+      if (autoRefreshIntervalRef.current) {
+        clearInterval(autoRefreshIntervalRef.current);
+        autoRefreshIntervalRef.current = null;
+      }
+    };
+  }, [activeTab, currentPage, attendanceCurrentPage, searchTerm, attendanceSearchTerm]);
   
   // Fetch MAC policy settings
   const fetchMacPolicies = async () => {
@@ -260,7 +306,8 @@ const DeviceManagement = () => {
           }
         }
         
-        fetchDevices();
+        // Refresh data silently
+        fetchDevicesSilently();
       } else {
         toast.error(response.data.message || 'Không thể xóa liên kết thiết bị');
       }
@@ -276,9 +323,9 @@ const DeviceManagement = () => {
       const response = await api.post('/users/remove-duplicate-mac', { macAddress });
       if (response.data.success) {
         toast.success(response.data.message);
-        // Refresh both tabs
-        fetchDevices();
-        fetchAttendanceRecords();
+        // Refresh both tabs silently
+        fetchDevicesSilently();
+        fetchAttendanceRecordsSilently();
       } else {
         toast.error(response.data.message || 'Không thể xóa MAC trùng lặp');
       }
@@ -322,7 +369,8 @@ const DeviceManagement = () => {
           }
         }
         
-        fetchAttendanceRecords();
+        // Refresh data silently
+        fetchAttendanceRecordsSilently();
       } else {
         toast.error(response.data.message || 'Không thể xóa địa chỉ MAC');
       }
@@ -356,6 +404,25 @@ const DeviceManagement = () => {
     } finally {
       setAttendanceLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  // Fetch attendance records silently (without loading state)
+  const fetchAttendanceRecordsSilently = async () => {
+    try {
+      setIsAutoRefreshing(true);
+      setAttendanceError('');
+
+      const response = await api.get(`/users/attendance-records?page=${attendanceCurrentPage}&limit=10&search=${attendanceSearchTerm}`);
+      if (response.data.success) {
+        setAttendanceRecords(response.data.data);
+        setAttendanceTotalPages(response.data.pagination.totalPages);
+        setAttendanceTotalRecords(response.data.pagination.totalItems);
+      }
+    } catch (error) {
+      console.error('Error fetching attendance records silently:', error);
+    } finally {
+      setIsAutoRefreshing(false);
     }
   };
 
@@ -458,6 +525,14 @@ const DeviceManagement = () => {
             <p className="header-subtitle">Theo dõi sinh viên đã đăng nhập và có địa chỉ MAC để bảo mật tài khoản</p>
           </div>
           <div className="header-actions">
+            {isAutoRefreshing && (
+              <div className="auto-refresh-indicator">
+                <div className="spinner-border spinner-border-sm text-white" role="status">
+                  <span className="visually-hidden">Đang cập nhật...</span>
+                </div>
+                <span className="ms-2 small">Đang cập nhật...</span>
+              </div>
+            )}
             <Button 
               variant="outline-light" 
               onClick={openMacPolicyModal}

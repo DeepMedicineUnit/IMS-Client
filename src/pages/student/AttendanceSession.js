@@ -469,14 +469,25 @@ const AttendanceSession = ({ shared = false }) => {
       const sessionData = response.data.data;
       const calculatedStatus = calculateSessionStatus(sessionData);
       
+      // Parse monitoring_options if it's a string
+      let parsedSessionData = { ...sessionData };
+      if (typeof sessionData.monitoring_options === 'string') {
+        try {
+          parsedSessionData.monitoring_options = JSON.parse(sessionData.monitoring_options);
+        } catch (error) {
+          console.error('Error parsing monitoring_options:', error);
+          parsedSessionData.monitoring_options = null;
+        }
+      }
+      
       // Cập nhật session với trạng thái đã tính toán
       setSession({
-        ...sessionData,
+        ...parsedSessionData,
         calculatedStatus: calculatedStatus
       });
       
       // Instead of checking if session is active, check if attendance is allowed based on windows
-      const attendanceStatus = checkAttendanceWindow(sessionData);
+      const attendanceStatus = checkAttendanceWindow(parsedSessionData);
       if (!attendanceStatus.allowed) {
         setError(attendanceStatus.message);
       } else {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Form, Alert, Container, Row, Col, Modal, Badge, Table, Spinner } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'react-toastify';
@@ -38,6 +38,10 @@ const AbsenceRequestManagement = () => {
   const [notificationEmails, setNotificationEmails] = useState([]);
   const [newEmail, setNewEmail] = useState({ email: '', name: '' });
   const [loadingNotifications, setLoadingNotifications] = useState(false);
+  
+  // Auto-refresh states
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
+  const autoRefreshIntervalRef = useRef(null);
 
   // Fetch absence requests
   const fetchAbsenceRequests = async (page = 1) => {
@@ -62,6 +66,28 @@ const AbsenceRequestManagement = () => {
     }
   };
 
+  // Fetch absence requests silently (without loading state)
+  const fetchAbsenceRequestsSilently = async () => {
+    try {
+      setIsAutoRefreshing(true);
+      const params = new URLSearchParams({
+        page: pagination.page.toString(),
+        limit: pagination.limit.toString(),
+        ...filters
+      });
+
+      const response = await api.get(`/absence-requests/admin?${params}`);
+      if (response.data.success) {
+        setRequests(response.data.data.requests);
+        setPagination(response.data.data.pagination);
+      }
+    } catch (error) {
+      console.error('Error fetching absence requests silently:', error);
+    } finally {
+      setIsAutoRefreshing(false);
+    }
+  };
+
   // Fetch statistics
   const fetchStats = async () => {
     try {
@@ -74,12 +100,41 @@ const AbsenceRequestManagement = () => {
     }
   };
 
+  // Fetch statistics silently
+  const fetchStatsSilently = async () => {
+    try {
+      const response = await api.get('/absence-requests/stats');
+      if (response.data.success) {
+        setStats(response.data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching stats silently:', error);
+    }
+  };
+
   // Initial data fetch
   useEffect(() => {
     fetchAbsenceRequests();
     fetchStats();
     fetchNotificationSettings();
   }, []);
+
+  // Auto-refresh data every 30 seconds
+  useEffect(() => {
+    // Start auto-refresh interval
+    autoRefreshIntervalRef.current = setInterval(() => {
+      fetchAbsenceRequestsSilently();
+      fetchStatsSilently();
+    }, 30000); // 30 seconds
+
+    // Clean up interval on unmount
+    return () => {
+      if (autoRefreshIntervalRef.current) {
+        clearInterval(autoRefreshIntervalRef.current);
+        autoRefreshIntervalRef.current = null;
+      }
+    };
+  }, [pagination.page, filters]);
 
   // Handle filter changes
   const handleFilterChange = (e) => {
@@ -341,12 +396,12 @@ const AbsenceRequestManagement = () => {
 
       if (response.data.success) {
         setSuccess(response.data.message);
-        toast.success(response.data.message);
+        // Silent success - no toast notification
         setShowProcessModal(false);
         setSelectedRequest(null);
-        // Refresh data
-        await fetchAbsenceRequests(pagination.page);
-        await fetchStats();
+        // Refresh data silently
+        fetchAbsenceRequestsSilently();
+        fetchStatsSilently();
       }
     } catch (error) {
       console.error('Error processing request:', error);
@@ -417,7 +472,7 @@ const AbsenceRequestManagement = () => {
 
       const response = await api.post('/absence-requests/notifications/emails', newEmail);
       if (response.data.success) {
-        toast.success('Đã thêm email nhận thông báo thành công');
+        // Silent success - no toast notification
         setNewEmail({ email: '', name: '' });
         fetchNotificationSettings();
       }
@@ -433,7 +488,7 @@ const AbsenceRequestManagement = () => {
       if (window.confirm(`Bạn có chắc chắn muốn xóa email ${email} khỏi danh sách nhận thông báo?`)) {
         const response = await api.delete(`/absence-requests/notifications/emails/${email}`);
         if (response.data.success) {
-          toast.success('Đã xóa email nhận thông báo thành công');
+          // Silent success - no toast notification
           fetchNotificationSettings();
         }
       }
@@ -450,7 +505,7 @@ const AbsenceRequestManagement = () => {
         is_active: !isActive
       });
       if (response.data.success) {
-        toast.success(`Đã ${!isActive ? 'kích hoạt' : 'vô hiệu hóa'} email nhận thông báo`);
+        // Silent success - no toast notification
         fetchNotificationSettings();
       }
     } catch (error) {
@@ -476,7 +531,17 @@ const AbsenceRequestManagement = () => {
       <div className="session-header">
         <div className="header-content">
           <div className="header-title">
-            <h1>Quản lý yêu cầu xin phép vắng học</h1>
+            <div className="d-flex align-items-center">
+              <h1 className="me-3">Quản lý yêu cầu xin phép vắng học</h1>
+              {isAutoRefreshing && (
+                <div className="auto-refresh-indicator">
+                  <div className="spinner-border spinner-border-sm text-white" role="status">
+                    <span className="visually-hidden">Đang cập nhật...</span>
+                  </div>
+                  <span className="ms-2 small">Đang cập nhật...</span>
+                </div>
+              )}
+            </div>
             <p className="header-subtitle">Theo dõi và xử lý các yêu cầu xin phép vắng học của sinh viên</p>
           </div>
           <div className="header-actions">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Form, Alert, Container, Row, Col, Modal, Badge, Table, Spinner } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'react-toastify';
@@ -21,6 +21,10 @@ const AbsenceRequestPage = () => {
     request_type: 'full_session',
     reason: ''
   });
+
+  // Auto-refresh states
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
+  const autoRefreshIntervalRef = useRef(null);
 
   // Fetch available sessions for absence request
   const fetchAvailableSessions = async () => {
@@ -64,6 +68,33 @@ const AbsenceRequestPage = () => {
     }
   };
 
+  // Fetch available sessions silently (without loading state)
+  const fetchAvailableSessionsSilently = async () => {
+    try {
+      setIsAutoRefreshing(true);
+      const response = await api.get('/sessions/student/dashboard?status=all');
+      if (response.data.success) {
+        setSessions(response.data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching sessions silently:', error);
+    } finally {
+      setIsAutoRefreshing(false);
+    }
+  };
+
+  // Fetch absence requests silently (without loading state)
+  const fetchAbsenceRequestsSilently = async () => {
+    try {
+      const response = await api.get('/absence-requests/student');
+      if (response.data.success) {
+        setRequests(response.data.data.requests);
+      }
+    } catch (error) {
+      console.error('Error fetching absence requests silently:', error);
+    }
+  };
+
   // Initial data fetch
   useEffect(() => {
     const fetchData = async () => {
@@ -83,6 +114,23 @@ const AbsenceRequestPage = () => {
       }
     };
     fetchData();
+  }, []);
+
+  // Auto-refresh data every 30 seconds
+  useEffect(() => {
+    // Start auto-refresh interval
+    autoRefreshIntervalRef.current = setInterval(() => {
+      fetchAvailableSessionsSilently();
+      fetchAbsenceRequestsSilently();
+    }, 30000); // 30 seconds
+
+    // Clean up interval on unmount
+    return () => {
+      if (autoRefreshIntervalRef.current) {
+        clearInterval(autoRefreshIntervalRef.current);
+        autoRefreshIntervalRef.current = null;
+      }
+    };
   }, []);
 
   // Debug effect to log state changes
@@ -261,8 +309,8 @@ const AbsenceRequestPage = () => {
           reason: ''
         });
         setSelectedSession(null);
-        // Refresh requests list
-        await fetchAbsenceRequests();
+        // Refresh requests list silently
+        await fetchAbsenceRequestsSilently();
       }
     } catch (error) {
       console.error('Error submitting absence request:', error);
@@ -387,6 +435,14 @@ const AbsenceRequestPage = () => {
           </div>
           <h2 className="mb-0">Xin phép vắng học</h2>
         </div>
+        {isAutoRefreshing && (
+          <div className="auto-refresh-indicator">
+            <div className="spinner-border spinner-border-sm text-primary" role="status">
+              <span className="visually-hidden">Đang cập nhật...</span>
+            </div>
+            <span className="ms-2 small text-muted">Đang cập nhật...</span>
+          </div>
+        )}
       </div>
 
       {error && (

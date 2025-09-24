@@ -940,30 +940,41 @@ const CreateSession = () => {
         
         // Prepare batch data for API
         const batchData = {
-          sessions: sessionBatch.map(session => ({
-            title: sharedSettings.name && !(customSettings[session.id]?.name)
+          sessions: sessionBatch.map(session => {
+            const title = sharedSettings.name && !(customSettings[session.id]?.name) && formData.name && formData.name.trim()
               ? formData.name
-              : session.name,
-            description: sharedSettings.description && !(customSettings[session.id]?.description) 
-              ? formData.description 
-              : session.description || '',
-            date: session.date,
-            startTime: sharedSettings.time && !(customSettings[session.id]?.time)
-              ? formData.startTime 
-              : session.startTime,
-            endTime: sharedSettings.time && !(customSettings[session.id]?.time)
-              ? formData.endTime 
-              : session.endTime,
-            location: sharedSettings.location && !(customSettings[session.id]?.location)
-              ? formData.location 
-              : session.location,
-            studentIds: sharedSettings.students && !(customSettings[session.id]?.students)
-              ? selectedStudents.map(student => student.id).filter(id => id)
-              : (session.students || []).map(student => student.id).filter(id => id),
-            monitoringOptions: sharedSettings.monitoring && !(customSettings[session.id]?.monitoring)
-              ? formData.monitoringOptions 
-              : session.monitoringOptions
-          })),
+              : session.name;
+            
+            console.log('Frontend Debug - session.id:', session.id);
+            console.log('Frontend Debug - sharedSettings.name:', sharedSettings.name);
+            console.log('Frontend Debug - customSettings[session.id]?.name:', customSettings[session.id]?.name);
+            console.log('Frontend Debug - formData.name:', formData.name);
+            console.log('Frontend Debug - session.name:', session.name);
+            console.log('Frontend Debug - final title:', title);
+            
+            return {
+              title: title,
+              description: sharedSettings.description && !(customSettings[session.id]?.description) 
+                ? formData.description 
+                : session.description || '',
+              date: session.date,
+              startTime: sharedSettings.time && !(customSettings[session.id]?.time)
+                ? formData.startTime 
+                : session.startTime,
+              endTime: sharedSettings.time && !(customSettings[session.id]?.time)
+                ? formData.endTime 
+                : session.endTime,
+              location: sharedSettings.location && !(customSettings[session.id]?.location)
+                ? formData.location 
+                : session.location,
+              studentIds: sharedSettings.students && !(customSettings[session.id]?.students)
+                ? selectedStudents.map(student => student.id).filter(id => id)
+                : (session.students || []).map(student => student.id).filter(id => id),
+              monitoringOptions: sharedSettings.monitoring && !(customSettings[session.id]?.monitoring)
+                ? formData.monitoringOptions 
+                : session.monitoringOptions
+            };
+          }),
           sharedSettings
         };
         

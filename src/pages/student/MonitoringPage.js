@@ -210,6 +210,73 @@ const MonitoringPage = () => {
   const audioIntervalRef = useRef(null);
   const locationIntervalRef = useRef(null);
   
+  // Auto-refresh intervals
+  const sessionDataIntervalRef = useRef(null);
+  const attendanceDataIntervalRef = useRef(null);
+  const filesDataIntervalRef = useRef(null);
+  
+  // Auto-refresh indicator
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
+  
+  // Function to fetch session data silently (without loading state)
+  const fetchSessionDataSilently = async () => {
+    try {
+      setIsAutoRefreshing(true);
+      const sessionResponse = await api.get(`/sessions/${id}`);
+      if (sessionResponse.data.success) {
+        const sessionData = sessionResponse.data.data;
+        
+        // Parse monitoring_options if it's a string
+        let parsedSessionData = { ...sessionData };
+        if (typeof sessionData.monitoring_options === 'string') {
+          try {
+            parsedSessionData.monitoring_options = JSON.parse(sessionData.monitoring_options);
+          } catch (error) {
+            console.error('Error parsing monitoring_options:', error);
+            parsedSessionData.monitoring_options = null;
+          }
+        }
+        
+        // Update session state silently
+        setSession(prevSession => ({
+          ...prevSession,
+          ...parsedSessionData,
+          students: parsedSessionData.students || prevSession?.students,
+          class_students: parsedSessionData.class_students || prevSession?.class_students
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching session data silently:', error);
+    } finally {
+      setIsAutoRefreshing(false);
+    }
+  };
+
+  // Function to fetch attendance data silently
+  const fetchAttendanceDataSilently = async () => {
+    try {
+      const attendanceResponse = await api.get(`/sessions/${id}/attendance`);
+      if (attendanceResponse.data.success) {
+        setIsAttended(attendanceResponse.data.data.attended);
+        setAttendanceData(attendanceResponse.data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching attendance data silently:', error);
+    }
+  };
+
+  // Function to fetch files data silently
+  const fetchFilesDataSilently = async () => {
+    try {
+      const filesResponse = await api.get(`/monitoring/files/${id}`);
+      if (filesResponse.data.success) {
+        setUploadedFiles(filesResponse.data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching files data silently:', error);
+    }
+  };
+
   // Get session details and check attendance
   useEffect(() => {
     const fetchSessionData = async () => {
@@ -223,11 +290,23 @@ const MonitoringPage = () => {
         }
         
         const sessionData = sessionResponse.data.data;
-        setSession(sessionData);
+        
+        // Parse monitoring_options if it's a string
+        let parsedSessionData = { ...sessionData };
+        if (typeof sessionData.monitoring_options === 'string') {
+          try {
+            parsedSessionData.monitoring_options = JSON.parse(sessionData.monitoring_options);
+          } catch (error) {
+            console.error('Error parsing monitoring_options:', error);
+            parsedSessionData.monitoring_options = null;
+          }
+        }
+        
+        setSession(parsedSessionData);
         
         // Check geofence if location monitoring is enabled
-        if (sessionData.monitoring_options?.location?.enabled && 
-            sessionData.monitoring_options?.location?.geofence?.enabled) {
+        if (parsedSessionData.monitoring_options?.location?.enabled && 
+            parsedSessionData.monitoring_options?.location?.geofence?.enabled) {
           
           try {
             // Get current location
@@ -251,7 +330,7 @@ const MonitoringPage = () => {
             
             if (!geofenceResponse.data.success) {
               // If not within geofence, show error and redirect to dashboard
-              setError(`Bạn đang ở ngoài phạm vi cho phép (${sessionData.monitoring_options.location.geofence.radius}m). Vui lòng di chuyển đến địa điểm buổi học để tham gia.`);
+              setError(`Bạn đang ở ngoài phạm vi cho phép (${parsedSessionData.monitoring_options.location.geofence.radius}m). Vui lòng di chuyển đến địa điểm buổi học để tham gia.`);
               toast.error('Không thể tham gia buổi học: Bạn đang ở ngoài phạm vi cho phép.');
               
               // Redirect to dashboard after 3 seconds
@@ -283,22 +362,22 @@ const MonitoringPage = () => {
         }
         
         // Set monitoring settings based on session configuration
-        if (sessionData.monitoring_options) {
+        if (parsedSessionData.monitoring_options) {
           // Handle both old format and new detailed format
-          if (typeof sessionData.monitoring_options.webcam === 'boolean') {
+          if (typeof parsedSessionData.monitoring_options.webcam === 'boolean') {
             // Old format
             setMonitoringSettings({
-              webcam: sessionData.monitoring_options.webcam ?? true,
-              audio: sessionData.monitoring_options.audio ?? true,
-              location: sessionData.monitoring_options.location ?? true,
+              webcam: parsedSessionData.monitoring_options.webcam ?? true,
+              audio: parsedSessionData.monitoring_options.audio ?? true,
+              location: parsedSessionData.monitoring_options.location ?? true,
               activity: true // Always enable activity tracking
             });
           } else {
             // New detailed format
             setMonitoringSettings({
-              webcam: sessionData.monitoring_options.webcam?.enabled ?? true,
-              audio: sessionData.monitoring_options.audio?.enabled ?? true,
-              location: sessionData.monitoring_options.location?.enabled ?? true,
+              webcam: parsedSessionData.monitoring_options.webcam?.enabled ?? true,
+              audio: parsedSessionData.monitoring_options.audio?.enabled ?? true,
+              location: parsedSessionData.monitoring_options.location?.enabled ?? true,
               activity: true // Always enable activity tracking
             });
           }
@@ -459,14 +538,14 @@ const MonitoringPage = () => {
           }
         }
         
-        sessionData.class_students = studentsData;
-        console.log('Final class_students:', sessionData.class_students);
+        parsedSessionData.class_students = studentsData;
+        console.log('Final class_students:', parsedSessionData.class_students);
         console.log('Final studentsData length:', studentsData.length);
-        console.log('Setting sessionData.class_students to:', studentsData);
+        console.log('Setting parsedSessionData.class_students to:', studentsData);
         
         // Update session data state
-        setSession(sessionData);
-        console.log('Updated session state with class_students:', sessionData.class_students);
+        setSession(parsedSessionData);
+        console.log('Updated session state with class_students:', parsedSessionData.class_students);
         
       } catch (error) {
         console.error('Error fetching session data:', error);
@@ -483,6 +562,40 @@ const MonitoringPage = () => {
       stopMonitoring();
     };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-refresh data every 30 seconds
+  useEffect(() => {
+    if (session && isAttended) {
+      // Start auto-refresh intervals
+      sessionDataIntervalRef.current = setInterval(() => {
+        fetchSessionDataSilently();
+      }, 30000); // 30 seconds
+
+      attendanceDataIntervalRef.current = setInterval(() => {
+        fetchAttendanceDataSilently();
+      }, 30000); // 30 seconds
+
+      filesDataIntervalRef.current = setInterval(() => {
+        fetchFilesDataSilently();
+      }, 30000); // 30 seconds
+
+      // Clean up intervals on unmount
+      return () => {
+        if (sessionDataIntervalRef.current) {
+          clearInterval(sessionDataIntervalRef.current);
+          sessionDataIntervalRef.current = null;
+        }
+        if (attendanceDataIntervalRef.current) {
+          clearInterval(attendanceDataIntervalRef.current);
+          attendanceDataIntervalRef.current = null;
+        }
+        if (filesDataIntervalRef.current) {
+          clearInterval(filesDataIntervalRef.current);
+          filesDataIntervalRef.current = null;
+        }
+      };
+    }
+  }, [session, isAttended, id]);
   
   // Setup socket connection
   useEffect(() => {
@@ -690,6 +803,22 @@ const MonitoringPage = () => {
     if (geofenceIntervalRef.current) {
       clearInterval(geofenceIntervalRef.current);
       geofenceIntervalRef.current = null;
+    }
+    
+    // Clear auto-refresh intervals
+    if (sessionDataIntervalRef.current) {
+      clearInterval(sessionDataIntervalRef.current);
+      sessionDataIntervalRef.current = null;
+    }
+    
+    if (attendanceDataIntervalRef.current) {
+      clearInterval(attendanceDataIntervalRef.current);
+      attendanceDataIntervalRef.current = null;
+    }
+    
+    if (filesDataIntervalRef.current) {
+      clearInterval(filesDataIntervalRef.current);
+      filesDataIntervalRef.current = null;
     }
     
     // Remove event listeners
@@ -903,15 +1032,12 @@ const MonitoringPage = () => {
       const response = await uploadApi.post('/monitoring/file', formData);
       
       if (response.data.success) {
-        toast.success('Tải file lên thành công');
+        // Silent success - no toast notification
         setSelectedFile(null);
         setFileNote('');
         
-        // Refresh file list
-        const filesResponse = await api.get(`/monitoring/files/${id}`);
-        if (filesResponse.data.success) {
-          setUploadedFiles(filesResponse.data.data);
-        }
+        // Refresh file list silently
+        fetchFilesDataSilently();
       }
     } catch (error) {
       console.error('Error uploading file:', error);
@@ -931,9 +1057,9 @@ const MonitoringPage = () => {
       const response = await api.put(`/monitoring/file/${fileId}/recall`);
       
       if (response.data.success) {
-        toast.success('Đã thu hồi file');
+        // Silent success - no toast notification
         
-        // Update file list to show recalled status
+        // Update file list to show recalled status silently
         setUploadedFiles(uploadedFiles.map(file => 
           file.id === fileId ? { ...file, is_recalled: true } : file
         ));
@@ -1002,8 +1128,16 @@ const MonitoringPage = () => {
     <div className="dashboard-container">
       <div className="modern-card shadow-sm p-4 mb-4">
         <div className="d-flex justify-content-between align-items-center">
-          <div>
-            <h2 className="fw-bold mb-1">Buổi học: {session.title}</h2>
+          <div className="d-flex align-items-center">
+            <h2 className="fw-bold mb-1 me-3">Buổi học: {session.title}</h2>
+            {isAutoRefreshing && (
+              <div className="auto-refresh-indicator">
+                <div className="spinner-border spinner-border-sm text-primary" role="status">
+                  <span className="visually-hidden">Đang cập nhật...</span>
+                </div>
+                <span className="ms-2 small text-muted">Đang cập nhật...</span>
+              </div>
+            )}
           </div>
           <button 
             className="btn-modern" 
@@ -1070,7 +1204,7 @@ const MonitoringPage = () => {
                           <strong>Địa điểm:</strong> {session.location || 'Chưa cập nhật'}
                         </div>
                         <div className="info-item mb-2">
-                          <strong>Lớp:</strong> {session.class_name || 'Chưa cập nhật'}
+                          <strong>Lớp:</strong> {session.students && session.students.length > 0 ? session.students[0].class_name || 'Chưa cập nhật' : 'Chưa cập nhật'}
                         </div>
                       </div>
                     </div>
@@ -1210,7 +1344,7 @@ const MonitoringPage = () => {
                               <div className="student-name">{student.full_name || student.fullName || student.username}</div>
                               <div className="student-email">{student.email}</div>
                               <div className="student-phone">
-                                {student.phone || student.student_id || 'Chưa cập nhật'}
+                                {student.phone || student.student_code || student.username || 'Chưa cập nhật'}
                               </div>
                             </div>
                             <div className="student-status">
@@ -1403,7 +1537,7 @@ const MonitoringPage = () => {
                           {/* File header */}
                           <div className="file-header">
                           <div className="file-icon">
-                              <i className={`${getFileIcon(file.file_type)} ${file.is_recalled ? 'text-muted' : 'text-primary'}`}></i>
+                              <i className={`${getFileIcon(file.file_type)} ${file.is_recalled ? 'text-muted' : 'text-white'}`}></i>
                           </div>
                           <div className="file-actions">
                               <button 

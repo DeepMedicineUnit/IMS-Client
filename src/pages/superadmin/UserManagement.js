@@ -32,20 +32,47 @@ const dropdownStyles = `
     box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
     border: none;
     border-radius: 0.5rem;
-    z-index: 9999 !important;
-    position: absolute !important;
+    z-index: 99999 !important;
+    position: fixed !important;
   }
   
   .action-dropdown {
     position: relative !important;
+    z-index: 1000 !important;
   }
   
   .action-dropdown .dropdown-menu {
     left: auto !important;
     right: 0 !important;
-    top: 100% !important;
+    top: auto !important;
+    bottom: 100% !important;
     transform: none !important;
-    margin-top: 5px !important;
+    margin-bottom: 5px !important;
+    z-index: 99999 !important;
+    position: absolute !important;
+  }
+  
+  .action-dropdown.show .dropdown-menu {
+    display: block !important;
+    z-index: 99999 !important;
+  }
+  
+  /* Auto-adjust dropdown position for last rows */
+  .session-table tbody tr:nth-last-child(-n+3) .action-dropdown .dropdown-menu {
+    top: auto !important;
+    bottom: 100% !important;
+    margin-top: 0 !important;
+    margin-bottom: 5px !important;
+  }
+  
+  .session-table tbody tr:nth-last-child(-n+3) .action-dropdown .dropdown-menu::before {
+    content: '';
+    position: absolute;
+    top: 100%;
+    right: 10px;
+    border: 5px solid transparent;
+    border-top-color: white;
+    z-index: 100000;
   }
   
   .dropdown-item {
@@ -74,6 +101,64 @@ const dropdownStyles = `
   
   .table tbody tr:hover td {
     background-color: transparent;
+  }
+  
+  /* Fix dropdown z-index issues */
+  .session-table-container {
+    position: relative;
+    z-index: 1;
+  }
+  
+  .session-table {
+    position: relative;
+    z-index: 1;
+  }
+  
+  .session-table tbody tr {
+    position: relative;
+    z-index: 1;
+  }
+  
+  .session-table tbody tr:hover {
+    z-index: 10;
+  }
+  
+  .action-dropdown {
+    position: relative !important;
+    z-index: 1000 !important;
+  }
+  
+  .action-dropdown:hover {
+    z-index: 10000 !important;
+  }
+  
+  .action-dropdown .btn-icon {
+    position: relative;
+    z-index: 1001 !important;
+  }
+  
+  /* Ensure dropdown container has enough space */
+  .session-table-container {
+    overflow: visible !important;
+  }
+  
+  .session-table {
+    overflow: visible !important;
+  }
+  
+
+  /* Smooth transition for dropdown */
+  .action-dropdown .dropdown-menu {
+    transition: all 0.2s ease !important;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-10px) !important;
+  }
+  
+  .action-dropdown.show .dropdown-menu {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateY(0) !important;
   }
 
   /* Student Detail Modal Styles */
@@ -812,7 +897,7 @@ const UserManagement = () => {
     gender: '',
     address: '',
     id_number: '',
-    status: 'Đang học',
+    status: '',
     phone: ''
   });
   const [currentPage, setCurrentPage] = useState(1);
@@ -821,7 +906,7 @@ const UserManagement = () => {
   const [classFilter, setClassFilter] = useState('');
   const [facultyFilter, setFacultyFilter] = useState('');
   const [majorFilter, setMajorFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Đang học');
   const [sortField, setSortField] = useState('student_id');
   const [sortOrder, setSortOrder] = useState('asc');
   const [uniqueClasses, setUniqueClasses] = useState([]);
@@ -1033,7 +1118,6 @@ const UserManagement = () => {
       
       if (response.data && response.data.success) {
         if (activeTab === 'students') {
-          console.log('Students data:', response.data.data);
           setStudents(response.data.data || []);
         } else {
           setUsers(response.data.data || []);
@@ -1071,6 +1155,11 @@ const UserManagement = () => {
       ...prev,
       role: tab === 'students' ? 'student' : 'staff'
     }));
+    
+    // Fetch data for the new tab
+    setTimeout(() => {
+      fetchUsers();
+    }, 100);
   };
 
   const handleAddUser = async (e) => {
@@ -1099,7 +1188,7 @@ const UserManagement = () => {
           gender: '',
           address: '',
           id_number: '',
-          status: 'Đang học',
+          status: '',
           phone: ''
         });
       }
@@ -2200,10 +2289,12 @@ const UserManagement = () => {
                       <Badge bg="danger">Nghỉ học</Badge>
                     ) : student.status === 'Tạm dừng' ? (
                       <Badge bg="warning">Tạm dừng</Badge>
-                    ) : student.status === 'Đã tốt nghiệp' ? (
-                      <Badge bg="primary">Đã tốt nghiệp</Badge>
+                    ) : student.status === 'Tốt nghiệp' ? (
+                      <Badge bg="primary">Tốt nghiệp</Badge>
+                    ) : student.status === 'Không có' ? (
+                      <Badge bg="secondary">Không có</Badge>
                     ) : (
-                      <Badge bg="secondary">-</Badge>
+                      <Badge bg="secondary">Không có</Badge>
                     )}
                   </td>
                 </tr>
