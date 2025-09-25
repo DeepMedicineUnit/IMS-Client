@@ -16,7 +16,7 @@ export function AuthProvider({ children }) {
 
   // Set up axios defaults
   const api = axios.create({
-    baseURL: '/api', // This will be proxied to http://localhost:5000/api
+    baseURL: process.env.NODE_ENV === 'production' ? 'https://clinical.pctu.edu.vn/api' : '/api',
     headers: {
       'Content-Type': 'application/json'
     },
