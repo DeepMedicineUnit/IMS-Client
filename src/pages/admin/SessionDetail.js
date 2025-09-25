@@ -168,7 +168,7 @@ const SessionDetail = () => {
   useEffect(() => {
     // Create socket connection
     const socket = io(process.env.NODE_ENV === 'production' 
-      ? 'https://clinical.pctu.edu.vn' 
+      ? window.location.origin 
       : 'http://localhost:5000');
     
     socketRef.current = socket;

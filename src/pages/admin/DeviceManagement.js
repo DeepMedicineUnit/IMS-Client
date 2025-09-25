@@ -34,9 +34,7 @@ const DeviceManagement = () => {
   const [showMacPolicyModal, setShowMacPolicyModal] = useState(false);
   const [macPolicies, setMacPolicies] = useState({
     allow_multiple_accounts_per_mac: false,
-    allow_multiple_macs_per_account: false,
-    block_login_with_used_mac: true,
-    block_login_with_different_mac: true
+    allow_multiple_macs_per_account: false
   });
   const [macPolicyLoading, setMacPolicyLoading] = useState(false);
   const [macPolicyError, setMacPolicyError] = useState('');
@@ -45,10 +43,8 @@ const DeviceManagement = () => {
   const [showUserMacPolicyModal, setShowUserMacPolicyModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [userMacPolicies, setUserMacPolicies] = useState({
-    allow_multiple_accounts_per_mac: null,
-    allow_multiple_macs_per_account: null,
-    block_login_with_used_mac: null,
-    block_login_with_different_mac: null
+    allow_multiple_accounts_per_mac: false,
+    allow_multiple_macs_per_account: false
   });
   const [userMacPolicyLoading, setUserMacPolicyLoading] = useState(false);
   
@@ -150,6 +146,7 @@ const DeviceManagement = () => {
       const response = await api.get('/mac-policies');
       
       if (response.data.success) {
+        console.log('Fetched MAC policies:', response.data.data);
         setMacPolicies(response.data.data);
       } else {
         setMacPolicyError('Không thể tải chính sách MAC address');
@@ -167,6 +164,7 @@ const DeviceManagement = () => {
     try {
       setMacPolicyLoading(true);
       
+      console.log('Sending MAC policies data:', macPolicies);
       const response = await api.put('/mac-policies', macPolicies);
       
       if (response.data.success) {
@@ -191,7 +189,26 @@ const DeviceManagement = () => {
       const response = await api.get(`/mac-policies/user/${userId}`);
       
       if (response.data.success) {
-        setUserMacPolicies(response.data.data);
+        const { exceptions, effectivePolicies } = response.data.data;
+        console.log('Fetched user MAC policy exceptions:', { exceptions, effectivePolicies });
+        
+        // If user has exceptions, use them, otherwise use effective policies
+        if (exceptions) {
+          const userPolicies = {
+            allow_multiple_accounts_per_mac: exceptions.allow_multiple_accounts_per_mac ?? false,
+            allow_multiple_macs_per_account: exceptions.allow_multiple_macs_per_account ?? false
+          };
+          console.log('Setting user policies from exceptions:', userPolicies);
+          setUserMacPolicies(userPolicies);
+        } else {
+          // No exceptions exist yet, show effective policies
+          const userPolicies = {
+            allow_multiple_accounts_per_mac: effectivePolicies.allow_multiple_accounts_per_mac ?? false,
+            allow_multiple_macs_per_account: effectivePolicies.allow_multiple_macs_per_account ?? false
+          };
+          console.log('Setting user policies from effective policies:', userPolicies);
+          setUserMacPolicies(userPolicies);
+        }
       } else {
         toast.error('Không thể tải ngoại lệ chính sách MAC address của người dùng');
       }
@@ -208,17 +225,30 @@ const DeviceManagement = () => {
     try {
       setUserMacPolicyLoading(true);
       
+      console.log('Setting user MAC policy exceptions for user:', selectedUser.id, 'with data:', userMacPolicies);
       const response = await api.put(`/mac-policies/user/${selectedUser.id}`, userMacPolicies);
       
       if (response.data.success) {
         toast.success('Cập nhật ngoại lệ chính sách MAC address thành công');
         setShowUserMacPolicyModal(false);
+        // Refresh data to show updated values
+        if (selectedUser) {
+          fetchUserMacPolicyExceptions(selectedUser.id);
+        }
       } else {
         toast.error(response.data.message || 'Không thể cập nhật ngoại lệ chính sách MAC address');
       }
     } catch (error) {
       console.error('Error setting user MAC policy exceptions:', error);
-      toast.error('Không thể cập nhật ngoại lệ chính sách MAC address. Vui lòng thử lại sau.');
+      
+      // Handle specific error cases
+      if (error.response && error.response.status === 400) {
+        toast.error(error.response.data?.message || 'Dữ liệu không hợp lệ. Vui lòng kiểm tra lại.');
+      } else if (error.response && error.response.status === 404) {
+        toast.error('Không tìm thấy người dùng');
+      } else {
+        toast.error('Không thể cập nhật ngoại lệ chính sách MAC address. Vui lòng thử lại sau.');
+      }
     } finally {
       setUserMacPolicyLoading(false);
     }
@@ -238,8 +268,15 @@ const DeviceManagement = () => {
         toast.error(response.data.message || 'Không thể xóa ngoại lệ chính sách MAC address');
       }
     } catch (error) {
-      console.error('Error removing user MAC policy exceptions:', error);
-      toast.error('Không thể xóa ngoại lệ chính sách MAC address. Vui lòng thử lại sau.');
+      // Handle 404 as success (no exceptions to delete)
+      if (error.response && error.response.status === 404) {
+        console.log('No MAC policy exceptions found for user - treating as success');
+        toast.success('Không có ngoại lệ chính sách MAC address để xóa');
+        setShowUserMacPolicyModal(false);
+      } else {
+        console.error('Error removing user MAC policy exceptions:', error);
+        toast.error('Không thể xóa ngoại lệ chính sách MAC address. Vui lòng thử lại sau.');
+      }
     } finally {
       setUserMacPolicyLoading(false);
     }
@@ -979,7 +1016,9 @@ const DeviceManagement = () => {
                       <div>
                         <Form.Label className="mb-0 fw-bold">Cho phép nhiều tài khoản trên một MAC</Form.Label>
                         <Form.Text className="d-block text-muted">
-                          Một địa chỉ MAC có thể được sử dụng bởi nhiều tài khoản khác nhau
+                          Một địa chỉ MAC có thể được sử dụng bởi nhiều tài khoản khác nhau.
+                          <br />
+                          <strong>NẾU TẮT:</strong> Chặn đăng nhập nếu MAC đã được sử dụng bởi tài khoản khác
                         </Form.Text>
                       </div>
                       <Form.Check 
@@ -993,41 +1032,15 @@ const DeviceManagement = () => {
                       <div>
                         <Form.Label className="mb-0 fw-bold">Cho phép nhiều MAC trên một tài khoản</Form.Label>
                         <Form.Text className="d-block text-muted">
-                          Một tài khoản có thể được sử dụng trên nhiều thiết bị khác nhau
+                          Một tài khoản có thể được sử dụng trên nhiều thiết bị khác nhau.
+                          <br />
+                          <strong>NẾU TẮT:</strong> Chặn đăng nhập nếu sử dụng thiết bị khác với thiết bị đã đăng ký
                         </Form.Text>
                       </div>
                       <Form.Check 
                         type="switch"
                         checked={macPolicies.allow_multiple_macs_per_account}
                         onChange={(e) => setMacPolicies({...macPolicies, allow_multiple_macs_per_account: e.target.checked})}
-                      />
-                    </Form.Group>
-                    
-                    <Form.Group className="mb-4 d-flex align-items-center justify-content-between">
-                      <div>
-                        <Form.Label className="mb-0 fw-bold">Chặn đăng nhập nếu MAC đã được sử dụng</Form.Label>
-                        <Form.Text className="d-block text-muted">
-                          Ngăn tài khoản đăng nhập nếu MAC address đã được liên kết với tài khoản khác
-                        </Form.Text>
-                      </div>
-                      <Form.Check 
-                        type="switch"
-                        checked={macPolicies.block_login_with_used_mac}
-                        onChange={(e) => setMacPolicies({...macPolicies, block_login_with_used_mac: e.target.checked})}
-                      />
-                    </Form.Group>
-                    
-                    <Form.Group className="mb-4 d-flex align-items-center justify-content-between">
-                      <div>
-                        <Form.Label className="mb-0 fw-bold">Chặn đăng nhập nếu MAC khác</Form.Label>
-                        <Form.Text className="d-block text-muted">
-                          Ngăn tài khoản đăng nhập nếu đang sử dụng thiết bị khác với thiết bị đã đăng ký
-                        </Form.Text>
-                      </div>
-                      <Form.Check 
-                        type="switch"
-                        checked={macPolicies.block_login_with_different_mac}
-                        onChange={(e) => setMacPolicies({...macPolicies, block_login_with_different_mac: e.target.checked})}
                       />
                     </Form.Group>
                   </div>
@@ -1160,7 +1173,9 @@ const DeviceManagement = () => {
                       <div>
                         <Form.Label className="mb-0 fw-bold">Cho phép nhiều tài khoản trên một MAC</Form.Label>
                         <Form.Text className="d-block text-muted">
-                          Địa chỉ MAC của người dùng này có thể được sử dụng bởi các tài khoản khác
+                          Địa chỉ MAC của người dùng này có thể được sử dụng bởi các tài khoản khác.
+                          <br />
+                          <strong>NẾU TẮT:</strong> Chặn đăng nhập nếu MAC đã được sử dụng bởi tài khoản khác
                         </Form.Text>
                       </div>
                       <Form.Check 
@@ -1174,41 +1189,15 @@ const DeviceManagement = () => {
                       <div>
                         <Form.Label className="mb-0 fw-bold">Cho phép nhiều MAC trên một tài khoản</Form.Label>
                         <Form.Text className="d-block text-muted">
-                          Tài khoản này có thể được sử dụng trên nhiều thiết bị khác nhau
+                          Tài khoản này có thể được sử dụng trên nhiều thiết bị khác nhau.
+                          <br />
+                          <strong>NẾU TẮT:</strong> Chặn đăng nhập nếu sử dụng thiết bị khác với thiết bị đã đăng ký
                         </Form.Text>
                       </div>
                       <Form.Check 
                         type="switch"
                         checked={userMacPolicies.allow_multiple_macs_per_account}
                         onChange={(e) => setUserMacPolicies({...userMacPolicies, allow_multiple_macs_per_account: e.target.checked})}
-                      />
-                    </Form.Group>
-                    
-                    <Form.Group className="mb-4 d-flex align-items-center justify-content-between">
-                      <div>
-                        <Form.Label className="mb-0 fw-bold">Chặn đăng nhập nếu MAC đã được sử dụng</Form.Label>
-                        <Form.Text className="d-block text-muted">
-                          Ngăn tài khoản đăng nhập nếu MAC address đã được liên kết với tài khoản khác
-                        </Form.Text>
-                      </div>
-                      <Form.Check 
-                        type="switch"
-                        checked={userMacPolicies.block_login_with_used_mac}
-                        onChange={(e) => setUserMacPolicies({...userMacPolicies, block_login_with_used_mac: e.target.checked})}
-                      />
-                    </Form.Group>
-                    
-                    <Form.Group className="mb-4 d-flex align-items-center justify-content-between">
-                      <div>
-                        <Form.Label className="mb-0 fw-bold">Chặn đăng nhập nếu MAC khác</Form.Label>
-                        <Form.Text className="d-block text-muted">
-                          Ngăn tài khoản đăng nhập nếu đang sử dụng thiết bị khác với thiết bị đã đăng ký
-                        </Form.Text>
-                      </div>
-                      <Form.Check 
-                        type="switch"
-                        checked={userMacPolicies.block_login_with_different_mac}
-                        onChange={(e) => setUserMacPolicies({...userMacPolicies, block_login_with_different_mac: e.target.checked})}
                       />
                     </Form.Group>
                   </div>
