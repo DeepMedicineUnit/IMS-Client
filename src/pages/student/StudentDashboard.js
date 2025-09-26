@@ -166,18 +166,19 @@ const StudentDashboard = () => {
     const now = new Date();
     const sessionDate = new Date(session.date);
     
-    // Set year, month, day from session date
-    const currentDate = new Date();
-    currentDate.setFullYear(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate());
+    // Create a new date for today with the session's date
+    const today = new Date();
+    const sessionToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    sessionToday.setFullYear(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate());
 
-    // Set session start and end times
+    // Parse start and end times
     const [startHours, startMinutes] = session.start_time.split(':').map(Number);
     const [endHours, endMinutes] = session.end_time.split(':').map(Number);
     
-    const sessionStartTime = new Date(currentDate);
+    const sessionStartTime = new Date(sessionToday);
     sessionStartTime.setHours(startHours, startMinutes, 0, 0);
     
-    const sessionEndTime = new Date(currentDate);
+    const sessionEndTime = new Date(sessionToday);
     sessionEndTime.setHours(endHours, endMinutes, 0, 0);
     
     // Handle sessions that span across midnight
@@ -199,17 +200,22 @@ const StudentDashboard = () => {
     const now = new Date();
     const sessionDate = new Date(session.date);
     
-    // Set year, month, day from session date
-    const currentDate = new Date();
-    currentDate.setFullYear(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate());
+    // Create a new date for today with the session's date
+    const today = new Date();
+    const sessionToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    sessionToday.setFullYear(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate());
     
-    // Set session end time
+    // Parse end time
     const [endHours, endMinutes] = session.end_time.split(':').map(Number);
-    const sessionEndTime = new Date(currentDate);
+    const sessionEndTime = new Date(sessionToday);
     sessionEndTime.setHours(endHours, endMinutes, 0, 0);
     
     // Handle sessions that span across midnight
-    if (sessionEndTime < new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 12, 0, 0)) {
+    const [startHours, startMinutes] = session.start_time.split(':').map(Number);
+    const sessionStartTime = new Date(sessionToday);
+    sessionStartTime.setHours(startHours, startMinutes, 0, 0);
+    
+    if (sessionEndTime < sessionStartTime) {
       sessionEndTime.setDate(sessionEndTime.getDate() + 1);
     }
     
@@ -276,9 +282,12 @@ const StudentDashboard = () => {
 
   // Function to get session status
   const getSessionStatus = (session) => {
-    if (isSessionActive(session)) {
+    const isActive = isSessionActive(session);
+    const isEnded = isSessionEnded(session);
+    
+    if (isActive) {
       return { status: 'active', text: 'Đang diễn ra', color: 'success' };
-    } else if (isSessionEnded(session)) {
+    } else if (isEnded) {
       return { status: 'ended', text: 'Đã kết thúc', color: 'secondary' };
     } else {
       return { status: 'upcoming', text: 'Sắp diễn ra', color: 'info' };
@@ -331,10 +340,8 @@ const StudentDashboard = () => {
                  Xem chi tiết
                </button>
              )}
-             
 
-
-             {sessionStatus.status === 'active' && (
+             {(sessionStatus.status === 'active' || (sessionStatus.status === 'upcoming' && isSessionActive(session))) && (
                <button
                  className="btn-modern"
                  onClick={() => handleJoinSession(session)}
@@ -1063,6 +1070,33 @@ const StudentDashboard = () => {
                   </div>
                 </div>
                 
+                {/* Chính sách thiết bị */}
+                <div className="mt-4">
+                  <h6 className="fw-bold mb-3">
+                    <i className="fas fa-shield-alt me-2"></i>
+                    Chính sách bảo mật thiết bị
+                  </h6>
+                  <div className="alert alert-warning mb-3">
+                    <div className="d-flex align-items-start">
+                      <i className="fas fa-shield-alt me-2 mt-1"></i>
+                      <div>
+                        <strong>Quy định quan trọng:</strong>
+                        <ul className="list-unstyled small mb-0 mt-2">
+                          <li className="mb-1">• <strong>Mỗi thiết bị chỉ được đăng nhập 1 tài khoản</strong></li>
+                          <li className="mb-1">• <strong>Mỗi tài khoản chỉ được đăng nhập 1 thiết bị</strong></li>
+                        </ul>
+                        <p className="small mb-0 mt-2">
+                          <strong>Lưu ý:</strong> Nếu gặp lỗi đăng nhập do vi phạm chính sách thiết bị, vui lòng liên hệ:
+                        </p>
+                        <ul className="list-unstyled small mb-0 mt-1">
+                          <li>📞 Phòng đào tạo</li>
+                          <li>📧 Email: <a href="mailto:system@pctu.edu.vn" className="text-decoration-none">system@pctu.edu.vn</a></li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Liên hệ hỗ trợ */}
                 <div className="mt-4 text-center">
                   <div className="alert alert-info">
