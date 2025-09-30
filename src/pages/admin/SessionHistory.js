@@ -91,7 +91,7 @@ const SessionHistory = () => {
     
     // Create socket connection
     const socket = io(
-      process.env.NODE_ENV === 'production' ? 'https://clinical.pctu.edu.vn' : 'http://localhost:5000',
+      process.env.NODE_ENV === 'production' ? window.location.origin : 'http://localhost:5000',
       socketOptions
     );
     
