@@ -14,7 +14,7 @@ const AbsenceConfirmationPreview = () => {
   const fetchConfirmationPreview = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/absence-requests/public/${id}/preview`);
+      const response = await axios.get(`https://clinical.pctu.edu.vn/api/absence-requests/public/${id}/preview`);
       
       if (response.data.success) {
         setConfirmationData(response.data.data);
