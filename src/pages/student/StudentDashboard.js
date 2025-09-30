@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, Row, Col, Button, Alert, Table, Modal, Spinner } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { toast } from 'react-toastify';
 import { Calendar, Clock, MapPin, RefreshCcw, ArrowRight, CheckCircle, AlertTriangle, Info, User, List, Eye } from 'lucide-react';
 import '../../styles/modern-ui.css';
@@ -166,19 +166,18 @@ const StudentDashboard = () => {
     const now = new Date();
     const sessionDate = new Date(session.date);
     
-    // Create a new date for today with the session's date
-    const today = new Date();
-    const sessionToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    sessionToday.setFullYear(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate());
+    // Set year, month, day from session date
+    const currentDate = new Date();
+    currentDate.setFullYear(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate());
 
-    // Parse start and end times
+    // Set session start and end times
     const [startHours, startMinutes] = session.start_time.split(':').map(Number);
     const [endHours, endMinutes] = session.end_time.split(':').map(Number);
     
-    const sessionStartTime = new Date(sessionToday);
+    const sessionStartTime = new Date(currentDate);
     sessionStartTime.setHours(startHours, startMinutes, 0, 0);
     
-    const sessionEndTime = new Date(sessionToday);
+    const sessionEndTime = new Date(currentDate);
     sessionEndTime.setHours(endHours, endMinutes, 0, 0);
     
     // Handle sessions that span across midnight
@@ -186,8 +185,12 @@ const StudentDashboard = () => {
       sessionEndTime.setDate(sessionEndTime.getDate() + 1);
     }
 
-    // Check if current time is within session time
-    return now >= sessionStartTime && now <= sessionEndTime;
+    // Allow attendance 30 minutes before session starts and until session ends
+    const attendanceStartTime = new Date(sessionStartTime);
+    attendanceStartTime.setMinutes(attendanceStartTime.getMinutes() - 30);
+
+    // Check if current time is within attendance window (30 min before start to end)
+    return now >= attendanceStartTime && now <= sessionEndTime;
   };
 
   // Function to check if session is currently active (within time window)
@@ -200,22 +203,17 @@ const StudentDashboard = () => {
     const now = new Date();
     const sessionDate = new Date(session.date);
     
-    // Create a new date for today with the session's date
-    const today = new Date();
-    const sessionToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    sessionToday.setFullYear(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate());
+    // Set year, month, day from session date
+    const currentDate = new Date();
+    currentDate.setFullYear(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate());
     
-    // Parse end time
+    // Set session end time
     const [endHours, endMinutes] = session.end_time.split(':').map(Number);
-    const sessionEndTime = new Date(sessionToday);
+    const sessionEndTime = new Date(currentDate);
     sessionEndTime.setHours(endHours, endMinutes, 0, 0);
     
     // Handle sessions that span across midnight
-    const [startHours, startMinutes] = session.start_time.split(':').map(Number);
-    const sessionStartTime = new Date(sessionToday);
-    sessionStartTime.setHours(startHours, startMinutes, 0, 0);
-    
-    if (sessionEndTime < sessionStartTime) {
+    if (sessionEndTime < new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 12, 0, 0)) {
       sessionEndTime.setDate(sessionEndTime.getDate() + 1);
     }
     
@@ -280,17 +278,52 @@ const StudentDashboard = () => {
     navigate(`/session/${session.id}/monitor`);
   };
 
+  // Function to check if a date is today
+  const isToday = (dateString) => {
+    const today = new Date();
+    const sessionDate = parseISO(dateString);
+    
+    return today.getFullYear() === sessionDate.getFullYear() &&
+           today.getMonth() === sessionDate.getMonth() &&
+           today.getDate() === sessionDate.getDate();
+  };
+
   // Function to get session status
   const getSessionStatus = (session) => {
-    const isActive = isSessionActive(session);
-    const isEnded = isSessionEnded(session);
+    const now = new Date();
+    const sessionDate = new Date(session.date);
     
-    if (isActive) {
-      return { status: 'active', text: 'Đang diễn ra', color: 'success' };
-    } else if (isEnded) {
-      return { status: 'ended', text: 'Đã kết thúc', color: 'secondary' };
-    } else {
+    // Set year, month, day from session date
+    const currentDate = new Date();
+    currentDate.setFullYear(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate());
+
+    // Set session start and end times
+    const [startHours, startMinutes] = session.start_time.split(':').map(Number);
+    const [endHours, endMinutes] = session.end_time.split(':').map(Number);
+    
+    const sessionStartTime = new Date(currentDate);
+    sessionStartTime.setHours(startHours, startMinutes, 0, 0);
+    
+    const sessionEndTime = new Date(currentDate);
+    sessionEndTime.setHours(endHours, endMinutes, 0, 0);
+    
+    // Handle sessions that span across midnight
+    if (sessionEndTime < sessionStartTime) {
+      sessionEndTime.setDate(sessionEndTime.getDate() + 1);
+    }
+
+    // Allow attendance 30 minutes before session starts
+    const attendanceStartTime = new Date(sessionStartTime);
+    attendanceStartTime.setMinutes(attendanceStartTime.getMinutes() - 30);
+
+    if (now < attendanceStartTime) {
       return { status: 'upcoming', text: 'Sắp diễn ra', color: 'info' };
+    } else if (now >= attendanceStartTime && now < sessionStartTime) {
+      return { status: 'upcoming', text: 'Có thể điểm danh', color: 'warning' };
+    } else if (now >= sessionStartTime && now <= sessionEndTime) {
+      return { status: 'active', text: 'Đang diễn ra', color: 'success' };
+    } else {
+      return { status: 'ended', text: 'Đã kết thúc', color: 'secondary' };
     }
   };
 
@@ -340,8 +373,11 @@ const StudentDashboard = () => {
                  Xem chi tiết
                </button>
              )}
+             
 
-             {(sessionStatus.status === 'active' || (sessionStatus.status === 'upcoming' && isSessionActive(session))) && (
+
+             {(sessionStatus.status === 'upcoming' || sessionStatus.status === 'active' || 
+               (sessionStatus.status === 'ended' && isToday(session.date))) && (
                <button
                  className="btn-modern"
                  onClick={() => handleJoinSession(session)}
@@ -350,7 +386,7 @@ const StudentDashboard = () => {
                    padding: '0.5rem 1rem',
                    fontSize: '0.875rem',
                    minWidth: '120px',
-                   backgroundColor: '#256176'
+                   backgroundColor: sessionStatus.status === 'ended' ? '#dc3545' : '#256176' // Red for ended sessions
                  }}
                >
                  {checkingGeofence && selectedSession?.id === session.id ? (
@@ -367,10 +403,6 @@ const StudentDashboard = () => {
                    </>
                  )}
                </button>
-
-
-
-
              )}
            </div>
          )}
@@ -618,10 +650,10 @@ const StudentDashboard = () => {
                     <List size={32} className="text-muted" />
                   </div>
                   <p>Không có buổi học nào</p>
-                                </div>
+                </div>
               )}
-                                </div>
-                                      </div>
+            </div>
+          </div>
         </Col>
       </Row>
       
@@ -645,10 +677,13 @@ const StudentDashboard = () => {
                 <div className="text-center p-5">
                   <div className="spinner-border text-primary" role="status">
                     <span className="visually-hidden">Đang tải...</span>
-                    </div>
+                  </div>
                 </div>
               ) : attendedSessions.length > 0 ? (
-                <div className="table-responsive">
+                <div 
+                className="table-responsive"
+                style={{ maxHeight: '400px', overflowY: 'auto' }}
+                >
                   <table className="modern-table modern-table-hover w-100">
                     <thead>
                       <tr>

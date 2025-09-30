@@ -119,13 +119,13 @@ const AbsenceRequestManagement = () => {
     fetchNotificationSettings();
   }, []);
 
-  // Auto-refresh data every 30 seconds
+  // Auto-refresh data every 10 seconds
   useEffect(() => {
     // Start auto-refresh interval
     autoRefreshIntervalRef.current = setInterval(() => {
       fetchAbsenceRequestsSilently();
       fetchStatsSilently();
-    }, 30000); // 30 seconds
+    }, 10000); // 30 seconds
 
     // Clean up interval on unmount
     return () => {
@@ -629,7 +629,6 @@ const AbsenceRequestManagement = () => {
             {/* Search and Filter Controls */}
             <div className="session-list-controls">
               <div className="search-controls">
-                  <i className="fas fa-search"></i>
                   <input
                     type="text"
                     placeholder="Tìm kiếm theo tên sinh viên hoặc mã buổi học..."
@@ -668,8 +667,9 @@ const AbsenceRequestManagement = () => {
 
             {/* Requests Table */}
             <div className="session-table-container">
-              {requests.length > 0 ? (
-                <table className="session-table">
+              <div className="table-responsive-mobile">
+                {requests.length > 0 ? (
+                  <table className="session-table">
                 <thead>
                   <tr>
                     <th>Thông tin sinh viên</th>
@@ -780,13 +780,14 @@ const AbsenceRequestManagement = () => {
                     </tr>
                   ))}
                 </tbody>
-                </table>
-              ) : (
-                <div className="text-center text-muted py-4">
-                  <i className="fas fa-inbox fa-3x mb-3"></i>
-                  <p>Không có yêu cầu xin phép vắng học nào</p>
-                </div>
-              )}
+                  </table>
+                ) : (
+                  <div className="text-center text-muted py-4">
+                    <i className="fas fa-inbox fa-3x mb-3"></i>
+                    <p>Không có yêu cầu xin phép vắng học nào</p>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Pagination */}

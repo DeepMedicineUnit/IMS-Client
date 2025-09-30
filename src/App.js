@@ -10,6 +10,7 @@ import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
 import ForgotPassword from './pages/auth/ForgotPassword';
 import ResetPassword from './pages/auth/ResetPassword';
+import QRLogin from './pages/auth/QRLogin';
 import SuperAdminDashboard from './pages/superadmin/SuperAdminDashboard';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import StaffDashboard from './pages/staff/StaffDashboard';
@@ -85,6 +86,7 @@ function App() {
             <Route path="/register" element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/qr-login" element={<QRLogin />} />
             
             {/* Default route - redirects to appropriate dashboard */}
             <Route path="/" element={<Navigate to={getDashboardRoute()} />} />

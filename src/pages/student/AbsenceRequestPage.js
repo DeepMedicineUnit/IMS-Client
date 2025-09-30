@@ -293,6 +293,50 @@ const AbsenceRequestPage = () => {
       return;
     }
 
+    // Kiểm tra duplicate request
+    const existingProcessedRequests = requests.filter(req => 
+      req.session_id === formData.session_id && 
+      ['approved', 'rejected'].includes(req.status)
+    );
+    
+    const hasFullSessionRequest = existingProcessedRequests.some(req => 
+      req.request_type === 'full_session'
+    );
+    
+    const hasBeforeRequest = existingProcessedRequests.some(req => 
+      req.request_type === 'before_session'
+    );
+    
+    const hasDuringRequest = existingProcessedRequests.some(req => 
+      req.request_type === 'during_session'
+    );
+    
+    const hasAfterRequest = existingProcessedRequests.some(req => 
+      req.request_type === 'after_session'
+    );
+    
+    // Kiểm tra xem có thể tạo request với loại đã chọn không
+    if (formData.request_type === 'full_session' && hasFullSessionRequest) {
+      setError('Đã có yêu cầu "Vắng cả buổi học" được duyệt/từ chối cho buổi học này');
+      return;
+    }
+    
+    // Chỉ ngăn chặn khi đã có request cụ thể đó
+    if (formData.request_type === 'before_session' && hasBeforeRequest) {
+      setError('Đã có yêu cầu "Vắng điểm danh trước buổi học" được duyệt/từ chối cho buổi học này');
+      return;
+    }
+    
+    if (formData.request_type === 'during_session' && hasDuringRequest) {
+      setError('Đã có yêu cầu "Vắng điểm danh trong buổi học" được duyệt/từ chối cho buổi học này');
+      return;
+    }
+    
+    if (formData.request_type === 'after_session' && hasAfterRequest) {
+      setError('Đã có yêu cầu "Vắng điểm danh sau buổi học" được duyệt/từ chối cho buổi học này');
+      return;
+    }
+
     try {
       setSubmitting(true);
       console.log('Submitting absence request:', formData);
@@ -477,13 +521,48 @@ const AbsenceRequestPage = () => {
             </div>
             <div className="card-body p-0">
               {sessions.length > 0 ? (
-                <div className="modern-list-group">
+                <div className="modern-list-group" style={{ maxHeight: sessions.length > 10 ? '600px' : 'auto', overflowY: sessions.length > 10 ? 'auto' : 'visible' }}>
                   {sessions.map(session => {
                     const status = calculateSessionStatus(session);
                     const canRequest = ['scheduled', 'active', 'ended'].includes(status);
-                    const hasExistingRequest = requests.some(req => 
+                    
+                    // Kiểm tra các request đã được duyệt/từ chối cho session này
+                    const existingProcessedRequests = requests.filter(req => 
+                      req.session_id === session.id && 
+                      ['approved', 'rejected'].includes(req.status)
+                    );
+                    
+                    // Kiểm tra có request "Cả buổi" đã được duyệt/từ chối không
+                    const hasFullSessionRequest = existingProcessedRequests.some(req => 
+                      req.request_type === 'full_session'
+                    );
+                    
+                    // Kiểm tra có request "Trước" đã được duyệt/từ chối không
+                    const hasBeforeRequest = existingProcessedRequests.some(req => 
+                      req.request_type === 'before_session'
+                    );
+                    
+                    // Kiểm tra có request "Trong" đã được duyệt/từ chối không
+                    const hasDuringRequest = existingProcessedRequests.some(req => 
+                      req.request_type === 'during_session'
+                    );
+                    
+                    // Kiểm tra có request "Sau" đã được duyệt/từ chối không
+                    const hasAfterRequest = existingProcessedRequests.some(req => 
+                      req.request_type === 'after_session'
+                    );
+                    
+                    // Kiểm tra có request đang chờ duyệt không
+                    const hasPendingRequest = requests.some(req => 
                       req.session_id === session.id && req.status === 'pending'
                     );
+                    
+                    // Chỉ disable button khi:
+                    // 1. Có request đang chờ duyệt
+                    // 2. Có request "Cả buổi" đã được duyệt/từ chối
+                    // 3. Có cả 3 loại "Trước/Trong/Sau" đã được duyệt/từ chối
+                    const hasAllPartialRequests = hasBeforeRequest && hasDuringRequest && hasAfterRequest;
+                    const hasExistingRequest = hasPendingRequest || hasFullSessionRequest || hasAllPartialRequests;
 
                     return (
                       <div key={session.id} className="modern-list-group-item p-3">
@@ -521,10 +600,22 @@ const AbsenceRequestPage = () => {
                                   }
                                 })()}
                               </div>
-                              {hasExistingRequest && (
+                              {hasPendingRequest && (
                                 <div className="modern-badge modern-badge-warning">
                                   <i className="fas fa-hourglass-half me-1"></i>
                                   Có yêu cầu chờ duyệt
+                                </div>
+                              )}
+                              {hasFullSessionRequest && (
+                                <div className="modern-badge modern-badge-danger">
+                                  <i className="fas fa-ban me-1"></i>
+                                  Đã có yêu cầu "Cả buổi"
+                                </div>
+                              )}
+                              {hasAllPartialRequests && (
+                                <div className="modern-badge modern-badge-danger">
+                                  <i className="fas fa-ban me-1"></i>
+                                  Đã có đủ yêu cầu "Trước/Trong/Sau"
                                 </div>
                               )}
                             </div>
@@ -539,8 +630,12 @@ const AbsenceRequestPage = () => {
                                 padding: '0.5rem 1rem'
                               }}
                             >
-                              {hasExistingRequest ? (
-                                <><i className="fas fa-check me-1"></i>Đã gửi yêu cầu</>
+                              {hasPendingRequest ? (
+                                <><i className="fas fa-hourglass-half me-1"></i>Chờ duyệt</>
+                              ) : hasFullSessionRequest ? (
+                                <><i className="fas fa-ban me-1"></i>Đã có yêu cầu "Cả buổi"</>
+                              ) : hasAllPartialRequests ? (
+                                <><i className="fas fa-ban me-1"></i>Đã có đủ yêu cầu</>
                               ) : (
                                 <><i className="fas fa-calendar-times me-1"></i>Xin phép vắng</>
                               )}
@@ -737,10 +832,63 @@ const AbsenceRequestPage = () => {
                   required
                   className="modern-form-control"
                 >
-                  <option value="full_session">Vắng cả buổi học</option>
-                  <option value="before_session">Vắng điểm danh trước buổi học</option>
-                  <option value="during_session">Vắng điểm danh trong buổi học</option>
-                  <option value="after_session">Vắng điểm danh sau buổi học</option>
+                  {(() => {
+                    if (!selectedSession) return null;
+                    
+                    // Kiểm tra các request đã được duyệt/từ chối cho session này
+                    const existingProcessedRequests = requests.filter(req => 
+                      req.session_id === selectedSession.id && 
+                      ['approved', 'rejected'].includes(req.status)
+                    );
+                    
+                    const hasFullSessionRequest = existingProcessedRequests.some(req => 
+                      req.request_type === 'full_session'
+                    );
+                    
+                    const hasBeforeRequest = existingProcessedRequests.some(req => 
+                      req.request_type === 'before_session'
+                    );
+                    
+                    const hasDuringRequest = existingProcessedRequests.some(req => 
+                      req.request_type === 'during_session'
+                    );
+                    
+                    const hasAfterRequest = existingProcessedRequests.some(req => 
+                      req.request_type === 'after_session'
+                    );
+                    
+                    // Chỉ disable khi có tất cả 3 loại partial requests
+                    const hasAllPartialRequests = hasBeforeRequest && hasDuringRequest && hasAfterRequest;
+                    
+                    return (
+                      <>
+                        <option 
+                          value="full_session" 
+                          disabled={hasFullSessionRequest}
+                        >
+                          Vắng cả buổi học {hasFullSessionRequest ? '(Đã có yêu cầu)' : ''}
+                        </option>
+                        <option 
+                          value="before_session" 
+                          disabled={hasBeforeRequest}
+                        >
+                          Vắng điểm danh trước buổi học {hasBeforeRequest ? '(Đã có yêu cầu)' : ''}
+                        </option>
+                        <option 
+                          value="during_session" 
+                          disabled={hasDuringRequest}
+                        >
+                          Vắng điểm danh trong buổi học {hasDuringRequest ? '(Đã có yêu cầu)' : ''}
+                        </option>
+                        <option 
+                          value="after_session" 
+                          disabled={hasAfterRequest}
+                        >
+                          Vắng điểm danh sau buổi học {hasAfterRequest ? '(Đã có yêu cầu)' : ''}
+                        </option>
+                      </>
+                    );
+                  })()}
                 </Form.Select>
               </div>
               <Form.Text className="text-muted">

@@ -5,7 +5,7 @@ import { toast } from 'react-toastify';
 import * as XLSX from 'xlsx';
 import '../../styles/calendar.css';
 
-// CSS cho dropdown menu
+// CSS cho dropdown menu và mobile optimization
 const dropdownStyles = `
   .btn-icon {
     width: 32px;
@@ -57,24 +57,6 @@ const dropdownStyles = `
     z-index: 99999 !important;
   }
   
-  /* Auto-adjust dropdown position for last rows */
-  .session-table tbody tr:nth-last-child(-n+3) .action-dropdown .dropdown-menu {
-    top: auto !important;
-    bottom: 100% !important;
-    margin-top: 0 !important;
-    margin-bottom: 5px !important;
-  }
-  
-  .session-table tbody tr:nth-last-child(-n+3) .action-dropdown .dropdown-menu::before {
-    content: '';
-    position: absolute;
-    top: 100%;
-    right: 10px;
-    border: 5px solid transparent;
-    border-top-color: white;
-    z-index: 100000;
-  }
-  
   .dropdown-item {
     padding: 0.5rem 1rem;
     transition: all 0.2s;
@@ -102,756 +84,22 @@ const dropdownStyles = `
   .table tbody tr:hover td {
     background-color: transparent;
   }
-  
-  /* Fix dropdown z-index issues */
-  .session-table-container {
-    position: relative;
-    z-index: 1;
-  }
-  
-  .session-table {
-    position: relative;
-    z-index: 1;
-  }
-  
-  .session-table tbody tr {
-    position: relative;
-    z-index: 1;
-  }
-  
-  .session-table tbody tr:hover {
-    z-index: 10;
-  }
-  
-  .action-dropdown {
-    position: relative !important;
-    z-index: 1000 !important;
-  }
-  
-  .action-dropdown:hover {
-    z-index: 10000 !important;
-  }
-  
-  .action-dropdown .btn-icon {
-    position: relative;
-    z-index: 1001 !important;
-  }
-  
-  /* Ensure dropdown container has enough space */
-  .session-table-container {
-    overflow: visible !important;
-  }
-  
-  .session-table {
-    overflow: visible !important;
-  }
-  
 
-  /* Smooth transition for dropdown */
-  .action-dropdown .dropdown-menu {
-    transition: all 0.2s ease !important;
-    opacity: 0;
-    visibility: hidden;
-    transform: translateY(-10px) !important;
-  }
-  
-  .action-dropdown.show .dropdown-menu {
-    opacity: 1 !important;
-    visibility: visible !important;
-    transform: translateY(0) !important;
-  }
-
-  /* Student Detail Modal Styles */
-  .student-detail-modal .modal-dialog {
-    max-width: 1200px;
-    margin: 20px auto;
-  }
-
-  .student-detail-modal .modal-content {
-    border-radius: 20px;
-    border: none;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
-    overflow: hidden;
-  }
-
-  .student-detail-header {
-    background: linear-gradient(135deg, #0d6efd 0%, #0b5ed7 100%);
-    border: none;
-    padding: 15px 32px;
-    color: white;
-  }
-
-  .student-detail-header .btn-close {
-    filter: invert(1);
-    opacity: 0.8;
-  }
-
-  .student-detail-header .btn-close:hover {
-    opacity: 1;
-  }
-
-  .student-detail-title {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin: 0;
-  }
-
-  .student-avatar {
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 24px;
-    backdrop-filter: blur(10px);
-    border: 2px solid rgba(255, 255, 255, 0.3);
-  }
-
-  .student-detail-title h4 {
-    font-size: 28px;
-    font-weight: 700;
-    margin: 0;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  }
-
-  .student-subtitle {
-    font-size: 16px;
-    opacity: 0.9;
-    margin: 4px 0 0 0;
-    font-weight: 500;
-  }
-
-  .student-detail-body {
-    padding: 7px 15px;
-    background: #f8f9fa;
-  }
-
-  .student-detail-container {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  }
-
-  /* Statistics Cards */
-  .statistics-card {
-    background: white;
-    border-radius: 16px;
-    padding: 20px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-    transition: all 0.3s ease;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    border: 1px solid #e9ecef;
-  }
-
-  .statistics-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
-  }
-
-  .statistics-icon {
-    width: 50px;
-    height: 50px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    flex-shrink: 0;
-  }
-
-  .statistics-icon.text-primary {
-    background: rgba(13, 110, 253, 0.1);
-    color: #0d6efd;
-  }
-
-  .statistics-icon.text-success {
-    background: rgba(25, 135, 84, 0.1);
-    color: #28a745;
-  }
-
-  .statistics-icon.text-warning {
-    background: rgba(255, 193, 7, 0.1);
-    color: #ffc107;
-  }
-
-  .statistics-icon.text-danger {
-    background: rgba(220, 53, 69, 0.1);
-    color: #dc3545;
-  }
-
-  .statistics-content h3 {
-    font-size: 18px;
-    font-weight: 700;
-    margin: 0;
-    color: #212529;
-    line-height: 1.2;
-  }
-
-  .statistics-content p {
-    font-size: 14px;
-    color: #6c757d;
-    margin: 4px 0 0 0;
-    font-weight: 500;
-  }
-
-  /* Session Cards */
-  .session-card {
-    background: white;
-    border-radius: 16px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-    transition: all 0.3s ease;
-    border: 1px solid #e9ecef;
-    margin-bottom: 20px;
-    overflow: hidden;
-  }
-
-  .session-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
-  }
-
-  .card-header-modern {
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border-bottom: 1px solid #dee2e6;
-    padding: 20px 24px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .header-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    background: linear-gradient(135deg, #0d6efd 0%, #0b5ed7 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 16px;
-  }
-
-  .card-header-modern h6 {
-    font-size: 18px;
-    font-weight: 600;
-    color: #495057;
-    margin: 0;
-  }
-
-  .card-body-modern {
-    padding: 24px;
-  }
-
-  /* Info Items */
-  .info-item {
-    display: flex;
-    align-items: flex-start;
-    margin-bottom: 16px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid #f1f3f4;
-  }
-
-  .info-item:last-child {
-    margin-bottom: 0;
-    padding-bottom: 0;
-    border-bottom: none;
-  }
-
-  .info-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 600;
-    color: #6c757d;
-    font-size: 14px;
-    min-width: 140px;
-    flex-shrink: 0;
-  }
-
-  .info-label i {
-    width: 16px;
-    text-align: center;
-    color: #0d6efd;
-  }
-
-  .info-value {
-    flex: 1;
-    color: #495057;
-    font-size: 14px;
-    line-height: 1.5;
-  }
-
-  /* Status Badge */
-  .status-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 6px 12px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .status-badge.active {
-    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-    color: white;
-  }
-
-  .status-badge.scheduled {
-    background: linear-gradient(135deg, #0d6efd 0%, #0b5ed7 100%);
-    color: white;
-  }
-
-  .status-badge.ended {
-    background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
-    color: white;
-  }
-
-  /* MAC Address Container */
-  .mac-address-container {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 8px;
-  }
-
-  .mac-address-display {
-    flex: 1;
-    background: #f8f9fa;
-    border: 1px solid #e9ecef;
-    border-radius: 8px;
-    padding: 8px 12px;
-    font-family: 'Courier New', monospace;
-    font-size: 13px;
-    color: #495057;
-    word-break: break-all;
-  }
-
-  .btn-reset-mac {
-    background: #dc3545;
-    border: none;
-    color: white;
-    border-radius: 8px;
-    padding: 8px 12px;
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .btn-reset-mac:hover {
-    background: #c82333;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(220, 53, 69, 0.3);
-  }
-
-  .mac-description {
-    color: #6c757d;
-    font-size: 12px;
-    line-height: 1.4;
-    margin: 0;
-  }
-
-  /* Password Display */
-  .password-container {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .password-display {
-    background: #f8f9fa;
-    border: 1px solid #e9ecef;
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-family: 'Courier New', monospace;
-    font-size: 13px;
-    color: #495057;
-    font-weight: 600;
-    letter-spacing: 1px;
-    display: inline-block;
-    min-width: 120px;
-    flex: 1;
-  }
-
-  .btn-toggle-password {
-    background: #6c757d;
-    border: none;
-    color: white;
-    border-radius: 6px;
-    padding: 6px 8px;
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 32px;
-    height: 32px;
-  }
-
-  .btn-toggle-password:hover {
-    background: #5a6268;
-    transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  }
-
-  .btn-toggle-password:active {
-    transform: translateY(0);
-  }
-
-  /* Footer */
-  .student-detail-footer {
-    background: #f8f9fa;
-    border-top: 1px solid #e9ecef;
-    padding: 20px 32px;
-    display: flex;
-    justify-content: flex-end;
-    gap: 12px;
-  }
-
-  .btn-cancel {
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-weight: 600;
-    transition: all 0.2s ease;
-  }
-
-  .btn-cancel:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  }
-
-  .btn-edit {
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-weight: 600;
-    background: linear-gradient(135deg, #0d6efd 0%, #0b5ed7 100%);
-    border: none;
-    transition: all 0.2s ease;
-  }
-
-  .btn-edit:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(13, 110, 253, 0.3);
-    background: linear-gradient(135deg, #0b5ed7 0%, #0a58ca 100%);
-  }
-
-  .btn-delete {
-    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-    border: none;
-    color: white;
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-weight: 600;
-    transition: all 0.2s ease;
-  }
-
-  .btn-delete:hover {
-    background: linear-gradient(135deg, #c82333 0%, #bd2130 100%);
-    color: white;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(220, 53, 69, 0.3);
-  }
-
-  .btn-delete:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none;
-  }
-
-  .btn-send-credentials {
-    border: 2px solid #198754;
-    color: #198754;
-    background: transparent;
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-weight: 600;
-    transition: all 0.2s ease;
-  }
-
-  .btn-send-credentials:hover {
-    background: #198754;
-    color: white;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(25, 135, 84, 0.3);
-  }
-
-  .btn-send-credentials:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .btn-reset-mac {
-    border: 2px solid #ffc107;
-    color: #ffc107;
-    background: transparent;
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-weight: 600;
-    transition: all 0.2s ease;
-  }
-
-  .btn-reset-mac:hover {
-    background: #ffc107;
-    color: #000;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(255, 193, 7, 0.3);
-  }
-
-  .btn-approve {
-    border: 2px solid #0dcaf0;
-    color: #0dcaf0;
-    background: transparent;
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-weight: 600;
-    transition: all 0.2s ease;
-  }
-
-  .btn-approve:hover {
-    background: #0dcaf0;
-    color: #000;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(13, 202, 240, 0.3);
-  }
-
-  /* Override for outline buttons in Student Detail Modal */
-  .student-detail-modal .btn-delete {
-    border: 2px solid #dc3545;
-    color: #dc3545;
-    background: transparent;
-  }
-
-  .student-detail-modal .btn-delete:hover {
-    background: #dc3545;
-    color: white;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(220, 53, 69, 0.3);
-  }
-
-  /* Form Controls Modern Styling */
-  .form-control-modern {
-    border: 2px solid #e9ecef;
-    border-radius: 8px;
-    padding: 12px 16px;
-    font-size: 14px;
-    transition: all 0.3s ease;
-    background: #fff;
-  }
-
-  .form-control-modern:focus {
-    border-color: #0d6efd;
-    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
-    background: #fff;
-  }
-
-  .form-control-modern:disabled {
-    background-color: #f8f9fa;
-    border-color: #e9ecef;
-    color: #6c757d;
-  }
-
-  .form-check-modern {
-    padding-left: 2rem;
-  }
-
-  .form-check-modern .form-check-input {
-    width: 1.2rem;
-    height: 1.2rem;
-    margin-left: -2rem;
-    margin-top: 0.1rem;
-    border: 2px solid #e9ecef;
-    border-radius: 4px;
-    transition: all 0.3s ease;
-  }
-
-  .form-check-modern .form-check-input:checked {
-    background-color: #0d6efd;
-    border-color: #0d6efd;
-  }
-
-  .form-check-modern .form-check-input:focus {
-    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
-  }
-
-  .form-check-modern .form-check-label {
-    font-weight: 500;
-    color: #495057;
-    margin-left: 0.5rem;
-  }
-
-  /* Additional Modern Styling */
-  .btn-download-template {
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-weight: 600;
-    transition: all 0.2s ease;
-    border: 2px solid #0d6efd;
-    color: #0d6efd;
-    background: transparent;
-  }
-
-  .btn-download-template:hover {
-    background: #0d6efd;
-    color: white;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(13, 110, 253, 0.3);
-  }
-
-  .progress-modern {
-    height: 8px;
-    border-radius: 4px;
-    background-color: #e9ecef;
-  }
-
-  .progress-modern .progress-bar {
-    background: linear-gradient(135deg, #0d6efd 0%, #0b5ed7 100%);
-    border-radius: 4px;
-  }
-
-  .custom-tabs .nav-link {
-    border: none;
-    border-radius: 8px 8px 0 0;
-    padding: 12px 20px;
-    font-weight: 600;
-    color: #6c757d;
-    transition: all 0.3s ease;
-  }
-
-  .custom-tabs .nav-link.active {
-    background: linear-gradient(135deg, #0d6efd 0%, #0b5ed7 100%);
-    color: white;
-  }
-
-  .custom-tabs .nav-link:hover:not(.active) {
-    background: #f8f9fa;
-    color: #495057;
-  }
-
-  .tab-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .tab-title i {
-    font-size: 14px;
-  }
-
-  /* Responsive */
+  /* Hide pagination on mobile */
   @media (max-width: 768px) {
-    .student-detail-modal .modal-dialog {
-      margin: 10px;
-      max-width: calc(100vw - 20px);
-    }
-
-    .student-detail-header {
-      padding: 20px;
-    }
-
-    .student-detail-title {
-      flex-direction: column;
-      text-align: center;
-      gap: 12px;
-    }
-
-    .student-avatar {
-      width: 50px;
-      height: 50px;
-      font-size: 20px;
-    }
-
-    .student-detail-title h4 {
-      font-size: 24px;
-    }
-
-    .student-detail-body {
-      padding: 20px;
-    }
-
-    .statistics-card {
-      padding: 16px;
-      gap: 12px;
-    }
-
-    .statistics-icon {
-      width: 40px;
-      height: 40px;
-      font-size: 16px;
-    }
-
-    .statistics-content h3 {
-      font-size: 16px;
-    }
-
-    .card-header-modern {
-      padding: 16px 20px;
-    }
-
-    .card-body-modern {
-      padding: 20px;
-    }
-
-    .info-item {
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .info-label {
-      min-width: auto;
-    }
-
-    .mac-address-container {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .student-detail-footer {
-      padding: 16px 20px;
-      flex-direction: column;
-    }
-
-    .student-detail-footer .d-flex {
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .student-detail-footer .d-flex .d-flex {
-      flex-direction: column;
-      gap: 8px;
+    .pagination-container {
+      display: none !important;
     }
   }
 `;
 
 const UserManagement = () => {
-  // Thêm CSS vào component
-  useEffect(() => {
-    // Tạo style element
-    const style = document.createElement('style');
-    style.textContent = dropdownStyles;
-    
-    // Thêm style vào document head
-    document.head.appendChild(style);
-    
-    // Cleanup khi component unmount
-    return () => {
-      document.head.removeChild(style);
-    };
-  }, []);
-
   const { api, currentUser } = useAuth();
   // Always start with students tab for better compatibility
   const [activeTab, setActiveTab] = useState('students');
   const [users, setUsers] = useState([]);
   const [students, setStudents] = useState([]);
+  const [allStudents, setAllStudents] = useState([]); // Tất cả sinh viên không bị filter
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -901,6 +149,7 @@ const UserManagement = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isMobile, setIsMobile] = useState(false);
   const [classFilter, setClassFilter] = useState('');
   const [facultyFilter, setFacultyFilter] = useState('');
   const [majorFilter, setMajorFilter] = useState('');
@@ -954,6 +203,29 @@ const UserManagement = () => {
     
     fetchUsers();
   }, [activeTab, currentPage, searchTerm, classFilter, facultyFilter, majorFilter, statusFilter, sortField, sortOrder]);
+
+  // Inject CSS styles
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = dropdownStyles;
+    document.head.appendChild(style);
+    
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, []);
+
+  // Detect mobile device
+  useEffect(() => {
+    const checkIsMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    
+    checkIsMobile();
+    window.addEventListener('resize', checkIsMobile);
+    
+    return () => window.removeEventListener('resize', checkIsMobile);
+  }, []);
   
   // State for storing student counts
   const [totalStudentsWithPasswords, setTotalStudentsWithPasswords] = useState(0);
@@ -1056,6 +328,19 @@ const UserManagement = () => {
     }
   }, [activeTab, api]);
 
+  // Fetch tất cả sinh viên cho modal bulk email
+  const fetchAllStudents = async () => {
+    try {
+      const response = await api.get('/users?role=student&limit=1000'); // Lấy tất cả sinh viên
+      if (response.data && response.data.success) {
+        setAllStudents(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching all students:', error);
+      setAllStudents([]);
+    }
+  };
+
   const fetchUsers = async () => {
     try {
       setLoading(true);
@@ -1064,7 +349,13 @@ const UserManagement = () => {
       const role = activeTab === 'students' ? 'student' : '';
       const excludeRole = activeTab === 'staff' ? 'student' : '';
       
-      let url = `/users?page=${currentPage}&limit=10`;
+      // Kiểm tra isMobile trực tiếp từ window.innerWidth để tránh lỗi state
+      const currentIsMobile = window.innerWidth <= 768;
+      
+      // Trên di động hiển thị tất cả danh sách, desktop có pagination
+      const limit = currentIsMobile ? 10000 : 10;
+      const page = currentIsMobile ? 1 : currentPage; // Trên di động luôn dùng trang 1
+      let url = `/users?page=${page}&limit=${limit}`;
       
       if (role) {
         url += `&role=${role}`;
@@ -1144,7 +435,11 @@ const UserManagement = () => {
 
   const handleTabChange = (tab) => {
     setActiveTab(tab);
-    setCurrentPage(1);
+    // Chỉ reset currentPage trên desktop, di động luôn dùng trang 1
+    const currentIsMobile = window.innerWidth <= 768;
+    if (!currentIsMobile) {
+      setCurrentPage(1);
+    }
     setSearchTerm('');
     setClassFilter('');
     setFacultyFilter('');
@@ -1414,6 +709,7 @@ const UserManagement = () => {
   
   const handleBulkSendCredentials = () => {
     setShowBulkEmailModal(true);
+    fetchAllStudents(); // Fetch tất cả sinh viên khi mở modal
   };
   
   const sendBulkCredentialsEmail = async () => {
@@ -1424,10 +720,10 @@ const UserManagement = () => {
       
       if (bulkEmailTab === 'all') {
         // Filter all students that have display_password
-        filteredStudents = students.filter(s => s.display_password);
+        filteredStudents = allStudents.filter(s => s.display_password);
       } else {
         // Filter students based on selected class, faculty, or major
-        filteredStudents = students.filter(s => 
+        filteredStudents = allStudents.filter(s => 
           s.display_password && 
           (!selectedClass || s.class_name === selectedClass) &&
           (!selectedFaculty || s.faculty_name === selectedFaculty) &&
@@ -1441,29 +737,10 @@ const UserManagement = () => {
         return;
       }
       
-      // Prepare request data based on selected tab
-      let requestData = {};
-      
-      if (bulkEmailTab === 'all') {
-        // Send all student IDs
-        requestData = {
-          userIds: filteredStudents.map(s => s.id)
-        };
-      } else {
-        // Send filter criteria
-        requestData = {
-          class_name: selectedClass || undefined,
-          faculty_name: selectedFaculty || undefined,
-          major_name: selectedMajor || undefined
-        };
-        
-        // If no filters are selected, send student IDs as fallback
-        if (!selectedClass && !selectedFaculty && !selectedMajor) {
-          requestData = {
-            userIds: filteredStudents.map(s => s.id)
-          };
-        }
-      }
+      // Always send student IDs to ensure we're sending to the correct students
+      const requestData = {
+        userIds: filteredStudents.map(s => s.id)
+      };
       
       console.log('Sending bulk email request with data:', requestData);
       const response = await api.post('/users/credentials/bulk-send-credentials', requestData);
@@ -2030,6 +1307,10 @@ const UserManagement = () => {
   };
 
   const renderPagination = () => {
+    // Không hiển thị pagination trên di động
+    const currentIsMobile = window.innerWidth <= 768;
+    if (currentIsMobile) return null;
+    
     // Tối ưu hiển thị phân trang, chỉ hiển thị trang hiện tại và các trang lân cận
     const maxPagesToShow = 5;
     const pages = [];
@@ -2125,6 +1406,9 @@ const UserManagement = () => {
   };
 
   const renderStudentsTab = () => {
+    // Kiểm tra isMobile trực tiếp từ window.innerWidth để tránh lỗi state
+    const currentIsMobile = window.innerWidth <= 768;
+    
     return (
       <>
 
@@ -2132,7 +1416,6 @@ const UserManagement = () => {
         <div className="session-list-controls">
           <div className="search-controls">
             <div className="search-input">
-              <i className="fas fa-search"></i>
               <input
                 type="text"
                 placeholder="Tìm kiếm theo tên, email, mã SV..."
@@ -2211,128 +1494,135 @@ const UserManagement = () => {
 
         {/* Students Table */}
         <div className="session-table-container">
-          <table className="session-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th 
-                onClick={() => handleSort('student_id')} 
-                style={{ cursor: 'pointer' }}
-                className="text-nowrap"
-              >
-                Mã SV {sortField === 'student_id' && (
-                  <i className={`fas fa-sort-${sortOrder === 'asc' ? 'up' : 'down'}`}></i>
-                )}
-              </th>
-              <th 
-                onClick={() => handleSort('full_name')} 
-                style={{ cursor: 'pointer' }}
-                className="text-nowrap"
-              >
-                Họ và tên {sortField === 'full_name' && (
-                  <i className={`fas fa-sort-${sortOrder === 'asc' ? 'up' : 'down'}`}></i>
-                )}
-              </th>
-              <th>Email</th>
-              <th>Mật khẩu</th>
-              <th>Lớp</th>
-              <th>Khoa</th>
-              <th>Ngành</th>
-              <th>Ngày sinh</th>
-              <th>Giới tính</th>
-              <th>Địa chỉ</th>
-              <th>CMND/CCCD</th>
-              <th>SĐT</th>
-              <th>Phê duyệt</th>
-              <th>Tình trạng</th>
-            </tr>
-          </thead>
-          <tbody>
-            {students.length > 0 ? (
-              students.map((student, index) => (
-                <tr key={student.id} onClick={() => handleStudentRowClick(student)} style={{ cursor: 'pointer' }}>
-                  <td style={{ width: '-10px' }}>
-                    {(currentPage - 1) * 10 + index + 1}
-                  </td>
-                  <td>{student.student_id || '-'}</td>
-                  <td>{student.full_name || '-'}</td>
-                  <td>{student.email || '-'}</td>
-                  <td>
-                    {student.display_password ? (
-                      <div>
-                        <span 
-                          onClick={() => togglePasswordVisibility(student.id)} 
-                          style={{ cursor: 'pointer' }}
-                          title={visiblePasswords[student.id] ? "Ẩn mật khẩu" : "Hiển thị mật khẩu"}
-                        >
-                          {visiblePasswords[student.id] ? student.display_password : "••••••••"}
-                        </span>
-                      </div>
+          <div className="table-responsive-mobile">
+            <table className="session-table students-table">
+            <thead>
+              <tr>
+                <th className={currentIsMobile ? "mobile-essential" : "mobile-hide"}>#</th>
+                <th 
+                  onClick={() => handleSort('student_id')} 
+                  style={{ cursor: 'pointer' }}
+                  className="text-nowrap mobile-essential"
+                >
+                  Mã SV {sortField === 'student_id' && (
+                    <i className={`fas fa-sort-${sortOrder === 'asc' ? 'up' : 'down'}`}></i>
+                  )}
+                </th>
+                <th 
+                  onClick={() => handleSort('full_name')} 
+                  style={{ cursor: 'pointer' }}
+                  className="text-nowrap mobile-essential"
+                >
+                  Họ và tên {sortField === 'full_name' && (
+                    <i className={`fas fa-sort-${sortOrder === 'asc' ? 'up' : 'down'}`}></i>
+                  )}
+                </th>
+                <th className="mobile-essential">Email</th>
+                <th className={currentIsMobile ? "mobile-essential" : "mobile-hide"}>Mật khẩu</th>
+                <th className="mobile-essential">Lớp</th>
+                <th className="mobile-essential">Khoa</th>
+                <th className={currentIsMobile ? "mobile-essential" : "mobile-hide"}>Ngành</th>
+                <th className="mobile-essential">Ngày sinh</th>
+                <th className="mobile-essential">Giới tính</th>
+                <th className="mobile-essential">Địa chỉ</th>
+                <th className="mobile-essential">CMND/CCCD</th>
+                <th className="mobile-essential">SĐT</th>
+                <th className={currentIsMobile ? "mobile-essential" : "mobile-hide"}>Phê duyệt</th>
+                <th className="mobile-essential">Tình trạng</th>
+              </tr>
+            </thead>
+            <tbody>
+              {students.length > 0 ? (
+                students.map((student, index) => (
+                  <tr key={student.id} onClick={() => handleStudentRowClick(student)} style={{ cursor: 'pointer' }}>
+                    <td className={currentIsMobile ? "mobile-essential" : "mobile-hide"}>
+                      {currentIsMobile ? index + 1 : (currentPage - 1) * 10 + index + 1}
+                    </td>
+                    <td className="mobile-essential">{student.student_id || '-'}</td>
+                    <td className="mobile-essential">{student.full_name || '-'}</td>
+                    <td className="mobile-essential">{student.email || '-'}</td>
+                    <td className={currentIsMobile ? "mobile-essential" : "mobile-hide"}>
+                      {student.display_password ? (
+                        <div>
+                          <span 
+                            onClick={() => togglePasswordVisibility(student.id)} 
+                            style={{ cursor: 'pointer' }}
+                            title={visiblePasswords[student.id] ? "Ẩn mật khẩu" : "Hiển thị mật khẩu"}
+                          >
+                            {visiblePasswords[student.id] ? student.display_password : "••••••••"}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-muted">Đang tạo...</span>
+                      )}
+                    </td>
+                    <td className="mobile-essential">{student.class_name || '-'}</td>
+                    <td className="mobile-essential">{student.faculty_name || '-'}</td>
+                    <td className={currentIsMobile ? "mobile-essential" : "mobile-hide"}>{student.major_name || '-'}</td>
+                    <td className="mobile-essential">{student.birth_date ? new Date(student.birth_date).toLocaleDateString() : '-'}</td>
+                    <td className="mobile-essential">
+                      {student.gender === 0 || student.gender === '0' || student.gender === null ? 'Nam' : 
+                       student.gender === 1 || student.gender === '1' ? 'Nữ' : 
+                       student.gender === 2 || student.gender === '2' ? 'Khác' : '-'}
+                    </td>
+                    <td className="mobile-essential">
+                      {student.address ? 
+                        `${student.address}${student.district ? `, ${student.district}` : ''}${student.province ? `, ${student.province}` : ''}` 
+                        : '-'}
+                    </td>
+                    <td className="mobile-essential">{student.id_number || '-'}</td>
+                    <td className="mobile-essential">{student.phone || '-'}</td>
+                    <td className={currentIsMobile ? "mobile-essential" : "mobile-hide"}>
+                      {student.approved ? (
+                        <Badge bg="success">Đã duyệt</Badge>
+                      ) : (
+                        <Badge bg="warning">Chờ duyệt</Badge>
+                      )}
+                    </td>
+                    <td className="mobile-essential">
+                      {student.status === 'Đang học' ? (
+                        <Badge bg="success">Đang học</Badge>
+                      ) : student.status === 'Nghỉ học' ? (
+                        <Badge bg="danger">Nghỉ học</Badge>
+                      ) : student.status === 'Tạm dừng' ? (
+                        <Badge bg="warning">Tạm dừng</Badge>
+                      ) : student.status === 'Tốt nghiệp' ? (
+                        <Badge bg="primary">Tốt nghiệp</Badge>
+                      ) : student.status === 'Không có' ? (
+                        <Badge bg="secondary">Không có</Badge>
+                      ) : (
+                        <Badge bg="secondary">Không có</Badge>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="15" className="text-center">
+                    {loading ? (
+                      <Spinner animation="border" size="sm" />
                     ) : (
-                      <span className="text-muted">Đang tạo...</span>
-                    )}
-                  </td>
-                  <td>{student.class_name || '-'}</td>
-                  <td>{student.faculty_name || '-'}</td>
-                  <td>{student.major_name || '-'}</td>
-                  <td>{student.birth_date ? new Date(student.birth_date).toLocaleDateString() : '-'}</td>
-                  <td>
-                    {student.gender === 0 || student.gender === '0' || student.gender === null ? 'Nam' : 
-                     student.gender === 1 || student.gender === '1' ? 'Nữ' : 
-                     student.gender === 2 || student.gender === '2' ? 'Khác' : '-'}
-                  </td>
-                  <td>
-                    {student.address ? 
-                      `${student.address}${student.district ? `, ${student.district}` : ''}${student.province ? `, ${student.province}` : ''}` 
-                      : '-'}
-                  </td>
-                  <td>{student.id_number || '-'}</td>
-                  <td>{student.phone || '-'}</td>
-                  <td>
-                    {student.approved ? (
-                      <Badge bg="success">Đã duyệt</Badge>
-                    ) : (
-                      <Badge bg="warning">Chờ duyệt</Badge>
-                    )}
-                  </td>
-                  <td>
-                    {student.status === 'Đang học' ? (
-                      <Badge bg="success">Đang học</Badge>
-                    ) : student.status === 'Nghỉ học' ? (
-                      <Badge bg="danger">Nghỉ học</Badge>
-                    ) : student.status === 'Tạm dừng' ? (
-                      <Badge bg="warning">Tạm dừng</Badge>
-                    ) : student.status === 'Tốt nghiệp' ? (
-                      <Badge bg="primary">Tốt nghiệp</Badge>
-                    ) : student.status === 'Không có' ? (
-                      <Badge bg="secondary">Không có</Badge>
-                    ) : (
-                      <Badge bg="secondary">Không có</Badge>
+                      'Không có sinh viên nào'
                     )}
                   </td>
                 </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan="15" className="text-center">
-                  {loading ? (
-                    <Spinner animation="border" size="sm" />
-                  ) : (
-                    'Không có sinh viên nào'
-                  )}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
+          </div>
         </div>
 
-        {totalPages > 1 && renderPagination()}
+        <div className="pagination-container">
+          {totalPages > 1 && renderPagination()}
+        </div>
       </>
     );
   };
 
   const renderStaffTab = () => {
+    // Kiểm tra isMobile trực tiếp từ window.innerWidth để tránh lỗi state
+    const currentIsMobile = window.innerWidth <= 768;
+    
     return (
       <>
 
@@ -2354,92 +1644,110 @@ const UserManagement = () => {
 
         {/* Staff Table */}
         <div className="session-table-container">
-          <table className="session-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Tên đăng nhập</th>
-              <th>Họ và tên</th>
-              <th>Email</th>
-              <th>Vai trò</th>
-              <th>Trạng thái</th>
-              <th>Thao tác</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.length > 0 ? (
-              users.map((user, index) => (
-                <tr key={user.id}>
-                  <td>{(currentPage - 1) * 10 + index + 1}</td>
-                  <td>{user.username}</td>
-                  <td>{user.full_name}</td>
-                  <td>{user.email}</td>
-                  <td>
-                    <Form.Select
-                      size="sm"
-                      value={user.role}
-                      onChange={(e) => handleChangeRole(user.id, e.target.value)}
-                      disabled={user.role === 'superadmin' || currentUser?.id === user.id}
-                    >
-                      <option value="staff">Nhân viên</option>
-                      <option value="admin">Quản trị viên</option>
-                      <option value="superadmin">Super Admin</option>
-                    </Form.Select>
-                  </td>
-                  <td>
-                    {user.approved ? (
-                      <Badge bg="success">Đã duyệt</Badge>
+          <div className="table-responsive-mobile">
+            <table className="session-table staff-table">
+            <thead>
+              <tr>
+                <th className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>#</th>
+                <th className="mobile-essential">Tên đăng nhập</th>
+                <th className="mobile-essential">Họ và tên</th>
+                <th className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>Email</th>
+                <th className="mobile-essential">Vai trò</th>
+                <th className="mobile-essential">Trạng thái</th>
+                <th className="mobile-essential">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.length > 0 ? (
+                users.map((user, index) => (
+                  <tr key={user.id}>
+                    <td className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>
+                      {currentIsMobile ? index + 1 : (currentPage - 1) * 10 + index + 1}
+                    </td>
+                    <td className="mobile-essential">
+                      <div className="user-info-mobile">
+                        <div className="user-username">{user.username}</div>
+                        {currentIsMobile && (
+                          <div className="user-email-mobile">{user.email}</div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="mobile-essential">{user.full_name}</td>
+                    <td className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>
+                      {!currentIsMobile && user.email}
+                    </td>
+                    <td className="mobile-essential">
+                      <Form.Select
+                        size="sm"
+                        value={user.role}
+                        onChange={(e) => handleChangeRole(user.id, e.target.value)}
+                        disabled={user.role === 'superadmin' || currentUser?.id === user.id}
+                        className="role-select-mobile"
+                      >
+                        <option value="staff">Nhân viên</option>
+                        <option value="admin">Quản trị viên</option>
+                        <option value="superadmin">Super Admin</option>
+                      </Form.Select>
+                    </td>
+                    <td className="mobile-essential">
+                      {user.approved ? (
+                        <Badge bg="success" className="status-badge-mobile">Đã duyệt</Badge>
+                      ) : (
+                        <Badge bg="warning" className="status-badge-mobile">Chờ duyệt</Badge>
+                      )}
+                    </td>
+                    <td className="mobile-essential">
+                      <div className="action-buttons">
+                        <Dropdown className="action-dropdown">
+                          <Dropdown.Toggle variant="light" size="sm" className="btn-icon" id={`dropdown-${user.id}`} disabled={user.role === 'superadmin'}>
+                            <i className="fas fa-ellipsis-v"></i>
+                          </Dropdown.Toggle>
+                          <Dropdown.Menu popperConfig={{ strategy: 'fixed' }}>
+                            <Dropdown.Item 
+                              onClick={() => handleEditUser(user)}
+                            disabled={user.role === 'superadmin'}
+                          >
+                              <i className="fas fa-edit me-2 text-primary"></i>Chỉnh sửa
+                            </Dropdown.Item>
+                            <Dropdown.Item 
+                                  onClick={() => {
+                                    setUserToDelete(user);
+                                    setShowDeleteModal(true);
+                                  }}
+                              disabled={user.role === 'superadmin'}
+                                >
+                              <i className="fas fa-trash me-2 text-danger"></i>Xóa
+                            </Dropdown.Item>
+                                {!user.approved && (
+                              <Dropdown.Item onClick={() => handleApproveUser(user.id)}>
+                                <i className="fas fa-check me-2 text-success"></i>Duyệt
+                              </Dropdown.Item>
+                            )}
+                          </Dropdown.Menu>
+                        </Dropdown>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="7" className="text-center">
+                    {loading ? (
+                      <Spinner animation="border" size="sm" />
                     ) : (
-                      <Badge bg="warning">Chờ duyệt</Badge>
+                      'Không có người dùng nào'
                     )}
                   </td>
-                  <td>
-                    <Dropdown className="action-dropdown">
-                      <Dropdown.Toggle variant="light" size="sm" className="btn-icon" id={`dropdown-${user.id}`} disabled={user.role === 'superadmin'}>
-                        <i className="fas fa-ellipsis-v"></i>
-                      </Dropdown.Toggle>
-                      <Dropdown.Menu popperConfig={{ strategy: 'fixed' }}>
-                        <Dropdown.Item 
-                          onClick={() => handleEditUser(user)}
-                        disabled={user.role === 'superadmin'}
-                      >
-                          <i className="fas fa-edit me-2 text-primary"></i>Chỉnh sửa
-                        </Dropdown.Item>
-                        <Dropdown.Item 
-                              onClick={() => {
-                                setUserToDelete(user);
-                                setShowDeleteModal(true);
-                              }}
-                          disabled={user.role === 'superadmin'}
-                            >
-                          <i className="fas fa-trash me-2 text-danger"></i>Xóa
-                        </Dropdown.Item>
-                            {!user.approved && (
-                          <Dropdown.Item onClick={() => handleApproveUser(user.id)}>
-                            <i className="fas fa-check me-2 text-success"></i>Duyệt
-                          </Dropdown.Item>
-                        )}
-                      </Dropdown.Menu>
-                    </Dropdown>
-                  </td>
                 </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan="7" className="text-center">
-                  {loading ? (
-                    <Spinner animation="border" size="sm" />
-                  ) : (
-                    'Không có người dùng nào'
-                  )}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
+          </div>
         </div>
 
-        {totalPages > 1 && renderPagination()}
+        <div className="pagination-container">
+          {totalPages > 1 && renderPagination()}
+        </div>
       </>
     );
   };
@@ -3044,7 +2352,7 @@ const UserManagement = () => {
                       </div>
                       <div className="info-value">
                         <Badge bg="primary" className="fs-6">
-                          {totalStudentsWithPasswords} sinh viên
+                          {allStudents.filter(s => s.display_password).length} sinh viên
                         </Badge>
                       </div>
                     </div>
@@ -3180,6 +2488,93 @@ const UserManagement = () => {
                                   </Badge>
                                 </div>
                               </div>
+                            </div>
+                          </div>
+                          
+                          {/* Danh sách sinh viên chi tiết */}
+                          <div className="session-card mt-3">
+                            <div className="card-header-modern">
+                              <div className="header-icon">
+                                <i className="fas fa-users"></i>
+                              </div>
+                              <h6 className="mb-0">Danh sách sinh viên sẽ nhận email</h6>
+                            </div>
+                            <div className="card-body-modern">
+                              {(() => {
+                                // Lọc sinh viên dựa trên tiêu chí đã chọn
+                                const filteredStudents = allStudents.filter(s => 
+                                  s.display_password && 
+                                  (!selectedClass || s.class_name === selectedClass) &&
+                                  (!selectedFaculty || s.faculty_name === selectedFaculty) &&
+                                  (!selectedMajor || s.major_name === selectedMajor)
+                                );
+                                
+                                if (filteredStudents.length === 0) {
+                                  return (
+                                    <div className="text-center text-muted py-4">
+                                      <i className="fas fa-users fa-3x mb-3"></i>
+                                      <p className="mb-0">Không có sinh viên nào phù hợp với tiêu chí đã chọn</p>
+                                    </div>
+                                  );
+                                }
+                                
+                                return (
+                                  <div 
+                                    className="table-responsive"
+                                    style={{
+                                      maxHeight: filteredStudents.length > 10 ? '400px' : 'auto',
+                                      overflowY: filteredStudents.length > 10 ? 'auto' : 'visible'
+                                    }}
+                                  >
+                                    <table className="table table-hover mb-0">
+                                      <thead className="table-light sticky-top">
+                                        <tr>
+                                          <th>STT</th>
+                                          <th>Họ tên</th>
+                                          <th>Mã SV</th>
+                                          <th>Lớp</th>
+                                          <th>Khoa</th>
+                                          <th>Ngành</th>
+                                          <th>Email</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {filteredStudents.map((student, index) => (
+                                          <tr key={student.id}>
+                                            <td className="text-muted">{index + 1}</td>
+                                            <td>
+                                              <div className="fw-medium">{student.full_name}</div>
+                                            </td>
+                                            <td>
+                                              <span className="badge bg-secondary">{student.student_id}</span>
+                                            </td>
+                                            <td>
+                                              <span className="badge bg-info">{student.class_name}</span>
+                                            </td>
+                                            <td>
+                                              <span className="badge bg-warning text-dark">{student.faculty_name}</span>
+                                            </td>
+                                            <td>
+                                              <span className="badge bg-success">{student.major_name}</span>
+                                            </td>
+                                            <td>
+                                              <small className="text-muted">{student.email}</small>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                    {filteredStudents.length > 10 && (
+                                      <div className="text-center mt-2">
+                                        <small className="text-muted">
+                                          <i className="fas fa-info-circle me-1"></i>
+                                          Cuộn để xem tất cả {filteredStudents.length} sinh viên
+                                        </small>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                         </div>

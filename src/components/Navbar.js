@@ -58,7 +58,7 @@ const Navbar = () => {
               <span className="nav-text">Quản lý buổi học</span>
             </Link>
             <Link to="/admin/absence-requests" className={`nav-icon-link ${isActive('/admin/absence-requests') ? 'active' : ''}`}>
-              <i className="fas fa-calendar-alt"></i>
+            <i className="fas fa-calendar-times"></i>
               <span className="nav-text">Yêu cầu vắng học</span>
             </Link>
             <Link to="/admin/network-wired" className={`nav-icon-link ${isActive('/admin/network-wired') ? 'active' : ''}`}>
@@ -90,7 +90,7 @@ const Navbar = () => {
               <span className="nav-text">Quản lý buổi học</span>
             </Link>
             <Link to="/admin/absence-requests" className={`nav-icon-link ${isActive('/admin/absence-requests') ? 'active' : ''}`}>
-              <i className="fas fa-calendar-alt"></i>
+            <i className="fas fa-calendar-times"></i>
               <span className="nav-text">Yêu cầu vắng học</span>
             </Link>
             <Link to="/admin/network-wired" className={`nav-icon-link ${isActive('/admin/network-wired') ? 'active' : ''}`}>
@@ -107,13 +107,13 @@ const Navbar = () => {
       case 'staff':
         return (
           <>
-            {/* Staff chỉ thấy menu Quản lý buổi học */}
+            {/* Staff chỉ thấy menu Quản lý buổi học - yêu cầu vắng học - báo cáo điểm danh */}
             <Link to="/admin/sessions" className={`nav-icon-link ${isActive('/admin/sessions') ? 'active' : ''}`}>
               <i className="fas fa-calendar-alt"></i>
               <span className="nav-text">Quản lý buổi học</span>
             </Link>
             <Link to="/admin/absence-requests" className={`nav-icon-link ${isActive('/admin/absence-requests') ? 'active' : ''}`}>
-              <i className="fas fa-calendar-alt"></i>
+            <i className="fas fa-calendar-times"></i>
               <span className="nav-text">Yêu cầu vắng học</span>
             </Link>
             <Link to="/admin/attendance-reports" className={`nav-icon-link ${isActive('/admin/attendance-reports') ? 'active' : ''}`}>
@@ -180,24 +180,64 @@ const Navbar = () => {
   // Render mobile bottom navigation
   const renderMobileNavigation = () => {
     if (!isLoggedIn) return null;
+    
+    // Ẩn mobile bottom navbar khi đang ở trang AttendanceSession
+    if (location.pathname.includes('/session/') && location.pathname.includes('/attend')) {
+      return null;
+    }
 
     return (
       <div className="mobile-bottom-navbar">
-        {/* Chỉ hiển thị Dashboard cho các vai trò khác staff */}
+        {/* Dashboard - hiển thị cho tất cả vai trò trừ staff */}
         {currentUser?.role !== 'staff' && (
-          <Link to={`/${currentUser?.role}/dashboard`} className="mobile-nav-item">
+          <Link to={`/${currentUser?.role}/dashboard`} className={`mobile-nav-item ${isActive(`/${currentUser?.role}/dashboard`) ? 'active' : ''}`}>
             <i className="fas fa-home"></i>
           </Link>
         )}
+               
+        {/* Quản lý người dùng - chỉ cho admin và superadmin */}
+        {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin') && (
+          <Link to="/superadmin/users" className={`mobile-nav-item ${isActive('/superadmin/users') ? 'active' : ''}`}>
+            <i className="fas fa-users-cog"></i>
+          </Link>
+        )}
         
-        {/* Chỉ hiển thị nút Sessions cho các vai trò phù hợp */}
+        {/* Quản lý buổi học - cho admin, superadmin, staff */}
         {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin' || currentUser?.role === 'staff') && (
-          <Link to="/admin/sessions" className="mobile-nav-item">
+          <Link to="/admin/sessions" className={`mobile-nav-item ${isActive('/admin/sessions') ? 'active' : ''}`}>
             <i className="fas fa-calendar-alt"></i>
           </Link>
         )}
         
-        <Link to="/profile" className="mobile-nav-item">
+        {/* Yêu cầu vắng học - cho admin, superadmin, staff */}
+        {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin' || currentUser?.role === 'staff') && (
+          <Link to="/admin/absence-requests" className={`mobile-nav-item ${isActive('/admin/absence-requests') ? 'active' : ''}`}>
+            <i className="fas fa-calendar-times"></i>
+          </Link>
+        )}
+        
+        {/* Quản lý thiết bị - chỉ cho admin và superadmin */}
+        {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin') && (
+          <Link to="/admin/network-wired" className={`mobile-nav-item ${isActive('/admin/network-wired') ? 'active' : ''}`}>
+            <i className="fas fa-network-wired"></i>
+          </Link>
+        )}
+        
+        {/* Báo cáo điểm danh - cho admin, superadmin, staff */}
+        {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin' || currentUser?.role === 'staff') && (
+          <Link to="/admin/attendance-reports" className={`mobile-nav-item ${isActive('/admin/attendance-reports') ? 'active' : ''}`}>
+            <i className="fas fa-chart-bar"></i>
+          </Link>
+        )}
+                {/* Xin phép vắng học - chỉ cho sinh viên */}
+                {(currentUser?.role === 'student') && (
+          <Link to="/student/absence-requests" className={`mobile-nav-item ${isActive('/student/absence-requests') ? 'active' : ''}`}>
+            <i className="fas fa-calendar-times"></i>
+          </Link>
+        )}
+        
+        {/* Profile - hiển thị cho tất cả vai trò */}
+        <Link to="/profile" className={`mobile-nav-item ${isActive('/profile') ? 'active' : ''}`}>
           <i className="fas fa-user"></i>
         </Link>
       </div>

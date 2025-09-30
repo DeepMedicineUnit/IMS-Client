@@ -54,7 +54,29 @@ const StatisticsDetail = () => {
   // Format time function
   const formatTime = (timeString) => {
     if (!timeString) return '';
-    return timeString;
+    
+    try {
+      // If it's an ISO string, parse it and format
+      if (timeString.includes('T') || timeString.includes('Z')) {
+        const date = new Date(timeString);
+        return format(date, 'HH:mm:ss');
+      }
+      
+      // If it's already in HH:mm:ss format, return as is
+      if (timeString.match(/^\d{2}:\d{2}:\d{2}$/)) {
+        return timeString;
+      }
+      
+      // If it's in HH:mm format, add seconds
+      if (timeString.match(/^\d{2}:\d{2}$/)) {
+        return timeString + ':00';
+      }
+      
+      return timeString;
+    } catch (error) {
+      console.error('Error formatting time:', error);
+      return timeString;
+    }
   };
   
   // Get metric title
@@ -69,7 +91,7 @@ const StatisticsDetail = () => {
       case 'multipleLate':
         return 'Sinh viên đi trễ nhiều lần';
       case 'incompleteBadge':
-        return 'Sinh viên không có badge Đầy đủ';
+        return 'Yêu cầu vắng học';
       default:
         return 'Thống kê chi tiết';
     }
@@ -98,16 +120,6 @@ const StatisticsDetail = () => {
             <td>{formatTime(item.check_in_time)}</td>
             <td>
               <Badge bg="warning" text="dark">Trễ {Math.round(item.minutes_late)} phút</Badge>
-            </td>
-            <td>
-              <Button 
-                as={Link}
-                to={`/admin/sessions/${item.session_id}/students/${item.id || studentId}`}
-                variant="outline-primary"
-                size="sm"
-              >
-                Chi tiết
-              </Button>
             </td>
           </tr>
         ));
@@ -140,22 +152,10 @@ const StatisticsDetail = () => {
             {!studentId && <td>{item.full_name}</td>}
             <td>{item.session_title}</td>
             <td>{formatDate(item.session_date)}</td>
-            <td>{formatTime(item.check_in_time) || '(Thiếu)'}</td>
-            <td>{formatTime(item.check_out_time) || '(Thiếu)'}</td>
-            <td>
+            <td colSpan="2">
               <Badge bg="warning" text="dark">
-                {!item.check_in_time ? 'Thiếu giờ vào' : !item.check_out_time ? 'Thiếu giờ ra' : 'Lỗi điểm danh'}
+                {item.missing_type || 'Thiếu khung giờ điểm danh'}
               </Badge>
-            </td>
-            <td>
-              <Button 
-                as={Link}
-                to={`/admin/sessions/${item.session_id}/students/${item.id || studentId}`}
-                variant="outline-primary"
-                size="sm"
-              >
-                Chi tiết
-              </Button>
             </td>
           </tr>
         ));
@@ -208,16 +208,12 @@ const StatisticsDetail = () => {
       case 'incompleteBadge':
         if (studentId) {
           return stats.map((item, index) => (
-            <tr key={`incomplete-detail-${index}-${item.session_id}`}>
+            <tr key={`absence-detail-${index}-${item.request_id}`}>
               <td>{item.session_title}</td>
               <td>{formatDate(item.session_date)}</td>
-              <td>{formatTime(item.check_in_time) || '(Thiếu)'}</td>
-              <td>{formatTime(item.check_out_time) || '(Thiếu)'}</td>
+              <td>{formatDate(item.request_date)}</td>
               <td>
-                <Badge bg="danger">
-                  {!item.check_in_time && !item.check_out_time ? 'Vắng mặt' : 
-                   !item.check_in_time ? 'Thiếu giờ vào' : 'Thiếu giờ ra'}
-                </Badge>
+                <Badge bg="warning" text="dark">Chờ duyệt</Badge>
               </td>
               <td>
                 <Button 
@@ -233,11 +229,13 @@ const StatisticsDetail = () => {
           ));
         } else {
           return stats.map((item, index) => (
-            <tr key={`incomplete-${item.id || index}`}>
+            <tr key={`absence-${item.id || index}-${item.request_id}`}>
               <td>{item.full_name}</td>
-              <td colSpan="3">{item.username}</td>
+              <td>{item.session_title}</td>
+              <td>{formatDate(item.session_date)}</td>
+              <td>{formatDate(item.request_date)}</td>
               <td>
-                <Badge bg="danger">Vắng {item.missed_sessions} buổi</Badge>
+                <Badge bg="warning" text="dark">Chờ duyệt</Badge>
               </td>
               <td>
                 <Button 
@@ -277,7 +275,6 @@ const StatisticsDetail = () => {
               <th>Giờ bắt đầu</th>
               <th>Giờ điểm danh</th>
               <th>Trạng thái</th>
-              <th>Thao tác</th>
             </tr>
           );
           
@@ -287,18 +284,6 @@ const StatisticsDetail = () => {
               <th>Buổi học</th>
               <th>Ngày</th>
               <th colSpan="2">Trạng thái</th>
-              <th>Thao tác</th>
-            </tr>
-          );
-          
-        case 'missingTimeSlot':
-          return (
-            <tr>
-              <th>Buổi học</th>
-              <th>Ngày</th>
-              <th>Giờ vào</th>
-              <th>Giờ ra</th>
-              <th>Trạng thái</th>
               <th>Thao tác</th>
             </tr>
           );
@@ -350,7 +335,6 @@ const StatisticsDetail = () => {
               <th>Giờ bắt đầu</th>
               <th>Giờ điểm danh</th>
               <th>Trạng thái</th>
-              <th>Thao tác</th>
             </tr>
           );
           
@@ -371,19 +355,27 @@ const StatisticsDetail = () => {
               <th>Sinh viên</th>
               <th>Buổi học</th>
               <th>Ngày</th>
-              <th>Giờ vào</th>
-              <th>Giờ ra</th>
+              <th>Trạng thái</th>
+            </tr>
+          );
+          
+        case 'multipleLate':
+          return (
+            <tr>
+              <th>Sinh viên</th>
+              <th colSpan="3">Mã số</th>
               <th>Trạng thái</th>
               <th>Thao tác</th>
             </tr>
           );
           
-        case 'multipleLate':
         case 'incompleteBadge':
           return (
             <tr>
-              <th>Sinh viên</th>
-              <th colSpan="3">Mã số</th>
+              {!studentId && <th>Tên sinh viên</th>}
+              <th>Buổi học</th>
+              <th>Ngày học</th>
+              <th>Ngày yêu cầu</th>
               <th>Trạng thái</th>
               <th>Thao tác</th>
             </tr>

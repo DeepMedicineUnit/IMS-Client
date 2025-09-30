@@ -117,7 +117,7 @@ const DeviceManagement = () => {
     }
   }, [attendanceCurrentPage, activeTab]);
 
-  // Auto-refresh data every 30 seconds
+  // Auto-refresh data every 10 seconds
   useEffect(() => {
     // Start auto-refresh interval
     autoRefreshIntervalRef.current = setInterval(() => {
@@ -126,7 +126,7 @@ const DeviceManagement = () => {
       } else if (activeTab === 'attendance') {
         fetchAttendanceRecordsSilently();
       }
-    }, 30000); // 30 seconds
+    }, 10000); // 10 seconds
 
     // Clean up interval on unmount
     return () => {
@@ -491,7 +491,7 @@ const DeviceManagement = () => {
     if (startPage > 1) {
       items.push(
         <Button 
-          key={1} 
+          key="device-page-1" 
           variant="outline-primary" 
           onClick={() => setCurrentPage(1)}
           className="mx-1 view-btn"
@@ -502,7 +502,7 @@ const DeviceManagement = () => {
       
       // Thêm dấu "..." nếu cần
       if (startPage > 2) {
-        items.push(<span key="ellipsis1" className="mx-1">...</span>);
+        items.push(<span key="device-ellipsis1" className="mx-1">...</span>);
       }
     }
     
@@ -510,7 +510,7 @@ const DeviceManagement = () => {
     for (let i = startPage; i <= endPage; i++) {
       items.push(
         <Button 
-          key={i} 
+          key={`device-page-${i}`} 
           variant={currentPage === i ? 'primary' : 'outline-primary'} 
           onClick={() => setCurrentPage(i)}
           className="mx-1 view-btn"
@@ -524,12 +524,12 @@ const DeviceManagement = () => {
     if (endPage < totalPages) {
       // Thêm dấu "..." nếu cần
       if (endPage < totalPages - 1) {
-        items.push(<span key="ellipsis2" className="mx-1">...</span>);
+        items.push(<span key="device-ellipsis2" className="mx-1">...</span>);
       }
       
       items.push(
         <Button 
-          key={totalPages} 
+          key={`device-page-${totalPages}`} 
           variant="outline-primary" 
           onClick={() => setCurrentPage(totalPages)}
           className="mx-1 view-btn"
@@ -620,7 +620,6 @@ const DeviceManagement = () => {
             <div className="session-list-controls mb-4">
               <div className="search-controls">
                 <div className="search-input" style={{ position: 'relative' }}>
-                  <i className="fas fa-search" style={{ position: 'absolute', left: '15px', top: '50%', transform: 'translateY(-50%)', color: '#6c757d' }}></i>
                   <input
                     type="text"
                     placeholder="Tìm kiếm theo tên, mã SV, email, MAC..."
@@ -669,7 +668,7 @@ const DeviceManagement = () => {
                     </tr>
                   ) : devices.length > 0 ? (
                     devices.map((device, index) => (
-                      <tr key={device.id}>
+                      <tr key={`device-${device.id}-${index}`}>
                         <td>{(currentPage - 1) * 10 + index + 1}</td>
                         <td>{device.student_id || '-'}</td>
                         <td>{device.full_name || '-'}</td>
@@ -749,7 +748,6 @@ const DeviceManagement = () => {
             <div className="session-list-controls mb-4">
               <div className="search-controls">
                 <div className="search-input" style={{ position: 'relative' }}>
-                  <i className="fas fa-search" style={{ position: 'absolute', left: '15px', top: '50%', transform: 'translateY(-50%)', color: '#6c757d' }}></i>
                   <input
                     type="text"
                     placeholder="Tìm kiếm theo tên, mã SV, email, MAC, buổi học..."
@@ -798,7 +796,7 @@ const DeviceManagement = () => {
                     </tr>
                   ) : attendanceRecords.length > 0 ? (
                     attendanceRecords.map((record, index) => (
-                      <tr key={record.id}>
+                      <tr key={`attendance-${record.id}-${index}`}>
                         <td>{(attendanceCurrentPage - 1) * 10 + index + 1}</td>
                         <td>{record.student_code || '-'}</td>
                         <td>{record.full_name || '-'}</td>
@@ -909,7 +907,7 @@ const DeviceManagement = () => {
                   if (startPage > 1) {
                     items.push(
                       <Button 
-                        key={1} 
+                        key="attendance-page-1" 
                         variant="outline-primary" 
                         onClick={() => setAttendanceCurrentPage(1)}
                         className="mx-1 view-btn"
@@ -919,14 +917,14 @@ const DeviceManagement = () => {
                     );
                     
                     if (startPage > 2) {
-                      items.push(<span key="ellipsis1" className="mx-1">...</span>);
+                      items.push(<span key="attendance-ellipsis1" className="mx-1">...</span>);
                     }
                   }
                   
                   for (let i = startPage; i <= endPage; i++) {
                     items.push(
                       <Button 
-                        key={i} 
+                        key={`attendance-page-${i}`} 
                         variant={attendanceCurrentPage === i ? 'primary' : 'outline-primary'} 
                         onClick={() => setAttendanceCurrentPage(i)}
                         className="mx-1 view-btn"
@@ -938,12 +936,12 @@ const DeviceManagement = () => {
                   
                   if (endPage < attendanceTotalPages) {
                     if (endPage < attendanceTotalPages - 1) {
-                      items.push(<span key="ellipsis2" className="mx-1">...</span>);
+                      items.push(<span key="attendance-ellipsis2" className="mx-1">...</span>);
                     }
                     
                     items.push(
                       <Button 
-                        key={attendanceTotalPages} 
+                        key={`attendance-page-${attendanceTotalPages}`} 
                         variant="outline-primary" 
                         onClick={() => setAttendanceCurrentPage(attendanceTotalPages)}
                         className="mx-1 view-btn"

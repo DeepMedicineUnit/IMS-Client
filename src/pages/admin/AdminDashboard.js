@@ -6,6 +6,7 @@ import StatisticsCard from '../../components/StatisticsCard';
 import StatisticsList from '../../components/StatisticsList';
 import PieChart from '../../components/charts/PieChart';
 import BarChart from '../../components/charts/BarChart';
+import '../../styles/dashboard.css';
 
 const AdminDashboard = () => {
   const { currentUser, api } = useAuth();
@@ -60,12 +61,12 @@ const AdminDashboard = () => {
     // Initial fetch
     fetchDashboardStats(true);
 
-    // Set up auto-refresh every 30 seconds, but only when tab is visible
+    // Set up auto-refresh every 10 seconds, but only when tab is visible
     const interval = setInterval(() => {
       if (!document.hidden) {
         fetchDashboardStats(false);
       }
-    }, 30000);
+    }, 10000);
 
     // Handle visibility change to refresh when tab becomes visible
     const handleVisibilityChange = () => {
@@ -101,153 +102,92 @@ const AdminDashboard = () => {
     : [];
 
   return (
-    <div style={{ fontFamily: 'Inter, Arial, sans-serif', background: '#fffff', minHeight: '100vh', paddingBottom: 32 }}>
-      <style>{`
-        .stat-card {
-          border-radius: 18px !important;
-          box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
-          transition: box-shadow 0.2s, transform 0.2s;
-          border: none;
-        }
-        .stat-card:hover {
-          box-shadow: 0 8px 32px rgba(80,120,200,0.18);
-          transform: translateY(-2px) scale(1.01);
-        }
-        .icon-box {
-          border-radius: 12px;
-          width: 56px;
-          height: 56px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 28px;
-          box-shadow: 0 2px 8px rgba(80,120,200,0.08);
-        }
-        .dashboard-section {
-          background: #fff;
-          border-radius: 18px;
-          box-shadow: 0 2px 12px rgba(0, 0, 0, 0.11);
-          padding: 24px 20px 20px 20px;
-          margin-bottom: 32px;
-        }
-        .dashboard-title {
-          font-size: 2rem;
-          font-weight: 700;
-          color: #2e3a59;
-          margin-bottom: 24px;
-        }
-        .dashboard-header {
-          margin-bottom: 32px;
-        }
-        .auto-refresh-indicator {
-          position: fixed;
-          bottom: 20px;
-          right: 20px;
-          background: #28a745;
-          color: white;
-          padding: 8px 12px;
-          border-radius: 20px;
-          font-size: 12px;
-          z-index: 1000;
-          animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-          0% { opacity: 1; }
-          50% { opacity: 0.7; }
-          100% { opacity: 1; }
-        }
-      `}</style>
+    <div className="admin-dashboard-container">
       
       {/* Auto-refresh indicator */}
       <div className="auto-refresh-indicator">
         <i className={`fas ${isRefreshing ? 'fa-sync-alt fa-spin' : 'fa-sync-alt'} me-1`}></i>
         {isRefreshing ? 'Đang cập nhật...' : 'Tự động cập nhật'}
-        <Button 
-          variant="link" 
-          size="sm" 
-          className="text-white p-0 ms-2"
-          onClick={() => window.location.reload()}
-          style={{ textDecoration: 'none' }}
-        >
-          <i className="fas fa-refresh"></i>
-        </Button>
       </div>
 
       <div className="dashboard-header">
         <div className="d-flex justify-content-between align-items-center">
-          <h2 className="dashboard-title">Bảng điều khiển Quản trị viên</h2>
+          <div>
+            <h2 className="dashboard-title">Bảng điều khiển Quản trị viên</h2>
+          </div>
         </div>
       </div>
-      {error && <Alert variant="danger">{error}</Alert>}
+      {error && <Alert className="error-alert">{error}</Alert>}
       {loading ? (
-        <div className="text-center py-5">
-          <Spinner animation="border" role="status">
-            <span className="visually-hidden">Đang tải...</span>
-          </Spinner>
+        <div className="loading-container">
+          <div className="loading-spinner"></div>
+          <p className="loading-text">Đang tải dữ liệu...</p>
         </div>
       ) : (
         <>
           {/* Top stats row */}
-          <Row className="mb-4 g-4">
-            <Col md={3} sm={6} xs={12}>
-              <Card className="stat-card">
-                <Card.Body className="d-flex align-items-center">
-                  <div className="icon-box bg-primary text-white me-3">
-                    <i className="fas fa-user-graduate"></i>
-                  </div>
-                  <div>
-                    <div className="text-muted small">Tổng số sinh viên đi lâm sàng</div>
-                    <div className="fw-bold" style={{ fontSize: 28 }}>{stats.totalStudents}</div>
-                  </div>
-                </Card.Body>
-              </Card>
-            </Col>
-            <Col md={3} sm={6} xs={12}>
-              <Card className="stat-card">
-                <Card.Body className="d-flex align-items-center">
-                  <div className="icon-box bg-warning text-white me-3">
-                    <i className="fas fa-user-clock"></i>
-                  </div>
-                  <div>
-                    <div className="text-muted small">Sinh viên đi trễ</div>
-                    <div className="fw-bold" style={{ fontSize: 28 }}>{stats.lateStudentsCount}</div>
-                  </div>
-                </Card.Body>
-              </Card>
-            </Col>
-            <Col md={3} sm={6} xs={12}>
-              <Card className="stat-card">
-                <Card.Body className="d-flex align-items-center">
-                  <div className="icon-box bg-danger text-white me-3">
-                    <i className="fas fa-user-slash"></i>
-                  </div>
-                  <div>
-                    <div className="text-muted small">Sinh viên vắng mặt</div>
-                    <div className="fw-bold" style={{ fontSize: 28 }}>{stats.absentStudentsCount}</div>
-                  </div>
-                </Card.Body>
-              </Card>
-            </Col>
-            <Col md={3} sm={6} xs={12}>
-              <Card className="stat-card">
-                <Card.Body className="d-flex align-items-center">
-                  <div className="icon-box bg-info text-white me-3">
-                    <i className="fas fa-chalkboard-teacher"></i>
-                  </div>
-                  <div>
-                    <div className="text-muted small">Tổng số buổi học</div>
-                    <div className="fw-bold" style={{ fontSize: 28 }}>{stats.totalSessions}</div>
-                  </div>
-                </Card.Body>
-              </Card>
-            </Col>
-          </Row>
+          <div className="stats-grid">
+            <Row className="g-4">
+              <Col md={3} sm={6} xs={12}>
+                <Card className="stat-card">
+                  <Card.Body className="stat-card-body">
+                    <div className="icon-container" style={{ background: 'linear-gradient(135deg, #667eea, #764ba2)' }}>
+                      <i className="fas fa-user-graduate"></i>
+                    </div>
+                    <div className="stat-content">
+                      <div className="stat-label">Sinh viên đi lâm sàng</div>
+                      <div className="stat-value">{stats.totalStudents}</div>
+                    </div>
+                  </Card.Body>
+                </Card>
+              </Col>
+              <Col md={3} sm={6} xs={12}>
+                <Card className="stat-card">
+                  <Card.Body className="stat-card-body">
+                    <div className="icon-container" style={{ background: 'linear-gradient(135deg, #f093fb, #f5576c)' }}>
+                      <i className="fas fa-user-clock"></i>
+                    </div>
+                    <div className="stat-content">
+                      <div className="stat-label">Sinh viên đi trễ</div>
+                      <div className="stat-value">{stats.lateStudentsCount}</div>
+                    </div>
+                  </Card.Body>
+                </Card>
+              </Col>
+              <Col md={3} sm={6} xs={12}>
+                <Card className="stat-card">
+                  <Card.Body className="stat-card-body">
+                    <div className="icon-container" style={{ background: 'linear-gradient(135deg, #ff9a9e, #fecfef)' }}>
+                      <i className="fas fa-user-slash"></i>
+                    </div>
+                    <div className="stat-content">
+                      <div className="stat-label">Sinh viên vắng mặt</div>
+                      <div className="stat-value">{stats.absentStudentsCount}</div>
+                    </div>
+                  </Card.Body>
+                </Card>
+              </Col>
+              <Col md={3} sm={6} xs={12}>
+                <Card className="stat-card">
+                  <Card.Body className="stat-card-body">
+                    <div className="icon-container" style={{ background: 'linear-gradient(135deg, #a8edea, #fed6e3)' }}>
+                      <i className="fas fa-chalkboard-teacher"></i>
+                    </div>
+                    <div className="stat-content">
+                      <div className="stat-label">Tổng số buổi học</div>
+                      <div className="stat-value">{stats.totalSessions}</div>
+                    </div>
+                  </Card.Body>
+                </Card>
+              </Col>
+            </Row>
+          </div>
 
           {/* Charts row */}
           <Row className="mb-4 g-4">
             <Col md={6} xs={12}>
-              <div className="dashboard-section">
-                <div className="fw-bold mb-3" style={{ color: '#4e73df' }}>Tổng quan điểm danh</div>
+              <div className="chart-section">
+                <div className="chart-title">Tổng quan điểm danh</div>
                 <PieChart
                   data={attendanceData}
                   labels={attendanceLabels}
@@ -257,8 +197,8 @@ const AdminDashboard = () => {
               </div>
             </Col>
             <Col md={6} xs={12}>
-              <div className="dashboard-section">
-                <div className="fw-bold mb-3" style={{ color: '#e74a3b' }}>Sinh viên đi trễ nhiều lần</div>
+              <div className="chart-section">
+                <div className="chart-title">Sinh viên đi trễ nhiều lần</div>
                 <BarChart
                   data={lateStudentsData}
                   labels={lateStudentsLabels}
@@ -273,71 +213,69 @@ const AdminDashboard = () => {
           {/* Lists row */}
           <Row className="mb-4 g-4">
             <Col md={6} xs={12}>
-              <div className="dashboard-section">
-                <StatisticsList
-                  title="Sinh viên đi trễ gần đây"
-                  icon="fa-user-clock"
-                  data={stats.lateStudents}
-                  bgColor="warning"
-                  detailPath="/admin/stats/late"
-                  type="late"
-                  maxItems={5}
-                />
-              </div>
+              <StatisticsList
+                title="Tất cả sinh viên đi trễ"
+                icon="fa-user-clock"
+                data={stats.lateStudents}
+                bgColor="warning"
+                detailPath="/admin/stats/late"
+                type="late"
+                maxItems={5}
+              />
             </Col>
             <Col md={6} xs={12}>
-              <div className="dashboard-section">
-                <StatisticsList
-                  title="Sinh viên thiếu khung giờ điểm danh"
-                  icon="fa-exclamation-triangle"
-                  data={stats.missingTimeSlotStudents}
-                  bgColor="warning"
-                  detailPath="/admin/stats/missingTimeSlot"
-                  type="missingTimeSlot"
-                  maxItems={5}
-                />
-              </div>
+              <StatisticsList
+                title="Sinh viên thiếu khung giờ điểm danh"
+                icon="fa-exclamation-triangle"
+                data={stats.missingTimeSlotStudents}
+                bgColor="warning"
+                detailPath="/admin/stats/missingTimeSlot"
+                type="missingTimeSlot"
+                maxItems={5}
+              />
             </Col>
           </Row>
 
           {/* Second lists row */}
           <Row className="mb-4 g-4">
             <Col md={6} xs={12}>
-              <div className="dashboard-section">
-                <StatisticsList
-                  title="Sinh viên vắng mặt gần đây"
-                  icon="fa-user-slash"
-                  data={stats.absentStudents}
-                  bgColor="danger"
-                  detailPath="/admin/stats/absent"
-                  type="absent"
-                  maxItems={5}
-                />
-              </div>
+              <StatisticsList
+                title="Tất cả Sinh viên vắng mặt"
+                icon="fa-user-slash"
+                data={stats.absentStudents}
+                bgColor="danger"
+                detailPath="/admin/stats/absent"
+                type="absent"
+                maxItems={5}
+              />
             </Col>
             <Col md={6} xs={12}>
-              <div className="dashboard-section">
-                <StatisticsList
-                  title="Sinh viên không có badge Đầy đủ"
-                  icon="fa-id-badge"
-                  data={stats.incompleteBadgeStudents}
-                  bgColor="danger"
-                  detailPath="/admin/stats/incompleteBadge"
-                  type="incompleteBadge"
-                  maxItems={5}
-                />
-              </div>
+              <StatisticsList
+                title="Yêu cầu vắng học"
+                icon="fa-id-badge"
+                data={stats.incompleteBadgeStudents}
+                bgColor="danger"
+                detailPath="/admin/stats/incompleteBadge"
+                type="incompleteBadge"
+                maxItems={5}
+              />
             </Col>
           </Row>
 
           {/* Account info card */}
-          <div className="dashboard-section">
+          <div className="account-info-section">
             <Row>
               <Col md={6}>
-                <div className="fw-bold mb-2">Thông tin tài khoản</div>
-                <p><strong>Tên:</strong> {currentUser?.full_name || currentUser?.name}</p>
-                <p><strong>Email:</strong> {currentUser?.email}</p>
-                <p><strong>Vai trò:</strong> {currentUser?.role === 'admin' ? 'Quản trị viên' : ''}</p>
+                <div className="account-title">Thông tin tài khoản</div>
+                <div className="account-info-item">
+                  <span className="account-info-label">Tên:</span> {currentUser?.full_name || currentUser?.name}
+                </div>
+                <div className="account-info-item">
+                  <span className="account-info-label">Email:</span> {currentUser?.email}
+                </div>
+                <div className="account-info-item">
+                  <span className="account-info-label">Vai trò:</span> {currentUser?.role === 'admin' ? 'Quản trị viên' : ''}
+                </div>
               </Col>
               <Col md={6} className="text-md-end">
                 <Button as={Link} to="/profile" variant="outline-primary" style={{ borderRadius: 12 }}>

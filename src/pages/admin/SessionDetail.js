@@ -4,9 +4,7 @@ import { Card, Row, Col, Button, Table, Badge, Tab, Tabs, Alert, Spinner } from 
 import { useAuth } from '../../contexts/AuthContext';
 import Loader from '../../components/Loader';
 import { format, parseISO, isAfter, isBefore, isEqual } from 'date-fns';
-import { toast } from 'react-toastify';
-import io from 'socket.io-client';
-import { Calendar, Clock, MapPin, Users, FileText, QrCode, ArrowLeft, RefreshCw, Info, CheckCircle, AlertTriangle, XCircle, UserCheck, UserX, Hospital, ExternalLink, Map, Upload, Clock as ClockIcon, Timer, TimerOff } from 'lucide-react';
+import { Calendar, Clock, MapPin, Users, FileText, QrCode, ArrowLeft, Info, CheckCircle, AlertTriangle, XCircle, UserCheck, UserX, Hospital, ExternalLink, Map, Upload, Clock as ClockIcon, Timer, TimerOff } from 'lucide-react';
 
 const SessionDetail = () => {
   const { id } = useParams();
@@ -16,8 +14,13 @@ const SessionDetail = () => {
   const [attendanceStats, setAttendanceStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [socketConnected, setSocketConnected] = useState(false);
-  const socketRef = useRef(null);
+  
+  // Auto-refresh intervals
+  const sessionDataIntervalRef = useRef(null);
+  const attendanceStatsIntervalRef = useRef(null);
+  
+  // Auto-refresh indicator
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
   
   // Predefined hospital locations
   const predefinedLocations = [
@@ -120,6 +123,40 @@ const SessionDetail = () => {
     }
   };
 
+  // Function to fetch session data silently (without loading state)
+  const fetchSessionDataSilently = async () => {
+    try {
+      setIsAutoRefreshing(true);
+      const sessionResponse = await api.get(`/sessions/${id}`);
+      
+      if (sessionResponse.data.success) {
+        const sessionData = sessionResponse.data.data;
+        // Calculate the session status
+        const calculatedStatus = calculateSessionStatus(sessionData);
+        setSession({
+          ...sessionData,
+          calculatedStatus: calculatedStatus
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching session data silently:', error);
+    } finally {
+      setIsAutoRefreshing(false);
+    }
+  };
+
+  // Function to fetch attendance stats silently
+  const fetchAttendanceStatsSilently = async () => {
+    try {
+      const statsResponse = await api.get(`/sessions/${id}/attendance/stats`);
+      if (statsResponse.data.success) {
+        setAttendanceStats(statsResponse.data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching attendance stats silently:', error);
+    }
+  };
+
   // Function to fetch session data
   const fetchSessionData = async () => {
     try {
@@ -163,52 +200,32 @@ const SessionDetail = () => {
     setLoading(true);
     fetchSessionData();
   }, [id]);
-  
-  // Set up socket connection
+
+  // Auto-refresh data every 10 seconds
   useEffect(() => {
-    // Create socket connection
-    const socket = io(process.env.NODE_ENV === 'production' 
-      ? window.location.origin 
-      : 'http://localhost:5000');
-    
-    socketRef.current = socket;
-    
-    socket.on('connect', () => {
-      console.log('Socket connected:', socket.id);
-      setSocketConnected(true);
-      
-      // Join session room
-      socket.emit('join_session', id);
-    });
-    
-    socket.on('disconnect', () => {
-      console.log('Socket disconnected');
-      setSocketConnected(false);
-    });
-    
-    socket.on('monitoring_update', (data) => {
-      console.log('Received monitoring update:', data);
-      // Refresh data when attendance is marked
-      if (data.type === 'attendance' || data.dataType === 'attendance') {
-        console.log('Attendance update detected, refreshing data');
-        fetchSessionData();
-      }
-    });
-    
-    socket.on('session_update', (data) => {
-      console.log('Received session update:', data);
-      // Refresh data when session is updated
-      fetchSessionData();
-    });
-    
-    // Clean up on unmount
-    return () => {
-      if (socket) {
-        socket.emit('leave_session', id);
-        socket.disconnect();
-      }
-    };
-  }, [id]);
+    if (session) {
+      // Start auto-refresh intervals
+      sessionDataIntervalRef.current = setInterval(() => {
+        fetchSessionDataSilently();
+      }, 10000); // 10 seconds
+
+      attendanceStatsIntervalRef.current = setInterval(() => {
+        fetchAttendanceStatsSilently();
+      }, 10000); // 10 seconds
+
+      // Clean up intervals on unmount
+      return () => {
+        if (sessionDataIntervalRef.current) {
+          clearInterval(sessionDataIntervalRef.current);
+          sessionDataIntervalRef.current = null;
+        }
+        if (attendanceStatsIntervalRef.current) {
+          clearInterval(attendanceStatsIntervalRef.current);
+          attendanceStatsIntervalRef.current = null;
+        }
+      };
+    }
+  }, [session, id]);
 
   const getStatusBadge = (status) => {
     switch (status) {
@@ -304,23 +321,14 @@ const SessionDetail = () => {
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div className="d-flex align-items-center">
           <h2 className="mb-0 fw-bold">Chi tiết buổi học</h2>
-          <div className="ms-3 d-flex align-items-center">
-            {!socketConnected && (
-              <button 
-                className="btn-modern" 
-                style={{ backgroundColor: '#6c757d', padding: '8px 16px' }}
-                onClick={() => {
-                  if (socketRef.current) {
-                    socketRef.current.connect();
-                  }
-                  toast.info('Đang kết nối lại...');
-                }}
-              >
-                <RefreshCw size={16} className="me-2" />
-                Kết nối lại
-              </button>
-            )}
-          </div>
+          {isAutoRefreshing && (
+            <div className="auto-refresh-indicator ms-3">
+              <div className="spinner-border spinner-border-sm text-primary" role="status">
+                <span className="visually-hidden">Đang cập nhật...</span>
+              </div>
+              <span className="ms-2 small text-muted">Đang cập nhật...</span>
+            </div>
+          )}
         </div>
         <div className="d-flex gap-2">
           {(session.status === 'active' || session.status === 'scheduled') && (
@@ -682,7 +690,10 @@ const SessionDetail = () => {
                       early: false,      // Đi trước
                       late: false,       // Đi trễ
                       late_leave: false, // Về trễ
-                      absent: false      // Vắng mặt
+                      absent: false,     // Vắng mặt
+                      missing_before: false,  // Thiếu trước
+                      missing_during: false, // Thiếu trong
+                      missing_after: false    // Thiếu sau
                     };
 
                     // Check which badges are actually used in the attendanceStats
@@ -728,22 +739,44 @@ const SessionDetail = () => {
                           requiredAttendanceTypes.length >= 1 && 
                           requiredAttendanceTypes.every(type => attendanceTypes.has(type));
                         
-                        // Check if full attendance is displayed
-                        if ((hasAllRequiredAttendances && 
-                            ((hasBeforeAttendance && hasDuringAttendance && (hasAfterAttendance || hasLateLeaveAttendance)) ||
-                             (hasEarlyAttendance && hasDuringAttendance && (hasAfterAttendance || hasLateLeaveAttendance)))) ||
-                            (hasAllRequiredAttendances && hasLateAttendance && hasDuringAttendance && 
-                                (hasAfterAttendance || hasLateLeaveAttendance)) ||
-                            (hasAllRequiredAttendances && (hasEarlyAttendance || hasBeforeAttendance) && 
-                                hasDuringAttendance && hasAfterAttendance) ||
-                            (hasLateAttendance && hasDuringAttendance && hasLateLeaveAttendance)) {
+                        // Kiểm tra các trường hợp thiếu điểm danh
+                        const missingBefore = requiredAttendanceTypes.includes('before') && !hasBeforeAttendance && !hasEarlyAttendance;
+                        const missingDuring = requiredAttendanceTypes.includes('during') && !hasDuringAttendance;
+                        const missingAfter = requiredAttendanceTypes.includes('after') && !hasAfterAttendance && !hasLateLeaveAttendance;
+                        
+                        // Trường hợp 1: Trước - Trong -> Chỉ hiển thị Thiếu Sau
+                        if (hasBeforeAttendance && hasDuringAttendance && !hasAfterAttendance && !hasLateLeaveAttendance && missingAfter) {
+                          usedBadges.missing_after = true;
+                        }
+                        // Trường hợp 2: Trước - Sau -> Chỉ hiển thị Thiếu Trong
+                        else if (hasBeforeAttendance && hasAfterAttendance && !hasDuringAttendance && missingDuring) {
+                          usedBadges.missing_during = true;
+                        }
+                        // Trường hợp 3: Đi trễ - Trong -> Chỉ hiển thị Thiếu Sau + Đi trễ
+                        else if (hasLateAttendance && hasDuringAttendance && !hasAfterAttendance && !hasLateLeaveAttendance && missingAfter) {
+                          usedBadges.missing_after = true;
+                          usedBadges.late = true;
+                        }
+                        // Trường hợp 4: Đi trễ - Sau -> Chỉ hiển thị Thiếu Trong + Đi trễ
+                        else if (hasLateAttendance && hasAfterAttendance && !hasDuringAttendance && missingDuring) {
+                          usedBadges.missing_during = true;
+                          usedBadges.late = true;
+                        }
+                        // Trường hợp 5: Trong - Sau -> Chỉ hiển thị Thiếu Trước
+                        else if (hasDuringAttendance && hasAfterAttendance && !hasBeforeAttendance && !hasEarlyAttendance && missingBefore) {
+                          usedBadges.missing_before = true;
+                        }
+                        // Trường hợp 6: Trước - Trong - Sau -> Chỉ hiển thị Đầy đủ
+                        else if (hasBeforeAttendance && hasDuringAttendance && (hasAfterAttendance || hasLateLeaveAttendance)) {
                           usedBadges.full = true;
-                          
-                          // Also mark late if it appears with full
-                          if (hasLateAttendance) {
-                            usedBadges.late = true;
-                          }
-                        } else {
+                        }
+                        // Trường hợp 7: Đi trễ - Trong - Sau -> Chỉ hiển thị Đầy đủ + Đi trễ
+                        else if (hasLateAttendance && hasDuringAttendance && (hasAfterAttendance || hasLateLeaveAttendance)) {
+                          usedBadges.full = true;
+                          usedBadges.late = true;
+                        }
+                        // Các trường hợp khác: hiển thị từng trạng thái riêng biệt
+                        else {
                           // Individual statuses
                           if (hasBeforeAttendance) usedBadges.before = true;
                           if (hasDuringAttendance) usedBadges.during = true;
@@ -763,6 +796,16 @@ const SessionDetail = () => {
                             usedBadges.present = true;
                           }
                         }
+                        
+                        // Đánh dấu các badge thiếu điểm danh nếu chưa được đánh dấu
+                        if (missingBefore && !usedBadges.missing_before) usedBadges.missing_before = true;
+                        if (missingDuring && !usedBadges.missing_during) usedBadges.missing_during = true;
+                        if (missingAfter && !usedBadges.missing_after) usedBadges.missing_after = true;
+                        
+                        // Đánh dấu badge "Đầy đủ" nếu sinh viên có đầy đủ điểm danh nhưng chưa được đánh dấu
+                        if (!usedBadges.full && hasBeforeAttendance && hasDuringAttendance && (hasAfterAttendance || hasLateLeaveAttendance)) {
+                          usedBadges.full = true;
+                        }
                       });
                     }
 
@@ -775,9 +818,14 @@ const SessionDetail = () => {
                     if (usedBadges.after) explanations.push({ badge: <Badge bg="success" className="modern-badge">Có mặt sau</Badge>, text: "Sinh viên điểm danh sau buổi học" });
                     if (usedBadges.present) explanations.push({ badge: <Badge bg="success" className="modern-badge">Có mặt</Badge>, text: "Sinh viên đã điểm danh (không xác định thời điểm)" });
                     if (usedBadges.early) explanations.push({ badge: <Badge bg="info" className="modern-badge">Đi trước</Badge>, text: "Sinh viên điểm danh sớm hơn thời gian cho phép" });
-                    if (usedBadges.late) explanations.push({ badge: <Badge bg="warning" className="modern-badge">Đi trễ</Badge>, text: "Sinh viên điểm danh muộn so với giờ bắt đầu" });
-                    if (usedBadges.late_leave) explanations.push({ badge: <Badge bg="warning" className="modern-badge">Về trễ</Badge>, text: "Sinh viên điểm danh muộn sau khi buổi học kết thúc" });
+                    if (usedBadges.late) explanations.push({ badge: <Badge bg="warning" className="modern-badge">Đi trễ</Badge>, text: "Sinh viên điểm danh đi trễ so với giờ bắt đầu" });
+                    if (usedBadges.late_leave) explanations.push({ badge: <Badge bg="warning" className="modern-badge">Về trễ</Badge>, text: "Sinh viên điểm danh về trễ sau khi buổi học kết thúc" });
                     if (usedBadges.absent) explanations.push({ badge: <Badge bg="danger" className="modern-badge">Vắng mặt</Badge>, text: "Sinh viên chưa điểm danh" });
+                    
+                    // Thêm các badge thiếu điểm danh
+                    if (usedBadges.missing_before) explanations.push({ badge: <Badge bg="danger" className="modern-badge">Thiếu Trước</Badge>, text: "Sinh viên thiếu điểm danh trước buổi học" });
+                    if (usedBadges.missing_during) explanations.push({ badge: <Badge bg="danger" className="modern-badge">Thiếu Trong</Badge>, text: "Sinh viên thiếu điểm danh trong buổi học" });
+                    if (usedBadges.missing_after) explanations.push({ badge: <Badge bg="danger" className="modern-badge">Thiếu Sau</Badge>, text: "Sinh viên thiếu điểm danh sau buổi học" });
                     
                     // Thêm các badge vắng có phép
                     if (usedBadges.absent_perm) explanations.push({ badge: <Badge bg="danger" className="modern-badge">Phép cả buổi</Badge>, text: "Sinh viên vắng cả buổi học có phép" });
@@ -785,8 +833,9 @@ const SessionDetail = () => {
                     if (usedBadges.absent_during_perm) explanations.push({ badge: <Badge bg="warning" className="modern-badge">Phép trong buổi</Badge>, text: "Sinh viên vắng điểm danh trong buổi học có phép" });
                     if (usedBadges.absent_after_perm) explanations.push({ badge: <Badge bg="secondary" className="modern-badge">Phép sau buổi</Badge>, text: "Sinh viên vắng điểm danh sau buổi học có phép" });
                     
-                    // If we're showing combination badges, also show the combinations
-                    const showCombinations = usedBadges.full && (usedBadges.before || usedBadges.during || usedBadges.after || usedBadges.late || usedBadges.late_leave);
+                    // Show combinations if we have any special cases (missing, full, or late combinations)
+                    const showCombinations = usedBadges.missing_before || usedBadges.missing_during || usedBadges.missing_after || 
+                                            usedBadges.full || usedBadges.late;
                     
                     const chunkExplanations = (arr, size) => {
                       const result = [];
@@ -815,29 +864,33 @@ const SessionDetail = () => {
                             <hr />
                             <h6 className="mb-2 fw-bold"><FileText className="me-2" size={16} />Ghi chú về hiển thị trạng thái:</h6>
                             <Row>
-                              {usedBadges.full && usedBadges.before && usedBadges.during && usedBadges.after && (
-                                <Col md={6}>
-                                  <p className="mb-1"><strong>Trường hợp 1:</strong> <Badge bg="success" size="sm" className="modern-badge">Có mặt trước</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt trong</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt sau</Badge> (hoặc <Badge bg="warning" size="sm" className="modern-badge">Về trễ</Badge>) → Chỉ hiển thị <Badge bg="success" className="modern-badge">Đầy đủ</Badge></p>
-                                </Col>
-                              )}
+                              <Col md={6}>
+                                <p className="mb-1"><strong>Trường hợp 1:</strong> <Badge bg="success" size="sm" className="modern-badge">Có mặt trước</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt trong</Badge> → Chỉ hiển thị <Badge bg="danger" className="modern-badge">Thiếu Sau</Badge></p>
+                              </Col>
                               
-                              {usedBadges.full && usedBadges.late && usedBadges.during && usedBadges.after && (
-                                <Col md={6}>
-                                  <p className="mb-1"><strong>Trường hợp 2:</strong> <Badge bg="warning" size="sm" className="modern-badge">Đi trễ</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt trong</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt sau</Badge> → Hiển thị <Badge bg="success" className="modern-badge">Đầy đủ</Badge> và <Badge bg="warning" className="modern-badge">Đi trễ</Badge></p>
-                                </Col>
-                              )}
+                              <Col md={6}>
+                                <p className="mb-1"><strong>Trường hợp 2:</strong> <Badge bg="success" size="sm" className="modern-badge">Có mặt trước</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt sau</Badge> → Chỉ hiển thị <Badge bg="danger" className="modern-badge">Thiếu Trong</Badge></p>
+                              </Col>
                               
-                              {usedBadges.full && usedBadges.late && usedBadges.during && usedBadges.late_leave && (
-                                <Col md={6}>
-                                  <p className="mb-1"><strong>Trường hợp 3:</strong> <Badge bg="warning" size="sm" className="modern-badge">Đi trễ</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt trong</Badge> + <Badge bg="warning" size="sm" className="modern-badge">Về trễ</Badge> → Hiển thị <Badge bg="success" className="modern-badge">Đầy đủ</Badge> và <Badge bg="warning" className="modern-badge">Đi trễ</Badge></p>
-                                </Col>
-                              )}
+                              <Col md={6}>
+                                <p className="mb-1"><strong>Trường hợp 3:</strong> <Badge bg="warning" size="sm" className="modern-badge">Đi trễ</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt trong</Badge> → Hiển thị <Badge bg="danger" className="modern-badge">Thiếu Sau</Badge> + <Badge bg="warning" className="modern-badge">Đi trễ</Badge></p>
+                              </Col>
                               
-                              {usedBadges.full && (usedBadges.early || usedBadges.before) && usedBadges.during && usedBadges.after && (
-                                <Col md={6}>
-                                  <p className="mb-1"><strong>Trường hợp 4:</strong> <Badge bg="info" size="sm" className="modern-badge">Đi trước</Badge> (hoặc <Badge bg="success" size="sm" className="modern-badge">Có mặt trước</Badge>) + <Badge bg="success" size="sm" className="modern-badge">Có mặt trong</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt sau</Badge> → Chỉ hiển thị <Badge bg="success" className="modern-badge">Đầy đủ</Badge></p>
-                                </Col>
-                              )}
+                              <Col md={6}>
+                                <p className="mb-1"><strong>Trường hợp 4:</strong> <Badge bg="warning" size="sm" className="modern-badge">Đi trễ</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt sau</Badge> → Hiển thị <Badge bg="danger" className="modern-badge">Thiếu Trong</Badge> + <Badge bg="warning" className="modern-badge">Đi trễ</Badge></p>
+                              </Col>
+                              
+                              <Col md={6}>
+                                <p className="mb-1"><strong>Trường hợp 5:</strong> <Badge bg="success" size="sm" className="modern-badge">Có mặt trong</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt sau</Badge> → Chỉ hiển thị <Badge bg="danger" className="modern-badge">Thiếu Trước</Badge></p>
+                              </Col>
+                              
+                              <Col md={6}>
+                                <p className="mb-1"><strong>Trường hợp 6:</strong> <Badge bg="success" size="sm" className="modern-badge">Có mặt trước</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt trong</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt sau</Badge> → Chỉ hiển thị <Badge bg="success" className="modern-badge">Đầy đủ</Badge></p>
+                              </Col>
+                              
+                              <Col md={6}>
+                                <p className="mb-1"><strong>Trường hợp 7:</strong> <Badge bg="warning" size="sm" className="modern-badge">Đi trễ</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt trong</Badge> + <Badge bg="success" size="sm" className="modern-badge">Có mặt sau</Badge> → Hiển thị <Badge bg="success" className="modern-badge">Đầy đủ</Badge> + <Badge bg="warning" className="modern-badge">Đi trễ</Badge></p>
+                              </Col>
                               
                               {/* Thêm các trường hợp vắng có phép */}
                               {(usedBadges.absent_perm || usedBadges.absent_before_perm || usedBadges.absent_during_perm || usedBadges.absent_after_perm) && (
@@ -869,7 +922,7 @@ const SessionDetail = () => {
                                 </Col>
                               )}
                             </Row>
-                            <p className="mb-0 mt-2 small fst-italic">Các trạng thái không quan trọng như "Có mặt", "Đi trước", "Về trễ" sẽ không hiển thị khi đã có trạng thái "Đầy đủ". Các trạng thái vắng có phép sẽ hiển thị riêng biệt và không bị ảnh hưởng bởi logic "Đầy đủ".</p>
+                            <p className="mb-0 mt-2 small fst-italic">Hệ thống sẽ ưu tiên hiển thị các trạng thái thiếu điểm danh và đầy đủ trước các trạng thái riêng lẻ. Các trạng thái vắng có phép sẽ hiển thị riêng biệt và không bị ảnh hưởng bởi logic trên.</p>
                           </>
                         )}
                       </>
@@ -987,16 +1040,22 @@ const SessionDetail = () => {
                                   const lateRecord = student.attendanceHistory?.find(r => r.attendance_type === 'late') || 
                                                     (student.attendanceRecord.attendance_type === 'late' ? student.attendanceRecord : null);
                                   
-                                  // Trường hợp 1: Có mặt trước, trong, sau hoặc về trễ -> Đầy đủ
-                                  if (hasAllRequiredAttendances && 
-                                      ((hasBeforeAttendance && hasDuringAttendance && (hasAfterAttendance || hasLateLeaveAttendance)) ||
-                                       (hasEarlyAttendance && hasDuringAttendance && (hasAfterAttendance || hasLateLeaveAttendance)))) {
-                                    badges.push(<Badge key="full" bg="success" className="mb-1">Đầy đủ</Badge>);
+                                  // Kiểm tra các trường hợp thiếu điểm danh
+                                  const missingBefore = requiredAttendanceTypes.includes('before') && !hasBeforeAttendance && !hasEarlyAttendance;
+                                  const missingDuring = requiredAttendanceTypes.includes('during') && !hasDuringAttendance;
+                                  const missingAfter = requiredAttendanceTypes.includes('after') && !hasAfterAttendance && !hasLateLeaveAttendance;
+                                  
+                                  // Trường hợp 1: Trước - Trong -> Chỉ hiển thị Thiếu Sau
+                                  if (hasBeforeAttendance && hasDuringAttendance && !hasAfterAttendance && !hasLateLeaveAttendance && missingAfter) {
+                                    badges.push(<Badge key="missing_after" bg="danger" className="mb-1">Thiếu Sau</Badge>);
                                   }
-                                  // Trường hợp 2 & 3: Đi trễ, có mặt trong, có mặt sau -> Đầy đủ và Đi trễ
-                                  else if (hasAllRequiredAttendances && hasLateAttendance && hasDuringAttendance && 
-                                          (hasAfterAttendance || hasLateLeaveAttendance)) {
-                                    badges.push(<Badge key="full" bg="success" className="mb-1">Đầy đủ</Badge>);
+                                  // Trường hợp 2: Trước - Sau -> Chỉ hiển thị Thiếu Trong
+                                  else if (hasBeforeAttendance && hasAfterAttendance && !hasDuringAttendance && missingDuring) {
+                                    badges.push(<Badge key="missing_during" bg="danger" className="mb-1">Thiếu Trong</Badge>);
+                                  }
+                                  // Trường hợp 3: Đi trễ - Trong -> Chỉ hiển thị Thiếu Sau + Đi trễ
+                                  else if (hasLateAttendance && hasDuringAttendance && !hasAfterAttendance && !hasLateLeaveAttendance && missingAfter) {
+                                    badges.push(<Badge key="missing_after" bg="danger" className="mb-1">Thiếu Sau</Badge>);
                                     if (lateRecord) {
                                       badges.push(
                                         <Badge key="late" bg="warning" className="mb-1">
@@ -1005,30 +1064,35 @@ const SessionDetail = () => {
                                       );
                                     }
                                   }
-                                  // Trường hợp 4: Đi trước hoặc có mặt trước, có mặt trong, có mặt sau -> Đầy đủ
-                                  else if (hasAllRequiredAttendances && (hasEarlyAttendance || hasBeforeAttendance) && 
-                                          hasDuringAttendance && hasAfterAttendance) {
+                                  // Trường hợp 4: Đi trễ - Sau -> Chỉ hiển thị Thiếu Trong + Đi trễ
+                                  else if (hasLateAttendance && hasAfterAttendance && !hasDuringAttendance && missingDuring) {
+                                    badges.push(<Badge key="missing_during" bg="danger" className="mb-1">Thiếu Trong</Badge>);
+                                    if (lateRecord) {
+                                      badges.push(
+                                        <Badge key="late" bg="warning" className="mb-1">
+                                          Đi trễ {lateRecord.minutes_late} phút
+                                        </Badge>
+                                      );
+                                    }
+                                  }
+                                  // Trường hợp 5: Trong - Sau -> Chỉ hiển thị Thiếu Trước
+                                  else if (hasDuringAttendance && hasAfterAttendance && !hasBeforeAttendance && !hasEarlyAttendance && missingBefore) {
+                                    badges.push(<Badge key="missing_before" bg="danger" className="mb-1">Thiếu Trước</Badge>);
+                                  }
+                                  // Trường hợp 6: Trước - Trong - Sau -> Chỉ hiển thị Đầy đủ
+                                  else if (hasBeforeAttendance && hasDuringAttendance && (hasAfterAttendance || hasLateLeaveAttendance)) {
                                     badges.push(<Badge key="full" bg="success" className="mb-1">Đầy đủ</Badge>);
                                   }
-                                  // Trường hợp 3: Đi trễ + Có mặt trong + Về trễ -> Đầy đủ và Đi trễ
-                                  else if (hasLateAttendance && hasDuringAttendance && hasLateLeaveAttendance && lateRecord) {
-                                    console.log(`Case 3: Full attendance with late + during + late_leave`);
+                                  // Trường hợp 7: Đi trễ - Trong - Sau -> Chỉ hiển thị Đầy đủ + Đi trễ
+                                  else if (hasLateAttendance && hasDuringAttendance && (hasAfterAttendance || hasLateLeaveAttendance)) {
                                     badges.push(<Badge key="full" bg="success" className="mb-1">Đầy đủ</Badge>);
-                                    badges.push(
-                                      <Badge key="late" bg="warning" className="mb-1">
-                                        Đi trễ {lateRecord.minutes_late} phút
-                                      </Badge>
-                                    );
-                                  }
-                                  // Trường hợp 5: Có mặt trong, Có mặt sau, Đi trễ -> Đầy đủ và Đi trễ
-                                  else if (hasDuringAttendance && hasAfterAttendance && hasLateAttendance && lateRecord) {
-                                    console.log(`Case 5: Full attendance with late + during + after`);
-                                    badges.push(<Badge key="full" bg="success" className="mb-1">Đầy đủ</Badge>);
-                                    badges.push(
-                                      <Badge key="late" bg="warning" className="mb-1">
-                                        Đi trễ {lateRecord.minutes_late} phút
-                                      </Badge>
-                                    );
+                                    if (lateRecord) {
+                                      badges.push(
+                                        <Badge key="late" bg="warning" className="mb-1">
+                                          Đi trễ {lateRecord.minutes_late} phút
+                                        </Badge>
+                                      );
+                                    }
                                   }
                                   // Các trường hợp khác: hiển thị từng trạng thái riêng biệt
                                   else {
@@ -1100,7 +1164,7 @@ const SessionDetail = () => {
                                       {student.attendanceRecord.attendance_type === 'during' && 'Trong: '}
                                       {student.attendanceRecord.attendance_type === 'after' && 'Sau: '}
                                       {student.attendanceRecord.attendance_type === 'early' && 'Sớm: '}
-                                      {student.attendanceRecord.attendance_type === 'late' && 'Trễ: '}
+                                      {student.attendanceRecord.attendance_type === 'late' && 'Đi trễ: '}
                                       {student.attendanceRecord.attendance_type === 'late_leave' && 'Về trễ: '}
                                       {student.attendanceRecord.attendance_type === 'absent_perm' && 'Phép cả buổi: '}
                                       {student.attendanceRecord.attendance_type === 'absent_before_perm' && 'Phép trước: '}
@@ -1139,7 +1203,7 @@ const SessionDetail = () => {
                                       {attendanceType === 'during' && 'Trong: '}
                                       {attendanceType === 'after' && 'Sau: '}
                                       {attendanceType === 'early' && 'Sớm: '}
-                                      {attendanceType === 'late' && 'Trễ: '}
+                                      {attendanceType === 'late' && ' Đi trễ: '}
                                       {attendanceType === 'late_leave' && 'Về trễ: '}
                                       {attendanceType === 'absent_perm' && 'Phép cả buổi: '}
                                       {attendanceType === 'absent_before_perm' && 'Phép trước: '}

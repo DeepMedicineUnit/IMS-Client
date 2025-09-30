@@ -523,7 +523,8 @@ const SessionList = () => {
         <div className="calendar-controls">
           <div className="calendar-nav">
             <button className="calendar-nav-btn" onClick={() => setCurrentDate(new Date())}>
-              Hôm nay
+              <i className="fas fa-home"></i>
+              <span className="nav-text">Hôm nay</span>
             </button>
             <button className="calendar-nav-btn" onClick={() => navigateCalendar(-1)}>
               <i className="fas fa-chevron-left"></i>
@@ -544,19 +545,22 @@ const SessionList = () => {
               className={`view-btn ${calendarView === 'month' ? 'active' : ''}`}
               onClick={() => setCalendarView('month')}
             >
-              Tháng
+              <i className="fas fa-calendar-alt"></i>
+              <span className="view-text">Tháng</span>
             </button>
             <button
               className={`view-btn ${calendarView === 'week' ? 'active' : ''}`}
               onClick={() => setCalendarView('week')}
             >
-              Tuần
+              <i className="fas fa-calendar-week"></i>
+              <span className="view-text">Tuần</span>
             </button>
             <button
               className={`view-btn ${calendarView === 'day' ? 'active' : ''}`}
               onClick={() => setCalendarView('day')}
             >
-              Ngày
+              <i className="fas fa-calendar-day"></i>
+              <span className="view-text">Ngày</span>
             </button>
           </div>
         </div>
@@ -632,39 +636,40 @@ const SessionList = () => {
             </div>
             
             <div className="session-table-container">
-              <table className="session-table">
+              <div className="table-responsive-mobile">
+                <table className="session-table">
                 <thead>
                   <tr>
-                    <th>ID</th>
-                    <th>Tên buổi học</th>
-                    <th>Ngày</th>
-                    <th>Thời gian</th>
-                    <th>Địa điểm</th>
-                    <th>Lớp</th>
-                    <th>Số sinh viên</th>
-                    <th>Trạng thái</th>
-                    <th>Giám sát</th>
-                    <th>Hành động</th>
+                    <th className="mobile-essential">ID</th>
+                    <th className="mobile-essential">Tên buổi học</th>
+                    <th className="mobile-essential">Ngày</th>
+                    <th className="mobile-essential">Thời gian</th>
+                    <th className="mobile-essential">Địa điểm</th>
+                    <th className="mobile-essential">Lớp</th>
+                    <th className="mobile-essential">Số sinh viên</th>
+                    <th className="mobile-essential">Trạng thái</th>
+                    <th className="mobile-hide">Giám sát</th>
+                    <th className="mobile-essential">Hành động</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredSessions.map(session => (
                     <tr key={session.id}>
-                      <td><span className="session-id">{session.id}</span></td>
-                      <td><span className="session-title-cell">{session.title || session.name}</span></td>
-                      <td><span className="session-date">{formatDate(session.date)}</span></td>
-                      <td><span className="session-time">{session.start_time && session.end_time ? 
+                      <td className="mobile-essential"><span className="session-id">{session.id}</span></td>
+                      <td className="mobile-essential"><span className="session-title-cell">{session.title || session.name}</span></td>
+                      <td className="mobile-essential"><span className="session-date">{formatDate(session.date)}</span></td>
+                      <td className="mobile-essential"><span className="session-time">{session.start_time && session.end_time ? 
                           `${session.start_time} - ${session.end_time}` : 
                           session.time}</span></td>
-                      <td><span className="session-location">{session.location}</span></td>
-                      <td><span className="session-class">{session.class_names || '-'}</span></td>
-                      <td><span className="session-student-count">{session.student_count || session.studentCount || '-'}</span></td>
-                      <td>
+                      <td className="mobile-essential"><span className="session-location">{session.location}</span></td>
+                      <td className="mobile-essential"><span className="session-class">{session.class_names || '-'}</span></td>
+                       <td className="mobile-essential"><span className="session-student-count">{session.student_count || session.studentCount || '-'}</span></td>
+                      <td className="mobile-essential">
                         <span className={`status-badge ${session.calculatedStatus || session.status}`}>
                           {getStatusText(session.calculatedStatus || session.status)}
                         </span>
                       </td>
-                      <td>
+                      <td className="mobile-hide">
                         <div className="monitoring-icons">
                           {session.monitoring_options?.location?.enabled && (
                             <div className="monitoring-icon location" title="Theo dõi vị trí">
@@ -712,50 +717,61 @@ const SessionList = () => {
                           )}
                         </div>
                       </td>
-                      <td>
-                        <div className="action-buttons">
-                          <Link
-                            to={`/admin/sessions/${session.id}`}
-                            className="action-btn btn-outline-primary"
-                          >
-                            <i className="fas fa-eye"></i> Chi tiết
-                          </Link>
-                          
-                          <Link
-                            to={`/admin/sessions/${session.id}/edit`}
-                            className="action-btn btn-outline-warning"
-                          >
-                            <i className="fas fa-edit"></i> Sửa
-                          </Link>
+                       <td className="mobile-essential">
+                         <div className="action-buttons">
+                           <Link
+                             to={`/admin/sessions/${session.id}`}
+                             className="action-btn btn-outline-primary"
+                             title="Xem chi tiết buổi học"
+                           >
+                             <i className="fas fa-eye"></i>
+                             <span>Chi tiết</span>
+                           </Link>
+                           
+                           <Link
+                             to={`/admin/sessions/${session.id}/edit`}
+                             className="action-btn btn-outline-warning"
+                             title="Chỉnh sửa buổi học"
+                           >
+                             <i className="fas fa-edit"></i>
+                             <span>Sửa</span>
+                           </Link>
 
-                          {session.calculatedStatus !== 'cancelled' && session.calculatedStatus !== 'ended' && (
-                            <Link
-                              to={`/admin/sessions/${session.id}/qr-code`}
-                              className="action-btn btn-outline-success"
-                            >
-                              <i className="fas fa-qrcode"></i> QR
-                            </Link>
-                          )}
-                          
-                          <Link
-                            to={`/admin/sessions/${session.id}/history`}
-                            className="action-btn btn-outline-info"
-                          >
-                            <i className="fas fa-history"></i> Lịch sử
-                          </Link>
-                          
-                          <button
-                            className="action-btn btn-outline-danger"
-                            onClick={() => handleDeleteClick(session)}
-                          >
-                            <i className="fas fa-trash"></i> Xóa
-                          </button>
-                        </div>
-                      </td>
+                           {session.calculatedStatus !== 'cancelled' && session.calculatedStatus !== 'ended' && (
+                             <Link
+                               to={`/admin/sessions/${session.id}/qr-code`}
+                               className="action-btn btn-outline-success"
+                               title="Xem mã QR Code"
+                             >
+                               <i className="fas fa-qrcode"></i>
+                               <span>QR</span>
+                             </Link>
+                           )}
+                           
+                           <Link
+                             to={`/admin/sessions/${session.id}/history`}
+                             className="action-btn btn-outline-info"
+                             title="Xem lịch sử buổi học"
+                           >
+                             <i className="fas fa-history"></i>
+                             <span>Lịch sử</span>
+                           </Link>
+                           
+                           <button
+                             className="action-btn btn-outline-danger"
+                             onClick={() => handleDeleteClick(session)}
+                             title="Xóa buổi học"
+                           >
+                             <i className="fas fa-trash"></i>
+                             <span>Xóa</span>
+                           </button>
+                         </div>
+                       </td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
+                </table>
+              </div>
             </div>
           </div>
         </Tab>

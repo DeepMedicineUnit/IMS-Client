@@ -393,6 +393,7 @@ const MonitoringPage = () => {
           setIsAttended(attendanceResponse.data.data.attended);
             setAttendanceData(attendanceResponse.data.data);
             console.log('Attendance status:', attendanceResponse.data.data.attended);
+            console.log('Full attendance data:', JSON.stringify(attendanceResponse.data.data, null, 2));
           
           // Automatically start monitoring since the user is already attended
           if (attendanceResponse.data.data.attended) {
@@ -563,21 +564,21 @@ const MonitoringPage = () => {
     };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-refresh data every 30 seconds
+  // Auto-refresh data every 10 seconds
   useEffect(() => {
     if (session && isAttended) {
       // Start auto-refresh intervals
       sessionDataIntervalRef.current = setInterval(() => {
         fetchSessionDataSilently();
-      }, 30000); // 30 seconds
+      }, 10000); // 10 seconds
 
       attendanceDataIntervalRef.current = setInterval(() => {
         fetchAttendanceDataSilently();
-      }, 30000); // 30 seconds
+      }, 10000); // 10 seconds
 
       filesDataIntervalRef.current = setInterval(() => {
         fetchFilesDataSilently();
-      }, 30000); // 30 seconds
+      }, 10000); // 10 seconds
 
       // Clean up intervals on unmount
       return () => {
@@ -619,7 +620,7 @@ const MonitoringPage = () => {
   // Start monitoring
   const startMonitoring = async () => {
     if (!isAttended) {
-      toast.error('Bạn chưa điểm danh cho buổi học này');
+
       return;
     }
     
@@ -1156,7 +1157,7 @@ const MonitoringPage = () => {
             <i className="fas fa-exclamation-triangle mt-1 me-2"></i>
             <div>
               <h6 className="fw-bold mb-2">Bạn chưa điểm danh cho buổi học này</h6>
-              <p className="mb-0">Vui lòng quét mã QR để điểm danh trước khi tham gia buổi học.</p>
+              <p className="mb-0">Vui lòng quét mã QR hoặc chọn nút "Điểm danh" để điểm danh trước khi tham gia buổi học.</p>
             </div>
           </div>
         </div>
@@ -1219,12 +1220,64 @@ const MonitoringPage = () => {
                         {/* Khung giờ hiện tại */}
                         <div className="current-time-section mb-3">
                           <div className="d-flex align-items-center justify-content-between">
-                            <span className="fw-bold text-success">Khung giờ hiện tại:</span>
+                            <span className="fw-bold text-success">Khung giờ điểm danh hiện tại:</span>
                             <span className="badge bg-success">
                               {(() => {
                                 const now = new Date();
-                                const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-                                return currentTime;
+                                const sessionDate = new Date(session.date);
+                                const [startHours, startMinutes] = session.start_time.split(':').map(Number);
+                                const [endHours, endMinutes] = session.end_time.split(':').map(Number);
+                                
+                                const sessionStartTime = new Date(sessionDate);
+                                sessionStartTime.setHours(startHours, startMinutes, 0, 0);
+                                
+                                const sessionEndTime = new Date(sessionDate);
+                                sessionEndTime.setHours(endHours, endMinutes, 0, 0);
+                                if (sessionEndTime < sessionStartTime) {
+                                  sessionEndTime.setDate(sessionEndTime.getDate() + 1);
+                                }
+                                
+                                // Before session window
+                                let beforeStart = null;
+                                let beforeEnd = null;
+                                if (session.monitoring_options?.attendance?.before_session?.enabled) {
+                                  beforeStart = new Date(sessionStartTime);
+                                  beforeStart.setMinutes(beforeStart.getMinutes() - session.monitoring_options.attendance.before_session.minutes_before);
+                                  beforeEnd = new Date(sessionStartTime);
+                                }
+                                
+                                // During session window
+                                let duringStart = null;
+                                let duringEnd = null;
+                                if (session.monitoring_options?.attendance?.during_session?.enabled) {
+                                  duringStart = new Date(sessionStartTime);
+                                  duringStart.setMinutes(duringStart.getMinutes() + session.monitoring_options.attendance.during_session.minutes_after_start);
+                                  duringEnd = new Date(sessionEndTime);
+                                  duringEnd.setMinutes(duringEnd.getMinutes() - session.monitoring_options.attendance.during_session.minutes_before_end);
+                                }
+                                
+                                // After session window
+                                let afterStart = null;
+                                let afterEnd = null;
+                                if (session.monitoring_options?.attendance?.after_session?.enabled) {
+                                  afterStart = new Date(sessionEndTime);
+                                  afterStart.setMinutes(afterStart.getMinutes() + session.monitoring_options.attendance.after_session.minutes_after);
+                                  afterEnd = new Date(afterStart);
+                                  afterEnd.setMinutes(afterEnd.getMinutes() + session.monitoring_options.attendance.after_session.duration);
+                                }
+                                
+                                // Determine current window
+                                if (beforeStart && beforeEnd && now >= beforeStart && now <= beforeEnd) {
+                                  return "Trước buổi học";
+                                } else if (duringStart && duringEnd && now >= duringStart && now <= duringEnd) {
+                                  return "Trong buổi học";
+                                } else if (afterStart && afterEnd && now >= afterStart && now <= afterEnd) {
+                                  return "Sau buổi học";
+                                } else if (now >= sessionStartTime && now < duringStart) {
+                                  return "Đi trễ";
+                                } else {
+                                  return "Ngoài khung giờ";
+                                }
                               })()}
                             </span>
                           </div>
@@ -1248,16 +1301,11 @@ const MonitoringPage = () => {
                                     })()}
                                   </span>
                                 </div>
-                                <div className="attendance-status">
-                                  {attendanceData?.attendance_type === 'before' ? (
-                                    <i className="fas fa-check-circle text-success"></i>
-                                  ) : (
-                                    <i className="fas fa-times-circle text-muted"></i>
-                                  )}
-                                </div>
                               </div>
                             </div>
                           )}
+                          
+
                           
                           {session.monitoring_options?.attendance?.during_session?.enabled && (
                             <div className="attendance-window mb-2">
@@ -1284,9 +1332,6 @@ const MonitoringPage = () => {
                                     })()}
                                   </span>
                                 </div>
-                                <div className="attendance-status">
-                                  <i className="fas fa-check-circle text-success"></i>
-                                </div>
                               </div>
                             </div>
                           )}
@@ -1310,9 +1355,6 @@ const MonitoringPage = () => {
                                     })()}
                                   </span>
                                 </div>
-                                <div className="attendance-status">
-                                  <i className="fas fa-times-circle text-muted"></i>
-                                </div>
                               </div>
                             </div>
                           )}
@@ -1325,8 +1367,7 @@ const MonitoringPage = () => {
                   <div className="info-section mb-4">
                     <h6 className="fw-bold text-primary mb-3">
                       <i className="fas fa-users me-2"></i>
-                      Danh sách sinh viên trong lớp
-                      {session.class_students ? ` (${session.class_students.length})` : ''}
+                      Danh sách {session.class_students ? ` (${session.class_students.length})` : ''} sinh viên trong lớp
                     </h6>
                     {(() => {
                       console.log('Render check - session.class_students:', session.class_students);

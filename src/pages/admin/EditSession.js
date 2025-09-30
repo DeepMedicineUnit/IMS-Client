@@ -1912,14 +1912,14 @@ const EditSession = () => {
                                         />
                                       </InputGroup>
                                       <Form.Text className="text-muted">
-                                        Mặc định: 30 phút
+                                        Mặc định: 60 phút
                                       </Form.Text>
                                     </Form.Group>
                                   </Col>
                                 </Row>
                                 <Alert variant="info" className="mb-0">
                                   <i className="fas fa-info-circle me-2"></i>
-                                  <small>Ví dụ: Nếu giờ kết thúc buổi học là 19:00, cấu hình trên sẽ cho phép điểm danh từ 19:00 - 19:30</small>
+                                  <small>Ví dụ: Nếu giờ kết thúc buổi học là 19:00, cấu hình trên sẽ cho phép điểm danh từ 19:00 - 20:00</small>
                                 </Alert>
                               </Card.Body>
                             </Card>

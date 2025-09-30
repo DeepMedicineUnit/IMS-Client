@@ -2,6 +2,7 @@ import React from 'react';
 import { Card, Button, ListGroup, Badge } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
+import '../../src/styles/dashboard.css';
 
 // Component to display statistics lists with consistent styling
 const StatisticsList = ({ 
@@ -19,116 +20,119 @@ const StatisticsList = ({
   // Default renderer functions for different types of data
   const defaultRenderers = {
     late: (item) => (
-      <ListGroup.Item key={`late-${item.id}-${item.session_id}`} className="d-flex justify-content-between align-items-center py-3">
-        <div>
-          <h6 className="mb-1">{item.full_name}</h6>
-          <div className="text-muted small">
-            <span className="me-3">
-              <i className="fas fa-calendar-day me-1"></i> {item.session_title || 'Buổi học'}
-            </span>
-            {item.minutes_late && (
-              <Badge bg="warning" text="dark">Trễ {Math.round(item.minutes_late)} phút</Badge>
-            )}
+      <div key={`late-${item.id}-${item.session_id}`} className="modern-list-item">
+        <div className="d-flex align-items-center">
+          <div className="modern-list-avatar bg-warning">
+            <i className="fas fa-user-clock"></i>
+          </div>
+          <div className="modern-list-content">
+            <h6 className="modern-list-title">{item.full_name}</h6>
+            <div className="modern-list-meta">
+              <span className="modern-list-meta-item">
+                <i className="fas fa-calendar-day me-1"></i>
+                {item.session_title || 'Buổi học'}
+              </span>
+              {item.minutes_late && (
+                <span className="modern-badge modern-badge-warning">
+                  Trễ {Math.round(item.minutes_late)} phút
+                </span>
+              )}
+            </div>
           </div>
         </div>
-        <Button 
-          as={Link} 
-          to={`/admin/sessions/${item.session_id}/students/${item.id}`} 
-          variant="outline-primary" 
-          size="sm"
-        >
-          Chi tiết
-        </Button>
-      </ListGroup.Item>
+      </div>
     ),
     
     absent: (item) => (
-      <ListGroup.Item key={`absent-${item.id}-${item.session_id}`} className="d-flex justify-content-between align-items-center py-3">
-        <div>
-          <h6 className="mb-1">{item.full_name}</h6>
-          <div className="text-muted small">
-            <span className="me-3">
-              <i className="fas fa-calendar-day me-1"></i> {item.session_title || 'Buổi học'}
-            </span>
-            {item.session_date && (
-              <span className="me-3">
-                <i className="fas fa-clock me-1"></i> {formatDate(item.session_date)}
+      <div key={`absent-${item.id}-${item.session_id}`} className="modern-list-item">
+        <div className="d-flex align-items-center">
+          <div className="modern-list-avatar bg-danger">
+            <i className="fas fa-user-slash"></i>
+          </div>
+          <div className="modern-list-content">
+            <h6 className="modern-list-title">{item.full_name}</h6>
+            <div className="modern-list-meta">
+              <span className="modern-list-meta-item">
+                <i className="fas fa-calendar-day me-1"></i>
+                {item.session_title || 'Buổi học'}
               </span>
-            )}
-            <Badge bg="danger">Vắng mặt</Badge>
+              {item.session_date && (
+                <span className="modern-list-meta-item">
+                  <i className="fas fa-clock me-1"></i>
+                  {formatDate(item.session_date)}
+                </span>
+              )}
+              <span className="modern-badge modern-badge-danger">Vắng mặt</span>
+            </div>
           </div>
         </div>
-        <Button 
-          as={Link} 
-          to={`/admin/sessions/${item.session_id}/students/${item.id}`} 
-          variant="outline-primary" 
-          size="sm"
-        >
-          Chi tiết
-        </Button>
-      </ListGroup.Item>
+      </div>
     ),
     
     missingTimeSlot: (item) => (
-      <ListGroup.Item key={`missing-${item.id}-${item.session_id}`} className="d-flex justify-content-between align-items-center py-3">
-        <div>
-          <h6 className="mb-1">{item.full_name}</h6>
-          <div className="text-muted small">
-            <span className="me-3">
-              <i className="fas fa-calendar-day me-1"></i> {item.session_title || 'Buổi học'}
-            </span>
-            <Badge bg="warning" text="dark">
-              {!item.check_in_time ? 'Thiếu giờ vào' : !item.check_out_time ? 'Thiếu giờ ra' : 'Lỗi điểm danh'}
-            </Badge>
+      <div key={`missing-${item.id}-${item.session_id}`} className="modern-list-item">
+        <div className="d-flex align-items-center">
+          <div className="modern-list-avatar bg-warning">
+            <i className="fas fa-exclamation-triangle"></i>
+          </div>
+          <div className="modern-list-content">
+            <h6 className="modern-list-title">{item.full_name}</h6>
+            <div className="modern-list-meta">
+              <span className="modern-list-meta-item">
+                <i className="fas fa-calendar-day me-1"></i>
+                {item.session_title || 'Buổi học'}
+              </span>
+              <span className="modern-badge modern-badge-warning">
+                {item.missing_type || 'Thiếu khung giờ điểm danh'}
+              </span>
+            </div>
           </div>
         </div>
-        <Button 
-          as={Link} 
-          to={`/admin/sessions/${item.session_id}/students/${item.id}`} 
-          variant="outline-primary" 
-          size="sm"
-        >
-          Chi tiết
-        </Button>
-      </ListGroup.Item>
+      </div>
     ),
     
     multipleLate: (item) => (
-      <ListGroup.Item key={`multiple-late-${item.id}`} className="d-flex justify-content-between align-items-center py-3">
-        <div>
-          <h6 className="mb-1">{item.full_name}</h6>
-          <div className="text-muted small">
-            <Badge bg="danger">Đi trễ {item.late_count} lần</Badge>
+      <div key={`multiple-late-${item.id}`} className="modern-list-item">
+        <div className="d-flex align-items-center">
+          <div className="modern-list-avatar bg-danger">
+            <i className="fas fa-user-clock"></i>
+          </div>
+          <div className="modern-list-content">
+            <h6 className="modern-list-title">{item.full_name}</h6>
+            <div className="modern-list-meta">
+              <span className="modern-badge modern-badge-danger">
+                Đi trễ {item.late_count} lần
+              </span>
+            </div>
           </div>
         </div>
-        <Button 
-          as={Link} 
-          to={`/admin/students/${item.id}`} 
-          variant="outline-primary" 
-          size="sm"
-        >
-          Chi tiết
-        </Button>
-      </ListGroup.Item>
+      </div>
     ),
     
     incompleteBadge: (item) => (
-      <ListGroup.Item key={`incomplete-${item.id}`} className="d-flex justify-content-between align-items-center py-3">
-        <div>
-          <h6 className="mb-1">{item.full_name}</h6>
-          <div className="text-muted small">
-            <Badge bg="danger">Vắng {item.missed_sessions} buổi</Badge>
+      <div key={`absence-${item.id}-${item.request_id}`} className="modern-list-item">
+        <div className="d-flex align-items-center">
+          <div className="modern-list-avatar bg-info">
+            <i className="fas fa-id-badge"></i>
+          </div>
+          <div className="modern-list-content">
+            <h6 className="modern-list-title">{item.full_name}</h6>
+            <div className="modern-list-meta">
+              <span className="modern-list-meta-item">
+                <i className="fas fa-calendar-day me-1"></i>
+                {item.session_title || 'Buổi học'}
+              </span>
+              {item.session_date && (
+                <span className="modern-list-meta-item">
+                  <i className="fas fa-clock me-1"></i>
+                  {formatDate(item.session_date)}
+                </span>
+              )}
+              <span className="modern-badge modern-badge-info">Chờ duyệt</span>
+            </div>
           </div>
         </div>
-        <Button 
-          as={Link} 
-          to={`/admin/students/${item.id}`} 
-          variant="outline-primary" 
-          size="sm"
-        >
-          Chi tiết
-        </Button>
-      </ListGroup.Item>
+      </div>
     ),
   };
   
@@ -148,48 +152,49 @@ const StatisticsList = ({
   const itemRenderer = renderItem || (type && defaultRenderers[type]) || defaultRenderers.late;
   
   return (
-    <Card className="h-100 shadow-sm">
-      <Card.Header className={`bg-${bgColor} text-white d-flex justify-content-between align-items-center`}>
-        <h5 className="mb-0">
+    <div className="modern-stats-list">
+      <div className="modern-stats-list-header">
+        <div className="modern-stats-list-title">
           {icon && <i className={`fas ${icon} me-2`}></i>}
           {title}
-        </h5>
-        {detailPath && (
-          <Button 
-            as={Link} 
-            to={detailPath} 
-            variant="light" 
-            size="sm"
-          >
-            Xem tất cả
-          </Button>
+        </div>
+        {data && data.length > 0 && (
+          <div className="modern-stats-list-count">
+            {data.length}
+          </div>
         )}
-      </Card.Header>
-      <Card.Body className="p-0">
+      </div>
+      
+      <div className="modern-stats-list-body">
         {data && data.length > 0 ? (
-          <ListGroup variant="flush">
+          <div className="modern-stats-list-content">
             {data.slice(0, maxItems).map(item => itemRenderer(item))}
             {data.length > maxItems && (
-              <ListGroup.Item className="text-center">
+              <div className="modern-stats-list-footer">
                 <Button 
                   as={Link} 
                   to={detailPath} 
                   variant="link" 
-                  size="sm"
+                  className="modern-stats-list-more-btn"
                 >
+                  <i className="fas fa-arrow-right me-1"></i>
                   Xem thêm {data.length - maxItems} mục khác
                 </Button>
-              </ListGroup.Item>
+              </div>
             )}
-          </ListGroup>
+          </div>
         ) : (
-          <div className="text-center text-muted p-4">
-            <i className="fas fa-info-circle fa-2x mb-2"></i>
-            <p>{emptyMessage}</p>
+          <div className="modern-stats-list-empty">
+            <div className="modern-stats-list-empty-icon">
+              <i className="fas fa-info-circle"></i>
+            </div>
+            <div className="modern-stats-list-empty-text">
+              {emptyMessage}
+            </div>
           </div>
         )}
-      </Card.Body>
-    </Card>
+      </div>
+    </div>
   );
 };
 

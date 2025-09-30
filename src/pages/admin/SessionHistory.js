@@ -267,6 +267,25 @@ const SessionHistory = () => {
           });
         }
         
+        // Check for missing attendance types based on session requirements
+        // This is a simplified check - in a real scenario, you'd need session monitoring options
+        const hasBeforeAttendance = usedAttendanceTypes.has('before') || usedAttendanceTypes.has('early');
+        const hasDuringAttendance = usedAttendanceTypes.has('during');
+        const hasAfterAttendance = usedAttendanceTypes.has('after') || usedAttendanceTypes.has('late_leave');
+        
+        // Add missing attendance types if applicable
+        // Note: This is a simplified implementation. In practice, you'd need to check
+        // the session's monitoring_options to determine which attendance types are required
+        if (hasBeforeAttendance && hasDuringAttendance && !hasAfterAttendance) {
+          usedAttendanceTypes.add('missing_after');
+        }
+        if (hasBeforeAttendance && hasAfterAttendance && !hasDuringAttendance) {
+          usedAttendanceTypes.add('missing_during');
+        }
+        if (hasDuringAttendance && hasAfterAttendance && !hasBeforeAttendance) {
+          usedAttendanceTypes.add('missing_before');
+        }
+        
         // If no records at all, mark as "absent"
         if (usedAttendanceTypes.size === 0 && !selectedStudent.attendance) {
           usedAttendanceTypes.add('absent');
@@ -299,6 +318,29 @@ const SessionHistory = () => {
       
       if (usedAttendanceTypes.has('absent')) 
         explanations.push({ badge: <Badge bg="danger">Vắng mặt</Badge>, text: "Sinh viên chưa điểm danh" });
+      
+      // Thêm các badge thiếu điểm danh
+      if (usedAttendanceTypes.has('missing_before')) 
+        explanations.push({ badge: <Badge bg="danger">Thiếu Trước</Badge>, text: "Sinh viên thiếu điểm danh trước buổi học" });
+      
+      if (usedAttendanceTypes.has('missing_during')) 
+        explanations.push({ badge: <Badge bg="danger">Thiếu Trong</Badge>, text: "Sinh viên thiếu điểm danh trong buổi học" });
+      
+      if (usedAttendanceTypes.has('missing_after')) 
+        explanations.push({ badge: <Badge bg="danger">Thiếu Sau</Badge>, text: "Sinh viên thiếu điểm danh sau buổi học" });
+      
+      // Thêm các badge vắng có phép
+      if (usedAttendanceTypes.has('absent_perm')) 
+        explanations.push({ badge: <Badge bg="danger">Phép cả buổi</Badge>, text: "Sinh viên vắng cả buổi học có phép" });
+      
+      if (usedAttendanceTypes.has('absent_before_perm')) 
+        explanations.push({ badge: <Badge bg="info">Phép trước buổi</Badge>, text: "Sinh viên vắng điểm danh trước buổi học có phép" });
+      
+      if (usedAttendanceTypes.has('absent_during_perm')) 
+        explanations.push({ badge: <Badge bg="warning">Phép trong buổi</Badge>, text: "Sinh viên vắng điểm danh trong buổi học có phép" });
+      
+      if (usedAttendanceTypes.has('absent_after_perm')) 
+        explanations.push({ badge: <Badge bg="secondary">Phép sau buổi</Badge>, text: "Sinh viên vắng điểm danh sau buổi học có phép" });
       
       // Function to chunk the explanations into columns
       const chunkExplanations = (arr, size) => {
@@ -376,6 +418,12 @@ const SessionHistory = () => {
           return <Badge bg="warning">Đi trễ {record.minutes_late || ''} phút</Badge>;
         case 'late_leave':
           return <Badge bg="warning">Về trễ {record.minutes_late || ''} phút</Badge>;
+        case 'missing_before':
+          return <Badge bg="danger">Thiếu Trước</Badge>;
+        case 'missing_during':
+          return <Badge bg="danger">Thiếu Trong</Badge>;
+        case 'missing_after':
+          return <Badge bg="danger">Thiếu Sau</Badge>;
         case 'absent_perm':
           return <Badge bg="danger">Phép cả buổi</Badge>;
         case 'absent_before_perm':
@@ -554,12 +602,12 @@ const SessionHistory = () => {
         {allImages.map((item, index) => (
           <div key={index} className="webcam-item" onClick={() => handleWebcamClick(item)}>
             <div className="webcam-thumbnail">
-              <Image 
+              <img 
                 src={item.is_profile ? 
                   (item.data_path ? `/api${item.data_path.startsWith('/') ? '' : '/'}${item.data_path.startsWith('/uploads/') ? item.data_path : `/uploads/${item.data_path.split('/').pop()}`}` : '/api/uploads/placeholder.jpg') : 
                   `/api/monitoring/data/${id}/${selectedStudent.id}/webcam?image=${item.id}`
                 } 
-                thumbnail 
+                alt={`Webcam image ${index + 1}`}
                 style={item.is_profile ? { border: '3px solid #28a745' } : {}}
                 onError={(e) => {
                   // Log error with source information
@@ -598,6 +646,13 @@ const SessionHistory = () => {
                 {item.attendance_type === 'early' && <span className="badge bg-info ms-2">Điểm danh sớm {item.minutes_early} phút</span>}
                 {item.attendance_type === 'late' && <span className="badge bg-warning ms-2">Điểm danh trễ {item.minutes_late} phút</span>}
                 {item.attendance_type === 'late_leave' && <span className="badge bg-warning ms-2">Điểm danh về trễ {item.minutes_late} phút</span>}
+                {item.attendance_type === 'missing_before' && <span className="badge bg-danger ms-2">Thiếu điểm danh trước</span>}
+                {item.attendance_type === 'missing_during' && <span className="badge bg-danger ms-2">Thiếu điểm danh trong</span>}
+                {item.attendance_type === 'missing_after' && <span className="badge bg-danger ms-2">Thiếu điểm danh sau</span>}
+                {item.attendance_type === 'absent_perm' && <span className="badge bg-danger ms-2">Phép cả buổi</span>}
+                {item.attendance_type === 'absent_before_perm' && <span className="badge bg-info ms-2">Phép trước buổi</span>}
+                {item.attendance_type === 'absent_during_perm' && <span className="badge bg-warning ms-2">Phép trong buổi</span>}
+                {item.attendance_type === 'absent_after_perm' && <span className="badge bg-secondary ms-2">Phép sau buổi</span>}
                 {!item.attendance_type && <span className="badge bg-success ms-2">Có mặt</span>}
               </>
             </div>
@@ -607,24 +662,57 @@ const SessionHistory = () => {
         <style jsx="true">{`
           .webcam-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
             gap: 15px;
           }
           .webcam-item {
             cursor: pointer;
             transition: transform 0.2s;
+            display: flex;
+            flex-direction: column;
           }
           .webcam-item:hover {
             transform: scale(1.05);
           }
+          .webcam-thumbnail {
+            position: relative;
+            width: 100%;
+            aspect-ratio: auto; /* Let the image determine its own aspect ratio */
+            overflow: hidden;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 120px; /* Minimum height to prevent too small images */
+          }
+          .webcam-thumbnail img {
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+            object-fit: contain; /* Show full image without cropping */
+            border-radius: 8px;
+          }
           .webcam-info {
             text-align: center;
-            margin-top: 5px;
+            margin-top: 8px;
+            padding: 0 4px;
+          }
+          .webcam-info small {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 0.75rem;
+            color: #6c757d;
+          }
+          .webcam-info .badge {
+            font-size: 0.7rem;
+            padding: 0.25em 0.5em;
           }
           .image-load-error {
             position: relative;
             background-color: #f8d7da;
-            border-radius: 5px;
+            border-radius: 8px;
             overflow: hidden;
           }
           .image-load-error::after {
@@ -634,9 +722,44 @@ const SessionHistory = () => {
             right: 5px;
             font-size: 16px;
             color: #721c24;
+            z-index: 1;
           }
           img.image-load-error {
             border: 1px solid #f5c6cb !important;
+          }
+          
+          /* Responsive adjustments */
+          @media (max-width: 768px) {
+            .webcam-grid {
+              grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+              gap: 10px;
+            }
+            .webcam-thumbnail {
+              padding-bottom: 75%; /* Keep 4:3 ratio on mobile */
+            }
+          }
+          
+          @media (max-width: 480px) {
+            .webcam-grid {
+              grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+              gap: 8px;
+            }
+          }
+          
+          /* Modal image styles */
+          .modal-image-container {
+            max-width: 100%;
+            margin: 0 auto;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+          }
+          .modal-image {
+            width: 100%;
+            height: auto;
+            max-height: 70vh;
+            object-fit: contain; /* Show full image without cropping */
+            border-radius: 12px;
           }
         `}</style>
       </div>
@@ -1102,39 +1225,42 @@ const SessionHistory = () => {
         <Modal.Body className="text-center">
           {selectedImage && (
             <>
-              <Image 
-                src={selectedImage.is_profile ? 
-                  (selectedImage.data_path ? `/api${selectedImage.data_path.startsWith('/') ? '' : '/'}${selectedImage.data_path.startsWith('/uploads/') ? selectedImage.data_path : `/uploads/${selectedImage.data_path.split('/').pop()}`}` : '/api/uploads/placeholder.jpg') : 
-                  `/api/monitoring/data/${id}/${selectedStudent.id}/webcam?image=${selectedImage.id}`
-                }
-                fluid 
-                onError={(e) => {
-                  // Log error with source information
-                  console.error(`Error loading image in modal: ${e.target.src}`, {
-                    imageId: selectedImage.id,
-                    isProfile: selectedImage.is_profile,
-                    dataPath: selectedImage.data_path,
-                    sessionId: id,
-                    studentId: selectedStudent.id
-                  });
-                  
-                  // Try to load placeholder image from server
-                  e.target.src = '/api/uploads/placeholder.jpg';
-                  
-                  // Add error class for styling
-                  e.target.classList.add('image-load-error');
-                  
-                  // Add onerror handler to placeholder image in case that fails too
-                  e.target.onerror = () => {
-                    // If placeholder also fails, use data URI for a simple colored box
-                    e.target.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMjAwIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2RkZGRkZCI+PC9yZWN0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZmlsbD0iIzk5OTk5OSI+S2jDtG5nIHRo4buDIHThuqNpIGjDrG5oIOG6o25oPC90ZXh0Pjwvc3ZnPg==';
-                    e.target.style.opacity = '0.7';
-                    e.target.onerror = null; // Remove this handler to prevent infinite loop
-                  };
-                }}
-              />
+              <div className="modal-image-container">
+                <img 
+                  src={selectedImage.is_profile ? 
+                    (selectedImage.data_path ? `/api${selectedImage.data_path.startsWith('/') ? '' : '/'}${selectedImage.data_path.startsWith('/uploads/') ? selectedImage.data_path : `/uploads/${selectedImage.data_path.split('/').pop()}`}` : '/api/uploads/placeholder.jpg') : 
+                    `/api/monitoring/data/${id}/${selectedStudent.id}/webcam?image=${selectedImage.id}`
+                  }
+                  alt="Webcam image"
+                  className="modal-image"
+                  onError={(e) => {
+                    // Log error with source information
+                    console.error(`Error loading image in modal: ${e.target.src}`, {
+                      imageId: selectedImage.id,
+                      isProfile: selectedImage.is_profile,
+                      dataPath: selectedImage.data_path,
+                      sessionId: id,
+                      studentId: selectedStudent.id
+                    });
+                    
+                    // Try to load placeholder image from server
+                    e.target.src = '/api/uploads/placeholder.jpg';
+                    
+                    // Add error class for styling
+                    e.target.classList.add('image-load-error');
+                    
+                    // Add onerror handler to placeholder image in case that fails too
+                    e.target.onerror = () => {
+                      // If placeholder also fails, use data URI for a simple colored box
+                      e.target.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMjAwIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2RkZGRkZCI+PC9yZWN0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZmlsbD0iIzk5OTk5OSI+S2jDtG5nIHRo4buDIHThuqNpIGjDrG5oIOG6o25oPC90ZXh0Pjwvc3ZnPg==';
+                      e.target.style.opacity = '0.7';
+                      e.target.onerror = null; // Remove this handler to prevent infinite loop
+                    };
+                  }}
+                />
+              </div>
               <div className="mt-3">
-              <h3><Badge bg="success">Ảnh điểm danh</Badge></h3>
+                <h3><Badge bg="success">Ảnh điểm danh</Badge></h3>
                 <p><strong>Thời gian:</strong> {formatDateTime(selectedImage.created_at)}</p>
                 <div className="mt-2">
                   <p>
@@ -1145,6 +1271,13 @@ const SessionHistory = () => {
                     {selectedImage.attendance_type === 'early' && <Badge bg="info">Sớm {selectedImage.minutes_early} phút</Badge>}
                     {selectedImage.attendance_type === 'late' && <Badge bg="warning">Trễ {selectedImage.minutes_late} phút</Badge>}
                     {selectedImage.attendance_type === 'late_leave' && <Badge bg="warning">Về trễ {selectedImage.minutes_late} phút</Badge>}
+                    {selectedImage.attendance_type === 'missing_before' && <Badge bg="danger">Thiếu điểm danh trước</Badge>}
+                    {selectedImage.attendance_type === 'missing_during' && <Badge bg="danger">Thiếu điểm danh trong</Badge>}
+                    {selectedImage.attendance_type === 'missing_after' && <Badge bg="danger">Thiếu điểm danh sau</Badge>}
+                    {selectedImage.attendance_type === 'absent_perm' && <Badge bg="danger">Phép cả buổi</Badge>}
+                    {selectedImage.attendance_type === 'absent_before_perm' && <Badge bg="info">Phép trước buổi</Badge>}
+                    {selectedImage.attendance_type === 'absent_during_perm' && <Badge bg="warning">Phép trong buổi</Badge>}
+                    {selectedImage.attendance_type === 'absent_after_perm' && <Badge bg="secondary">Phép sau buổi</Badge>}
                     {!selectedImage.attendance_type && <Badge bg="success">Có mặt</Badge>}
                   </p>
                   {(selectedImage.attendance_type === 'early' || selectedImage.attendance_type === 'late' || selectedImage.attendance_type === 'late_leave') && (
@@ -1159,37 +1292,38 @@ const SessionHistory = () => {
                     className="btn-modern" 
                     style={{ backgroundColor: '#256176', padding: '6px 12px', fontSize: '0.875rem' }}
                     onClick={async () => {
-                    try {
-                      // Tạo URL đầy đủ - sử dụng API endpoint
-                      const imageUrl = selectedImage.is_profile ? 
-                        (selectedImage.data_path ? `/api${selectedImage.data_path.startsWith('/') ? '' : '/'}${selectedImage.data_path.startsWith('/uploads/') ? selectedImage.data_path : `/uploads/${selectedImage.data_path.split('/').pop()}`}` : '/api/uploads/placeholder.jpg') : 
-                        `/api/monitoring/data/${id}/${selectedStudent.id}/webcam?image=${selectedImage.id}`;
-                      const token = localStorage.getItem('token');
-                      
-                      // Sử dụng fetch với token trong header để lấy hình ảnh
-                      const response = await fetch(imageUrl, {
-                        headers: {
-                          'x-auth-token': token
+                      try {
+                        // Tạo URL đầy đủ - sử dụng API endpoint
+                        const imageUrl = selectedImage.is_profile ? 
+                          (selectedImage.data_path ? `/api${selectedImage.data_path.startsWith('/') ? '' : '/'}${selectedImage.data_path.startsWith('/uploads/') ? selectedImage.data_path : `/uploads/${selectedImage.data_path.split('/').pop()}`}` : '/api/uploads/placeholder.jpg') : 
+                          `/api/monitoring/data/${id}/${selectedStudent.id}/webcam?image=${selectedImage.id}`;
+                        const token = localStorage.getItem('token');
+                        
+                        // Sử dụng fetch với token trong header để lấy hình ảnh
+                        const response = await fetch(imageUrl, {
+                          headers: {
+                            'x-auth-token': token
+                          }
+                        });
+                        
+                        if (!response.ok) {
+                          throw new Error('Không thể tải hình ảnh');
                         }
-                      });
-                      
-                      if (!response.ok) {
-                        throw new Error('Không thể tải hình ảnh');
+                        
+                        // Chuyển đổi response thành blob
+                        const blob = await response.blob();
+                        
+                        // Tạo URL cho blob
+                        const blobUrl = URL.createObjectURL(blob);
+                        
+                        // Mở URL trong tab mới
+                        window.open(blobUrl, '_blank');
+                      } catch (error) {
+                        console.error('Lỗi khi tải hình ảnh:', error);
+                        toast.error('Không thể tải hình ảnh. Vui lòng thử lại sau.');
                       }
-                      
-                      // Chuyển đổi response thành blob
-                      const blob = await response.blob();
-                      
-                      // Tạo URL cho blob
-                      const blobUrl = URL.createObjectURL(blob);
-                      
-                      // Mở URL trong tab mới
-                      window.open(blobUrl, '_blank');
-                    } catch (error) {
-                      console.error('Lỗi khi tải hình ảnh:', error);
-                      toast.error('Không thể tải hình ảnh. Vui lòng thử lại sau.');
-                    }
-                  }}>
+                    }}
+                  >
                     <ExternalLink size={14} className="me-1" />
                     Xem ảnh đầy đủ
                   </button>

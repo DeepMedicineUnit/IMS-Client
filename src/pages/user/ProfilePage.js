@@ -13,6 +13,7 @@ const ProfilePage = () => {
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
+    phone: '',
     currentPassword: '',
     newPassword: '',
     confirmPassword: ''
@@ -43,7 +44,8 @@ const ProfilePage = () => {
       setFormData(prev => ({
         ...prev,
         fullName: currentUser.full_name || '',
-        email: currentUser.email || ''
+        email: currentUser.email || '',
+        phone: currentUser.phone || ''
       }));
     }
     return () => setMounted(false);
@@ -201,7 +203,8 @@ const ProfilePage = () => {
       
       const updateData = {
         fullName: formData.fullName,
-        email: formData.email
+        email: formData.email,
+        phone: formData.phone
       };
 
       if (showPasswordFields && formData.newPassword) {
@@ -607,6 +610,9 @@ const ProfilePage = () => {
                       </InputGroup.Text>
                       <Form.Control
                         type="tel"
+                        name="phone"
+                        value={formData.phone}
+                        onChange={handleChange}
                         placeholder="Nhập số điện thoại"
                         className="modern-form-control"
                       />

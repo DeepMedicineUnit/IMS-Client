@@ -9,6 +9,8 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   const { login, googleLogin } = useAuth();
   const navigate = useNavigate();
@@ -45,6 +47,13 @@ const Login = () => {
       setLoading(false);
     }
   };
+  const toggleShowPassword = () => {
+    setShowPassword(!showPassword);
+  };
+
+  const toggleShowConfirmPassword = () => {
+    setShowConfirmPassword(!showConfirmPassword);
+  };
 
   return (
     <Container>
@@ -74,13 +83,21 @@ const Login = () => {
 
                 <Form.Group className="mb-3" controlId="formPassword">
                   <Form.Label>Mật khẩu</Form.Label>
+                  <div className="input-group">
                   <Form.Control 
-                    type="password" 
+                    type={showConfirmPassword ? "text" : "password"} 
                     placeholder="Nhập mật khẩu" 
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
                   />
+                    <Button 
+                      variant="outline-secondary"
+                      onClick={toggleShowConfirmPassword}
+                    >
+                    <i className={showConfirmPassword ? "fas fa-eye-slash" : "fas fa-eye"}></i>
+                    </Button>
+                </div>
                 </Form.Group>
 
                 <Button 

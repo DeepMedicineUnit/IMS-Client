@@ -213,6 +213,13 @@ export function AuthProvider({ children }) {
     }
   };
 
+  // Helper function to update user state after QR login
+  const updateUserState = (user, token) => {
+    localStorage.setItem('token', token);
+    setCurrentUser(user);
+    setIsLoggedIn(true);
+  };
+
   const value = {
     currentUser,
     loading,
@@ -224,6 +231,7 @@ export function AuthProvider({ children }) {
     forgotPassword,
     resetPassword,
     verifyPassword,
+    updateUserState,
     api
   };
 

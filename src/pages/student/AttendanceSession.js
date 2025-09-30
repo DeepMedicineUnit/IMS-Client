@@ -769,13 +769,21 @@ const AttendanceSession = ({ shared = false }) => {
         
         // Create canvas to capture frame
         const canvas = document.createElement('canvas');
-        canvas.width = 640;  // Fixed width
-        canvas.height = 480; // Fixed height
         const ctx = canvas.getContext('2d');
         
-        // Draw video frame to canvas
+        // Get actual video dimensions
+        const videoWidth = video.videoWidth;
+        const videoHeight = video.videoHeight;
+        
+        console.log('Video dimensions:', videoWidth, 'x', videoHeight);
+        
+        // Set canvas size to match video dimensions to preserve aspect ratio
+        canvas.width = videoWidth;
+        canvas.height = videoHeight;
+        
+        // Draw video frame to canvas preserving original aspect ratio
         try {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
         } catch (drawError) {
           console.error('Error drawing video to canvas:', drawError);
           throw new Error('Không thể chụp ảnh từ camera');
@@ -1116,12 +1124,12 @@ const AttendanceSession = ({ shared = false }) => {
                     <Clock size={14} className="me-1" />
                     {session.start_time} - {session.end_time}
                   </span>
-                  {session.location && (
+                </div>
+                <div className="d-flex justify-content-center align-items-center gap-3 mt-2">
                     <span className="text-muted small">
                       <MapPin size={14} className="me-1" />
                       {session.location}
                     </span>
-                  )}
                 </div>
               </div>
               
@@ -1376,13 +1384,7 @@ const AttendanceSession = ({ shared = false }) => {
               
               {isLoggedIn ? (
                 <Form onSubmit={handleSubmitAttendance}>
-                  <div className="bg-white rounded-lg p-4 text-center mb-4 shadow-sm">
-                    <div className="rounded-circle bg-primary bg-opacity-10 d-inline-flex align-items-center justify-content-center mb-3" style={{width: '80px', height: '80px'}}>
-                      <User size={32} className="text-primary" />
-                    </div>
-                    <h5 className="fw-bold">{currentUser.full_name}</h5>
-                    <p className="text-muted">{currentUser.email}</p>
-                  </div>
+
                   
                   {session.password && (
                     <div className="bg-white rounded-lg p-4 mb-4 shadow-sm">
