@@ -1,12 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Form, Alert, Container, Row, Col, Modal, Badge, Table, Spinner } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthContext';
-import { toast } from 'react-toastify';
+import { useAlert } from '../../contexts/AlertContext';
+import { useTranslation } from 'react-i18next';
 import { format } from 'date-fns';
 import { Calendar, Clock, MapPin, FileText, Send, Eye, CheckCircle, AlertTriangle } from 'lucide-react';
 import '../../../src/styles/modern-ui.css';
+import usePageTitle from '../../hooks/usePageTitle';
 
 const AbsenceRequestPage = () => {
+  const { t } = useTranslation();
+  usePageTitle(t('absenceRequest.title'));
+  const { showAlert } = useAlert();
   const { api } = useAuth();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -19,8 +24,11 @@ const AbsenceRequestPage = () => {
   const [formData, setFormData] = useState({
     session_id: '',
     request_type: 'full_session',
-    reason: ''
+    reason: '',
+    makeup_date: '',
+    makeup_notes: ''
   });
+  const [evidenceFile, setEvidenceFile] = useState(null);
 
   // Auto-refresh states
   const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
@@ -30,7 +38,7 @@ const AbsenceRequestPage = () => {
   const fetchAvailableSessions = async () => {
     try {
       console.log('Fetching available sessions...');
-      const response = await api.get('/sessions/student/dashboard?status=all');
+      const response = await api.get('/sessions/student/attendance?status=all');
       console.log('Sessions response:', response.data);
       if (response.data.success) {
         setSessions(response.data.data);
@@ -72,7 +80,7 @@ const AbsenceRequestPage = () => {
   const fetchAvailableSessionsSilently = async () => {
     try {
       setIsAutoRefreshing(true);
-      const response = await api.get('/sessions/student/dashboard?status=all');
+      const response = await api.get('/sessions/student/attendance?status=all');
       if (response.data.success) {
         setSessions(response.data.data);
       }
@@ -162,33 +170,27 @@ const AbsenceRequestPage = () => {
 
   // Debug effect to log loading changes
   useEffect(() => {
-    console.log('Loading changed:', loading);
+
   }, [loading]);
 
   // Debug effect to log requests changes
   useEffect(() => {
-    console.log('Requests changed:', requests);
-    console.log('Requests length:', requests.length);
   }, [requests]);
 
   // Debug effect to log form data changes
   useEffect(() => {
-    console.log('Form data changed:', formData);
   }, [formData]);
 
   // Debug effect to log selected session changes
   useEffect(() => {
-    console.log('Selected session changed:', selectedSession);
   }, [selectedSession]);
 
   // Debug effect to log show request modal changes
   useEffect(() => {
-    console.log('Show request modal changed:', showRequestModal);
   }, [showRequestModal]);
 
   // Debug effect to log submitting changes
   useEffect(() => {
-    console.log('Submitting changed:', submitting);
   }, [submitting]);
 
   // Debug effect to log error changes
@@ -198,67 +200,23 @@ const AbsenceRequestPage = () => {
 
   // Debug effect to log success changes
   useEffect(() => {
-    console.log('Success changed:', success);
   }, [success]);
 
   // Debug effect to log all state changes
   useEffect(() => {
-    console.log('All state:', {
-      sessions: sessions.length,
-      requests: requests.length,
-      loading,
-      error,
-      success,
-      submitting,
-      showRequestModal,
-      selectedSession: selectedSession?.id,
-      formData
-    });
+
   });
 
   // Debug effect to log component mount
   useEffect(() => {
-    console.log('Component mounted');
     return () => {
-      console.log('Component unmounted');
     };
   }, []);
 
   // Debug effect to log component update
   useEffect(() => {
-    console.log('Component updated');
   });
 
-  // Debug effect to log render
-  console.log('Rendering AbsenceRequestPage with sessions:', sessions.length, 'loading:', loading);
-  console.log('Sessions data in render:', sessions);
-  console.log('Loading state in render:', loading);
-  console.log('Error state in render:', error);
-  console.log('Success state in render:', success);
-  console.log('Requests data in render:', requests);
-  console.log('Form data in render:', formData);
-  console.log('Selected session in render:', selectedSession);
-  console.log('Show request modal in render:', showRequestModal);
-  console.log('Submitting in render:', submitting);
-  console.log('All state in render:', {
-    sessions: sessions.length,
-    requests: requests.length,
-    loading,
-    error,
-    success,
-    submitting,
-    showRequestModal,
-    selectedSession: selectedSession?.id,
-    formData
-  });
-  console.log('Sessions type check:', typeof sessions, Array.isArray(sessions));
-  console.log('Sessions length check:', sessions?.length);
-  console.log('Sessions truthy check:', !!sessions);
-  console.log('Sessions null check:', sessions === null);
-  console.log('Sessions undefined check:', sessions === undefined);
-  console.log('Sessions empty check:', sessions?.length === 0);
-  console.log('Sessions falsy check:', !sessions);
-  console.log('Sessions nullish check:', sessions == null);
 
   // Handle form input changes
   const handleInputChange = (e) => {
@@ -280,6 +238,35 @@ const AbsenceRequestPage = () => {
     setShowRequestModal(true);
   };
 
+  // Handle file change
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validate file size (10MB max)
+      if (file.size > 10 * 1024 * 1024) {
+        setError(t('absenceRequest.errors.fileSizeExceeded'));
+        return;
+      }
+      
+      // Validate file type
+      const allowedTypes = [
+        'image/jpeg', 'image/jpg', 'image/png', 'image/gif',
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain'
+      ];
+      
+      if (!allowedTypes.includes(file.type)) {
+        setError(t('absenceRequest.errors.fileTypeNotSupported'));
+        return;
+      }
+      
+      setEvidenceFile(file);
+      setError('');
+    }
+  };
+
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -289,8 +276,20 @@ const AbsenceRequestPage = () => {
     console.log('Form data:', formData);
 
     if (!formData.session_id || !formData.request_type || !formData.reason.trim()) {
-      setError('Vui lòng điền đầy đủ thông tin');
+      setError(t('absenceRequest.errors.fillAllFields'));
       return;
+    }
+
+    // Validate makeup date if provided
+    if (formData.makeup_date) {
+      const makeupDate = new Date(formData.makeup_date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (makeupDate < today) {
+        setError(t('absenceRequest.errors.makeupDatePast'));
+        return;
+      }
     }
 
     // Kiểm tra duplicate request
@@ -317,51 +316,77 @@ const AbsenceRequestPage = () => {
     
     // Kiểm tra xem có thể tạo request với loại đã chọn không
     if (formData.request_type === 'full_session' && hasFullSessionRequest) {
-      setError('Đã có yêu cầu "Vắng cả buổi học" được duyệt/từ chối cho buổi học này');
+      setError(t('absenceRequest.errors.duplicateFullSession'));
       return;
     }
     
     // Chỉ ngăn chặn khi đã có request cụ thể đó
     if (formData.request_type === 'before_session' && hasBeforeRequest) {
-      setError('Đã có yêu cầu "Vắng điểm danh trước buổi học" được duyệt/từ chối cho buổi học này');
+      setError(t('absenceRequest.errors.duplicateBefore'));
       return;
     }
     
     if (formData.request_type === 'during_session' && hasDuringRequest) {
-      setError('Đã có yêu cầu "Vắng điểm danh trong buổi học" được duyệt/từ chối cho buổi học này');
+      setError(t('absenceRequest.errors.duplicateDuring'));
       return;
     }
     
     if (formData.request_type === 'after_session' && hasAfterRequest) {
-      setError('Đã có yêu cầu "Vắng điểm danh sau buổi học" được duyệt/từ chối cho buổi học này');
+      setError(t('absenceRequest.errors.duplicateAfter'));
       return;
     }
 
     try {
       setSubmitting(true);
       console.log('Submitting absence request:', formData);
-      const response = await api.post('/absence-requests', formData);
+      
+      // Create FormData for file upload
+      const submitData = new FormData();
+      submitData.append('session_id', formData.session_id);
+      submitData.append('request_type', formData.request_type);
+      submitData.append('reason', formData.reason);
+      
+      if (formData.makeup_date) {
+        submitData.append('makeup_date', formData.makeup_date);
+      }
+      
+      if (formData.makeup_notes) {
+        submitData.append('makeup_notes', formData.makeup_notes);
+      }
+      
+      if (evidenceFile) {
+        submitData.append('evidence_file', evidenceFile);
+      }
+      
+      const response = await api.post('/absence-requests', submitData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
       console.log('Absence request response:', response.data);
       
       if (response.data.success) {
-        setSuccess('Yêu cầu xin phép vắng học đã được gửi thành công');
-        toast.success('Yêu cầu xin phép vắng học đã được gửi thành công');
+        setSuccess(t('absenceRequest.success.requestSubmitted'));
+        showAlert(t('absenceRequest.success.requestSubmitted'), 'success');
         setShowRequestModal(false);
         setFormData({
           session_id: '',
           request_type: 'full_session',
-          reason: ''
+          reason: '',
+          makeup_date: '',
+          makeup_notes: ''
         });
         setSelectedSession(null);
+        setEvidenceFile(null);
         // Refresh requests list silently
         await fetchAbsenceRequestsSilently();
       }
     } catch (error) {
       console.error('Error submitting absence request:', error);
       console.error('Error details:', error.response?.data);
-      const errorMessage = error.response?.data?.message || 'Có lỗi xảy ra khi gửi yêu cầu';
+      const errorMessage = error.response?.data?.message || t('absenceRequest.errors.submitError');
       setError(errorMessage);
-      toast.error(errorMessage);
+      showAlert(errorMessage, 'danger');
     } finally {
       setSubmitting(false);
     }
@@ -372,13 +397,13 @@ const AbsenceRequestPage = () => {
     console.log('Getting status badge for:', status);
     switch (status) {
       case 'pending':
-        return <Badge bg="warning">Chờ duyệt</Badge>;
+        return <Badge bg="warning">{t('absenceRequest.status.pending')}</Badge>;
       case 'approved':
-        return <Badge bg="success">Đã duyệt</Badge>;
+        return <Badge bg="success">{t('absenceRequest.status.approved')}</Badge>;
       case 'rejected':
-        return <Badge bg="danger">Từ chối</Badge>;
+        return <Badge bg="danger">{t('absenceRequest.status.rejected')}</Badge>;
       case 'cancelled':
-        return <Badge bg="secondary">Đã hủy</Badge>;
+        return <Badge bg="secondary">{t('absenceRequest.status.cancelled')}</Badge>;
       default:
         return <Badge bg="secondary">{status}</Badge>;
     }
@@ -389,13 +414,13 @@ const AbsenceRequestPage = () => {
     console.log('Getting request type text for:', type);
     switch (type) {
       case 'full_session':
-        return 'Vắng cả buổi học';
+        return t('absenceRequest.requestTypes.fullSession');
       case 'before_session':
-        return 'Vắng điểm danh trước buổi học';
+        return t('absenceRequest.requestTypes.beforeSession');
       case 'during_session':
-        return 'Vắng điểm danh trong buổi học';
+        return t('absenceRequest.requestTypes.duringSession');
       case 'after_session':
-        return 'Vắng điểm danh sau buổi học';
+        return t('absenceRequest.requestTypes.afterSession');
       default:
         return type;
     }
@@ -405,38 +430,60 @@ const AbsenceRequestPage = () => {
   const calculateSessionStatus = (session) => {
     console.log('Calculating status for session:', session);
     const now = new Date();
-    const sessionDate = new Date(session.date);
+    const sessionStartDate = new Date(session.date);
+    const sessionEndDate = session.end_date ? new Date(session.end_date) : sessionStartDate;
     
-    // Set year, month, day from session date
-    const currentDate = new Date();
-    currentDate.setFullYear(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate());
+    // Normalize dates for comparison (only date part)
+    const currentDateOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const sessionStartDateOnly = new Date(sessionStartDate.getFullYear(), sessionStartDate.getMonth(), sessionStartDate.getDate());
+    const sessionEndDateOnly = new Date(sessionEndDate.getFullYear(), sessionEndDate.getMonth(), sessionEndDate.getDate());
 
-    // Parse start and end times
-    const [startHours, startMinutes] = session.start_time.split(':').map(Number);
-    const [endHours, endMinutes] = session.end_time.split(':').map(Number);
-    
-    const sessionStartTime = new Date(currentDate);
-    sessionStartTime.setHours(startHours, startMinutes, 0, 0);
-    
-    const sessionEndTime = new Date(currentDate);
-    sessionEndTime.setHours(endHours, endMinutes, 0, 0);
-    
-    // Handle sessions that span across midnight
-    if (sessionEndTime < sessionStartTime) {
-      sessionEndTime.setDate(sessionEndTime.getDate() + 1);
+    // Check if session is cancelled
+    if (session.status === 'cancelled') {
+      return 'cancelled';
     }
 
-    let status;
-    if (now < sessionStartTime) {
-      status = 'scheduled';
-    } else if (now >= sessionStartTime && now <= sessionEndTime) {
-      status = 'active';
-    } else {
-      status = 'ended';
+    // Session in the future (not started yet)
+    if (sessionStartDateOnly > currentDateOnly) {
+      return 'scheduled';
     }
-    
-    console.log('Session status calculated:', status, 'for session:', session.title);
-    return status;
+
+    // Session ended (after end date)
+    if (sessionEndDateOnly < currentDateOnly) {
+      return 'ended';
+    }
+
+    // Session is ongoing (within date range)
+    if ((sessionStartDateOnly <= currentDateOnly) && (sessionEndDateOnly >= currentDateOnly)) {
+      // If it's the start date, check start time
+      if (sessionStartDateOnly.getTime() === currentDateOnly.getTime()) {
+        const [startHours, startMinutes] = session.start_time.split(':').map(Number);
+        const sessionStartTime = new Date(now);
+        sessionStartTime.setHours(startHours, startMinutes, 0, 0);
+        
+        if (now < sessionStartTime) {
+          return 'scheduled';
+        }
+      }
+
+      // If it's the end date, check end time
+      if (sessionEndDateOnly.getTime() === currentDateOnly.getTime()) {
+        const [endHours, endMinutes] = session.end_time.split(':').map(Number);
+        const sessionEndTime = new Date(now);
+        sessionEndTime.setHours(endHours, endMinutes, 0, 0);
+        
+        if (now > sessionEndTime) {
+          return 'ended';
+        }
+      }
+
+      // Within the session period
+      return 'active';
+    }
+
+    // Default fallback
+    console.log('Session status calculated: scheduled (fallback) for session:', session.title);
+    return 'scheduled';
   };
 
   // Get session status badge
@@ -445,11 +492,11 @@ const AbsenceRequestPage = () => {
     console.log('Getting session status badge for:', session.title, 'status:', status);
     switch (status) {
       case 'scheduled':
-        return <Badge bg="info">Sắp diễn ra</Badge>;
+        return <Badge bg="info">{t('absenceRequest.sessionStatus.scheduled')}</Badge>;
       case 'active':
-        return <Badge bg="success">Đang diễn ra</Badge>;
+        return <Badge bg="success">{t('absenceRequest.sessionStatus.active')}</Badge>;
       case 'ended':
-        return <Badge bg="secondary">Đã kết thúc</Badge>;
+        return <Badge bg="secondary">{t('absenceRequest.sessionStatus.ended')}</Badge>;
       default:
         return <Badge bg="secondary">{status}</Badge>;
     }
@@ -464,7 +511,7 @@ const AbsenceRequestPage = () => {
               <span className="visually-hidden">Loading...</span>
             </div>
           </div>
-          <p className="text-gray-600">Đang tải dữ liệu...</p>
+          <p className="text-gray-600">{t('absenceRequest.loading')}</p>
         </div>
       </Container>
     );
@@ -477,14 +524,14 @@ const AbsenceRequestPage = () => {
           <div className="rounded-circle bg-primary bg-opacity-10 p-2 me-3">
             <FileText size={24} className="text-primary" />
           </div>
-          <h2 className="mb-0">Xin phép vắng học</h2>
+          <h2 className="mb-0">{t('absenceRequest.pageTitle')}</h2>
         </div>
         {isAutoRefreshing && (
           <div className="auto-refresh-indicator">
             <div className="spinner-border spinner-border-sm text-primary" role="status">
-              <span className="visually-hidden">Đang cập nhật...</span>
+              <span className="visually-hidden">{t('absenceRequest.updating')}</span>
             </div>
-            <span className="ms-2 small text-muted">Đang cập nhật...</span>
+            <span className="ms-2 small text-muted">{t('absenceRequest.updating')}</span>
           </div>
         )}
       </div>
@@ -516,7 +563,7 @@ const AbsenceRequestPage = () => {
                 <div className="rounded-circle bg-primary bg-opacity-10 p-2 me-2">
                   <Calendar size={18} className="text-primary" />
                 </div>
-                <h5 className="mb-0 fw-bold">Buổi học có thể xin phép vắng</h5>
+                <h5 className="mb-0 fw-bold">{t('absenceRequest.availableSessions')}</h5>
               </div>
             </div>
             <div className="card-body p-0">
@@ -568,11 +615,13 @@ const AbsenceRequestPage = () => {
                       <div key={session.id} className="modern-list-group-item p-3">
                         <div className="d-flex justify-content-between align-items-start">
                           <div className="flex-grow-1">
-                            <h6 className="mb-2 fw-bold">{session.title}</h6>
+                            <h6 className="fw-bold mb-0 text-dark session-title-truncated">{session.title}</h6>
                             <div className="d-flex flex-wrap gap-3 mb-2 text-muted small">
                               <div className="d-flex align-items-center">
                                 <Calendar size={14} className="me-1" />
-                                <span>{format(new Date(session.date), 'dd/MM/yyyy')}</span>
+                                <span>{session.end_date && session.end_date !== session.date ? 
+                                  `${format(new Date(session.date), 'dd/MM/yyyy')} - ${format(new Date(session.end_date), 'dd/MM/yyyy')}` :
+                                  format(new Date(session.date), 'dd/MM/yyyy')}</span>
                               </div>
                               <div className="d-flex align-items-center">
                                 <Clock size={14} className="me-1" />
@@ -590,11 +639,11 @@ const AbsenceRequestPage = () => {
                                 {(() => {
                                   switch (status) {
                                     case 'scheduled':
-                                      return <><i className="fas fa-clock me-1"></i>Sắp diễn ra</>;
+                                      return <><i className="fas fa-clock me-1"></i>{t('absenceRequest.sessionStatus.scheduled')}</>;
                                     case 'active':
-                                      return <><i className="fas fa-play-circle me-1"></i>Đang diễn ra</>;
+                                      return <><i className="fas fa-play-circle me-1"></i>{t('absenceRequest.sessionStatus.active')}</>;
                                     case 'ended':
-                                      return <><i className="fas fa-check-circle me-1"></i>Đã kết thúc</>;
+                                      return <><i className="fas fa-check-circle me-1"></i>{t('absenceRequest.sessionStatus.ended')}</>;
                                     default:
                                       return <><i className="fas fa-info-circle me-1"></i>{status}</>;
                                   }
@@ -603,19 +652,18 @@ const AbsenceRequestPage = () => {
                               {hasPendingRequest && (
                                 <div className="modern-badge modern-badge-warning">
                                   <i className="fas fa-hourglass-half me-1"></i>
-                                  Có yêu cầu chờ duyệt
                                 </div>
                               )}
                               {hasFullSessionRequest && (
                                 <div className="modern-badge modern-badge-danger">
                                   <i className="fas fa-ban me-1"></i>
-                                  Đã có yêu cầu "Cả buổi"
+                                  {t('absenceRequest.alreadyRequestedAll')}
                                 </div>
                               )}
                               {hasAllPartialRequests && (
                                 <div className="modern-badge modern-badge-danger">
                                   <i className="fas fa-ban me-1"></i>
-                                  Đã có đủ yêu cầu "Trước/Trong/Sau"
+                                  {t('absenceRequest.alreadyRequestedPartialFull')}
                                 </div>
                               )}
                             </div>
@@ -631,13 +679,13 @@ const AbsenceRequestPage = () => {
                               }}
                             >
                               {hasPendingRequest ? (
-                                <><i className="fas fa-hourglass-half me-1"></i>Chờ duyệt</>
+                                <><i className="fas fa-hourglass-half me-1"></i>{t('absenceRequest.waiting')}</>
                               ) : hasFullSessionRequest ? (
-                                <><i className="fas fa-ban me-1"></i>Đã có yêu cầu "Cả buổi"</>
+                                <><i className="fas fa-ban me-1"></i>{t('absenceRequest.alreadyRequestedAll')}</>
                               ) : hasAllPartialRequests ? (
-                                <><i className="fas fa-ban me-1"></i>Đã có đủ yêu cầu</>
+                                <><i className="fas fa-ban me-1"></i>{t('absenceRequest.alreadyRequestedPartial')}</>
                               ) : (
-                                <><i className="fas fa-calendar-times me-1"></i>Xin phép vắng</>
+                                <><i className="fas fa-calendar-times me-1"></i></>
                               )}
                             </button>
                           </div>
@@ -651,7 +699,7 @@ const AbsenceRequestPage = () => {
                   <div className="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style={{width: '80px', height: '80px'}}>
                     <Calendar size={32} className="text-muted" />
                   </div>
-                  <p>Không có buổi học nào để xin phép vắng</p>
+                  <p>{t('absenceRequest.noSessionsAvailable')}</p>
                 </div>
               )}
             </div>
@@ -666,7 +714,7 @@ const AbsenceRequestPage = () => {
                 <div className="rounded-circle bg-info bg-opacity-10 p-2 me-2">
                   <i className="fas fa-history text-info"></i>
                 </div>
-                <h5 className="mb-0 fw-bold">Lịch sử yêu cầu xin phép vắng</h5>
+                <h5 className="mb-0 fw-bold">{t('absenceRequest.requestHistory')}</h5>
               </div>
             </div>
             <div className="card-body p-0">
@@ -675,11 +723,13 @@ const AbsenceRequestPage = () => {
                   <table className="modern-table modern-table-hover w-100">
                     <thead>
                       <tr>
-                        <th>Buổi học</th>
-                        <th>Loại vắng</th>
-                        <th>Trạng thái</th>
-                        <th>Ngày tạo</th>
-                        <th>Thao tác</th>
+                        <th>{t('absenceRequest.tableHeaders.session')}</th>
+                        <th>{t('absenceRequest.tableHeaders.type')}</th>
+                        <th>{t('absenceRequest.tableHeaders.status')}</th>
+                        <th>{t('absenceRequest.tableHeaders.makeupDate')}</th>
+                        <th>{t('absenceRequest.tableHeaders.evidence')}</th>
+                        <th>{t('absenceRequest.tableHeaders.createdAt')}</th>
+                        <th>{t('absenceRequest.tableHeaders.actions')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -690,7 +740,9 @@ const AbsenceRequestPage = () => {
                               <div className="fw-bold">{request.session_title}</div>
                               <div className="d-flex align-items-center text-muted small mt-1">
                                 <Calendar size={12} className="me-1" />
-                                <span>{format(new Date(request.session_date), 'dd/MM/yyyy')}</span>
+                                <span>{request.session_end_date && request.session_end_date !== request.session_date ? 
+                                  `${format(new Date(request.session_date), 'dd/MM/yyyy')} - ${format(new Date(request.session_end_date), 'dd/MM/yyyy')}` :
+                                  format(new Date(request.session_date), 'dd/MM/yyyy')}</span>
                                 <Clock size={12} className="ms-2 me-1" />
                                 <span>{request.start_time}</span>
                               </div>
@@ -701,13 +753,13 @@ const AbsenceRequestPage = () => {
                               {(() => {
                                 switch(request.request_type) {
                                   case 'full_session':
-                                    return <>Cả buổi</>;
+                                    return <>{t('absenceRequest.requestTypeLabels.all')}</>;
                                   case 'before_session':
-                                    return <>Trước buổi</>;
+                                    return <>{t('absenceRequest.requestTypeLabels.before')}</>;
                                   case 'during_session':
-                                    return <>Trong buổi</>;
+                                    return <>{t('absenceRequest.requestTypeLabels.during')}</>;
                                   case 'after_session':
-                                    return <>Sau buổi</>;
+                                    return <>{t('absenceRequest.requestTypeLabels.after')}</>;
                                   default:
                                     return getRequestTypeText(request.request_type);
                                 }
@@ -736,6 +788,28 @@ const AbsenceRequestPage = () => {
                             </div>
                           </td>
                           <td>
+                            {request.makeup_date ? (
+                              <div className="d-flex align-items-center text-primary small">
+                                {format(new Date(request.makeup_date), 'dd/MM/yyyy')}
+                              </div>
+                            ) : (
+                              <span className="text-muted small">{t('absenceRequest.noMakeupDate')}</span>
+                            )}
+                          </td>
+                          <td>
+                            {request.evidence_file ? (
+                              <button
+                                className="btn btn-sm btn-outline-primary"
+                                onClick={() => window.open(`/api/absence-requests/${request.id}/evidence`, '_blank')}
+                                title={t('absenceRequest.downloadEvidence')}
+                              >
+                                <i className="fas fa-download me-1"></i>
+                              </button>
+                            ) : (
+                              <span className="text-muted small">{t('absenceRequest.noEvidence')}</span>
+                            )}
+                          </td>
+                          <td>
                             <div className="d-flex align-items-center text-muted small">
                               <i className="fas fa-calendar-alt me-1"></i>
                               {format(new Date(request.created_at), 'dd/MM/yyyy HH:mm')}
@@ -745,7 +819,7 @@ const AbsenceRequestPage = () => {
                             <button
                               className="btn-modern"
                               onClick={() => window.open(`/student/absence-requests/${request.id}/preview`, '_blank')}
-                              title="Xem trước đơn xác nhận"
+                              title={t('absenceRequest.previewConfirmation')}
                               style={{ backgroundColor: '#3b82f6', padding: '0.5rem 1rem' }}
                             >
                               <Eye size={16} />
@@ -761,7 +835,7 @@ const AbsenceRequestPage = () => {
                   <div className="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style={{width: '80px', height: '80px'}}>
                     <i className="fas fa-inbox fa-2x text-muted"></i>
                   </div>
-                  <p>Chưa có yêu cầu xin phép vắng nào</p>
+                  <p>{t('absenceRequest.noRequests')}</p>
                 </div>
               )}
             </div>
@@ -776,7 +850,7 @@ const AbsenceRequestPage = () => {
             <div className="rounded-circle bg-primary bg-opacity-10 p-2 me-2">
               <FileText size={20} className="text-primary" />
             </div>
-            <Modal.Title className="fw-bold">Xin phép vắng học</Modal.Title>
+            <Modal.Title className="fw-bold">{t('absenceRequest.pageTitle')}</Modal.Title>
           </div>
         </Modal.Header>
         <Modal.Body className="pt-2">
@@ -786,17 +860,19 @@ const AbsenceRequestPage = () => {
                 <div className="rounded-circle bg-info bg-opacity-10 p-2 me-2">
                   <i className="fas fa-info-circle text-info"></i>
                 </div>
-                <h6 className="mb-0 fw-bold">Thông tin buổi học</h6>
+                <h6 className="mb-0 fw-bold">{t('absenceRequest.sessionInfo')}</h6>
               </div>
               <div className="bg-light p-4 rounded-lg shadow-sm">
                 <div className="row g-3">
                   <div className="col-md-12">
-                    <h6 className="fw-bold mb-0">{selectedSession.title}</h6>
+                    <h6 className="fw-bold mb-0 session-title-wrap">{selectedSession.title}</h6>
                   </div>
                   <div className="col-md-6">
                     <div className="d-flex align-items-center">
                       <Calendar size={16} className="text-primary me-2" />
-                      <span>{format(new Date(selectedSession.date), 'dd/MM/yyyy')}</span>
+                      <span>{selectedSession.end_date && selectedSession.end_date !== selectedSession.date ? 
+                                  `${format(new Date(selectedSession.date), 'dd/MM/yyyy')} - ${format(new Date(selectedSession.end_date), 'dd/MM/yyyy')}` :
+                                  format(new Date(selectedSession.date), 'dd/MM/yyyy')}</span>
                     </div>
                   </div>
                   <div className="col-md-6">
@@ -820,7 +896,7 @@ const AbsenceRequestPage = () => {
 
           <Form onSubmit={handleSubmit}>
             <Form.Group className="mb-4">
-              <Form.Label className="fw-medium">Loại vắng học <span className="text-danger">*</span></Form.Label>
+              <Form.Label className="fw-medium">{t('absenceRequest.requestTypeRequired')}</Form.Label>
               <div className="input-group">
                 <div className="input-group-text bg-light">
                   <i className="fas fa-calendar-times"></i>
@@ -866,25 +942,25 @@ const AbsenceRequestPage = () => {
                           value="full_session" 
                           disabled={hasFullSessionRequest}
                         >
-                          Vắng cả buổi học {hasFullSessionRequest ? '(Đã có yêu cầu)' : ''}
+                          {t('absenceRequest.requestTypes.fullSession')} {hasFullSessionRequest ? t('absenceRequest.requestTypes.alreadyRequested') : ''}
                         </option>
                         <option 
                           value="before_session" 
                           disabled={hasBeforeRequest}
                         >
-                          Vắng điểm danh trước buổi học {hasBeforeRequest ? '(Đã có yêu cầu)' : ''}
+                          {t('absenceRequest.requestTypes.beforeSession')} {hasBeforeRequest ? t('absenceRequest.requestTypes.alreadyRequested') : ''}
                         </option>
                         <option 
                           value="during_session" 
                           disabled={hasDuringRequest}
                         >
-                          Vắng điểm danh trong buổi học {hasDuringRequest ? '(Đã có yêu cầu)' : ''}
+                          {t('absenceRequest.requestTypes.duringSession')} {hasDuringRequest ? t('absenceRequest.requestTypes.alreadyRequested') : ''}
                         </option>
                         <option 
                           value="after_session" 
                           disabled={hasAfterRequest}
                         >
-                          Vắng điểm danh sau buổi học {hasAfterRequest ? '(Đã có yêu cầu)' : ''}
+                          {t('absenceRequest.requestTypes.afterSession')} {hasAfterRequest ? t('absenceRequest.requestTypes.alreadyRequested') : ''}
                         </option>
                       </>
                     );
@@ -892,12 +968,12 @@ const AbsenceRequestPage = () => {
                 </Form.Select>
               </div>
               <Form.Text className="text-muted">
-                Chọn loại vắng học phù hợp với tình huống của bạn
+                {t('absenceRequest.requestTypeHelp')}
               </Form.Text>
             </Form.Group>
 
             <Form.Group className="mb-4">
-              <Form.Label className="fw-medium">Lý do xin phép vắng <span className="text-danger">*</span></Form.Label>
+              <Form.Label className="fw-medium">{t('absenceRequest.reasonRequired')}</Form.Label>
               <div className="input-group">
                 <div className="input-group-text bg-light">
                   <i className="fas fa-comment-alt"></i>
@@ -908,14 +984,85 @@ const AbsenceRequestPage = () => {
                   name="reason"
                   value={formData.reason}
                   onChange={handleInputChange}
-                  placeholder="Vui lòng mô tả chi tiết lý do xin phép vắng học..."
+                  placeholder={t('absenceRequest.reasonPlaceholder')}
                   required
                   className="modern-form-control"
                 />
               </div>
+            </Form.Group>
+
+            <Form.Group className="mb-4">
+              <Form.Label className="fw-medium">{t('absenceRequest.makeupDate')}</Form.Label>
+              <div className="input-group">
+                <div className="input-group-text bg-light">
+                  <i className="fas fa-calendar-plus"></i>
+                </div>
+                <Form.Control
+                  type="date"
+                  name="makeup_date"
+                  value={formData.makeup_date}
+                  onChange={handleInputChange}
+                  min={new Date().toISOString().split('T')[0]}
+                  className="modern-form-control"
+                />
+              </div>
               <Form.Text className="text-muted">
-                Lý do càng chi tiết càng giúp giảng viên đánh giá chính xác
+                {t('absenceRequest.makeupDateHelp')}
               </Form.Text>
+            </Form.Group>
+
+            <Form.Group className="mb-4">
+              <Form.Label className="fw-medium">{t('absenceRequest.makeupNotes')}</Form.Label>
+              <div className="input-group">
+                <div className="input-group-text bg-light">
+                  <i className="fas fa-sticky-note"></i>
+                </div>
+                <Form.Control
+                  as="textarea"
+                  rows={2}
+                  name="makeup_notes"
+                  value={formData.makeup_notes}
+                  onChange={handleInputChange}
+                  placeholder={t('absenceRequest.makeupNotesPlaceholder')}
+                  className="modern-form-control"
+                />
+              </div>
+              <Form.Text className="text-muted">
+                {t('absenceRequest.makeupNotesHelp')}
+              </Form.Text>
+            </Form.Group>
+
+            <Form.Group className="mb-4">
+              <Form.Label className="fw-medium">{t('absenceRequest.evidence')}</Form.Label>
+              <div className="input-group">
+                <div className="input-group-text bg-light">
+                  <i className="fas fa-paperclip"></i>
+                </div>
+                <Form.Control
+                  type="file"
+                  onChange={handleFileChange}
+                  accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.txt"
+                  className="modern-form-control"
+                />
+              </div>
+              <Form.Text className="text-muted">
+                {t('absenceRequest.evidenceHelp')}
+              </Form.Text>
+              {evidenceFile && (
+                <div className="mt-2">
+                  <div className="d-flex align-items-center gap-2 p-2 bg-light rounded">
+                    <i className="fas fa-file text-primary"></i>
+                    <span className="small">{evidenceFile.name}</span>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-danger ms-auto"
+                      onClick={() => setEvidenceFile(null)}
+                    >
+                      <i className="fas fa-times"></i>
+                    </button>
+                  </div>
+                </div>
+              )}
             </Form.Group>
 
             <div className="d-flex justify-content-end gap-2">
@@ -925,7 +1072,7 @@ const AbsenceRequestPage = () => {
                 disabled={submitting}
                 style={{ backgroundColor: '#6b7280' }}
               >
-                Hủy
+                {t('absenceRequest.cancel')}
               </button>
               <button
                 type="submit"
@@ -936,14 +1083,14 @@ const AbsenceRequestPage = () => {
                 {submitting ? (
                   <div className="d-flex align-items-center gap-2">
                     <div className="spinner-border spinner-border-sm" role="status">
-                      <span className="visually-hidden">Loading...</span>
+                      <span className="visually-hidden">{t('common.loading')}</span>
                     </div>
-                    <span>Đang gửi...</span>
+                    <span>{t('absenceRequest.submitting')}</span>
                   </div>
                 ) : (
                   <div className="d-flex align-items-center gap-2">
                     <Send size={16} />
-                    <span>Gửi yêu cầu</span>
+                    <span>{t('absenceRequest.submit')}</span>
                   </div>
                 )}
               </button>

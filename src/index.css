@@ -18,6 +18,18 @@ code {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+/* Ensure buttons and interactive elements are clickable */
+button, a, input, select, textarea, [role="button"], [onClick] {
+  pointer-events: auto !important;
+  cursor: pointer;
+}
+
+/* Prevent any overlay from blocking interactions */
+body {
+  pointer-events: auto !important;
 }
 
 /* Additional global styles */

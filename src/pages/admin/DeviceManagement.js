@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Container, Row, Col, Card, Table, Button, Badge, Alert, Spinner, Form, InputGroup, Pagination, Nav, Tab, Modal, Switch } from 'react-bootstrap';
+import { Container, Row, Col, Card, Table, Button, Badge, Alert, Spinner, Form, InputGroup, Nav, Tab, Modal, Switch } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthContext';
-import { toast } from 'react-toastify';
+import { useAlert } from '../../contexts/AlertContext';
 import { format } from 'date-fns';
 import { vi } from 'date-fns/locale';
-import '../../styles/calendar.css';
+import Pagination from '../../components/Pagination';
+import '../../styles/user.css';
+import usePageTitle from '../../hooks/usePageTitle';
 
 const DeviceManagement = () => {
+  usePageTitle('Quản lý thiết bị');
+  const { showAlert } = useAlert();
   const { api } = useAuth();
   const [loading, setLoading] = useState(true);
   const [devices, setDevices] = useState([]);
@@ -14,21 +18,33 @@ const DeviceManagement = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
   const [totalDevices, setTotalDevices] = useState(0);
   const [linkedDevices, setLinkedDevices] = useState(0);
   const [unlinkedDevices, setUnlinkedDevices] = useState(0);
+  
+  // States for sorting
+  const [sortBy, setSortBy] = useState('last_login');
+  const [sortOrder, setSortOrder] = useState('desc'); // desc = gần nhất ở trên, asc = xa nhất ở trên
   
   // States for attendance records tab
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [attendanceError, setAttendanceError] = useState('');
   const [attendanceSearchTerm, setAttendanceSearchTerm] = useState('');
-  const [attendanceCurrentPage, setAttendanceCurrentPage] = useState(1);
-  const [attendanceTotalPages, setAttendanceTotalPages] = useState(1);
   const [attendanceTotalRecords, setAttendanceTotalRecords] = useState(0);
   const [activeTab, setActiveTab] = useState('devices');
+  const [devicesPagination, setDevicesPagination] = useState({
+    page: 1,
+    limit: 20,
+    totalItems: 0,
+    totalPages: 0
+  });
+  const [attendancePagination, setAttendancePagination] = useState({
+    page: 1,
+    limit: 20,
+    totalItems: 0,
+    totalPages: 0
+  });
   
   // States for MAC policy settings
   const [showMacPolicyModal, setShowMacPolicyModal] = useState(false);
@@ -53,20 +69,20 @@ const DeviceManagement = () => {
   const autoRefreshIntervalRef = useRef(null);
 
   // Fetch devices with MAC addresses - only show students who have logged in and have MAC
-  const fetchDevices = async (isRefresh = false) => {
+  const fetchDevices = async (isRefresh = false, isSearch = false) => {
     try {
       if (isRefresh) {
         setRefreshing(true);
-      } else {
+      } else if (!isSearch) {
+        // Chỉ hiển thị loading khi tải trang lần đầu, không hiển thị khi tìm kiếm
         setLoading(true);
       }
       setError('');
 
       // Always filter for students with MAC addresses (status=active)
-      const response = await api.get(`/users/devices?page=${currentPage}&limit=10&search=${searchTerm}&status=active`);
+      const response = await api.get(`/users/devices?page=1&limit=999999&search=${searchTerm}&status=active`);
       if (response.data.success) {
         setDevices(response.data.data);
-        setTotalPages(response.data.pagination.totalPages);
         setTotalDevices(response.data.pagination.totalItems);
         
         // All devices shown have MAC addresses
@@ -90,10 +106,9 @@ const DeviceManagement = () => {
       setIsAutoRefreshing(true);
       setError('');
 
-      const response = await api.get(`/users/devices?page=${currentPage}&limit=10&search=${searchTerm}&status=active`);
+      const response = await api.get(`/users/devices?page=1&limit=999999&search=${searchTerm}&status=active`);
       if (response.data.success) {
         setDevices(response.data.data);
-        setTotalPages(response.data.pagination.totalPages);
         setTotalDevices(response.data.pagination.totalItems);
         
         setLinkedDevices(response.data.data.length);
@@ -108,14 +123,42 @@ const DeviceManagement = () => {
 
   useEffect(() => {
     fetchDevices();
-  }, [currentPage, filterStatus]);
+  }, [filterStatus]);
 
-  // Fetch attendance records when tab changes or page changes
+  // Update pagination when devices change
+  useEffect(() => {
+    if (activeTab === 'devices') {
+      const totalItems = devices.length;
+      const totalPages = Math.ceil(totalItems / devicesPagination.limit);
+      setDevicesPagination(prev => ({
+        ...prev,
+        totalItems,
+        totalPages,
+        page: prev.page > totalPages && totalPages > 0 ? totalPages : prev.page
+      }));
+    }
+  }, [devices, activeTab, devicesPagination.limit]);
+
+  // Update pagination when attendanceRecords change
+  useEffect(() => {
+    if (activeTab === 'attendance') {
+      const totalItems = attendanceRecords.length;
+      const totalPages = Math.ceil(totalItems / attendancePagination.limit);
+      setAttendancePagination(prev => ({
+        ...prev,
+        totalItems,
+        totalPages,
+        page: prev.page > totalPages && totalPages > 0 ? totalPages : prev.page
+      }));
+    }
+  }, [attendanceRecords, activeTab, attendancePagination.limit]);
+
+  // Fetch attendance records when tab changes
   useEffect(() => {
     if (activeTab === 'attendance') {
       fetchAttendanceRecords();
     }
-  }, [attendanceCurrentPage, activeTab]);
+  }, [activeTab]);
 
   // Auto-refresh data every 10 seconds
   useEffect(() => {
@@ -135,7 +178,7 @@ const DeviceManagement = () => {
         autoRefreshIntervalRef.current = null;
       }
     };
-  }, [activeTab, currentPage, attendanceCurrentPage, searchTerm, attendanceSearchTerm]);
+  }, [activeTab, searchTerm, attendanceSearchTerm]);
   
   // Fetch MAC policy settings
   const fetchMacPolicies = async () => {
@@ -168,7 +211,7 @@ const DeviceManagement = () => {
       const response = await api.put('/mac-policies', macPolicies);
       
       if (response.data.success) {
-        toast.success('Cập nhật chính sách MAC address thành công');
+        showAlert('Cập nhật chính sách MAC address thành công', 'success');
         setShowMacPolicyModal(false);
       } else {
         setMacPolicyError(response.data.message || 'Không thể cập nhật chính sách MAC address');
@@ -210,11 +253,11 @@ const DeviceManagement = () => {
           setUserMacPolicies(userPolicies);
         }
       } else {
-        toast.error('Không thể tải ngoại lệ chính sách MAC address của người dùng');
+        showAlert('Không thể tải ngoại lệ chính sách MAC address của người dùng', 'danger');
       }
     } catch (error) {
       console.error('Error fetching user MAC policy exceptions:', error);
-      toast.error('Không thể tải ngoại lệ chính sách MAC address của người dùng. Vui lòng thử lại sau.');
+      showAlert('Không thể tải ngoại lệ chính sách MAC address của người dùng. Vui lòng thử lại sau.', 'danger');
     } finally {
       setUserMacPolicyLoading(false);
     }
@@ -229,25 +272,25 @@ const DeviceManagement = () => {
       const response = await api.put(`/mac-policies/user/${selectedUser.id}`, userMacPolicies);
       
       if (response.data.success) {
-        toast.success('Cập nhật ngoại lệ chính sách MAC address thành công');
+        showAlert('Cập nhật ngoại lệ chính sách MAC address thành công', 'success');
         setShowUserMacPolicyModal(false);
         // Refresh data to show updated values
         if (selectedUser) {
           fetchUserMacPolicyExceptions(selectedUser.id);
         }
       } else {
-        toast.error(response.data.message || 'Không thể cập nhật ngoại lệ chính sách MAC address');
+        showAlert(response.data.message || 'Không thể cập nhật ngoại lệ chính sách MAC address', 'danger');
       }
     } catch (error) {
       console.error('Error setting user MAC policy exceptions:', error);
       
       // Handle specific error cases
       if (error.response && error.response.status === 400) {
-        toast.error(error.response.data?.message || 'Dữ liệu không hợp lệ. Vui lòng kiểm tra lại.');
+        showAlert(error.response.data?.message || 'Dữ liệu không hợp lệ. Vui lòng kiểm tra lại.', 'danger');
       } else if (error.response && error.response.status === 404) {
-        toast.error('Không tìm thấy người dùng');
+        showAlert('Không tìm thấy người dùng', 'danger');
       } else {
-        toast.error('Không thể cập nhật ngoại lệ chính sách MAC address. Vui lòng thử lại sau.');
+        showAlert('Không thể cập nhật ngoại lệ chính sách MAC address. Vui lòng thử lại sau.', 'danger');
       }
     } finally {
       setUserMacPolicyLoading(false);
@@ -262,20 +305,20 @@ const DeviceManagement = () => {
       const response = await api.delete(`/mac-policies/user/${selectedUser.id}`);
       
       if (response.data.success) {
-        toast.success('Xóa ngoại lệ chính sách MAC address thành công');
+        showAlert('Xóa ngoại lệ chính sách MAC address thành công', 'success');
         setShowUserMacPolicyModal(false);
       } else {
-        toast.error(response.data.message || 'Không thể xóa ngoại lệ chính sách MAC address');
+        showAlert(response.data.message || 'Không thể xóa ngoại lệ chính sách MAC address', 'danger');
       }
     } catch (error) {
       // Handle 404 as success (no exceptions to delete)
       if (error.response && error.response.status === 404) {
         console.log('No MAC policy exceptions found for user - treating as success');
-        toast.success('Không có ngoại lệ chính sách MAC address để xóa');
+        showAlert('Không có ngoại lệ chính sách MAC address để xóa', 'success');
         setShowUserMacPolicyModal(false);
       } else {
         console.error('Error removing user MAC policy exceptions:', error);
-        toast.error('Không thể xóa ngoại lệ chính sách MAC address. Vui lòng thử lại sau.');
+        showAlert('Không thể xóa ngoại lệ chính sách MAC address. Vui lòng thử lại sau.', 'danger');
       }
     } finally {
       setUserMacPolicyLoading(false);
@@ -300,7 +343,6 @@ const DeviceManagement = () => {
     if (activeTab === 'attendance') {
       const timeoutId = setTimeout(() => {
         if (attendanceSearchTerm.length >= 2 || attendanceSearchTerm === '') {
-          setAttendanceCurrentPage(1);
           fetchAttendanceRecords();
         }
       }, 500); // 500ms debounce
@@ -313,7 +355,7 @@ const DeviceManagement = () => {
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       if (searchTerm.length >= 2 || searchTerm === '') {
-        fetchDevices();
+        fetchDevices(false, true); // isRefresh = false, isSearch = true
       }
     }, 500); // 500ms debounce
 
@@ -329,12 +371,12 @@ const DeviceManagement = () => {
     try {
       const response = await api.post(`/auth/reset-device-mac/${userId}`);
       if (response.data.success) {
-        toast.success('Đã xóa liên kết thiết bị thành công');
+        showAlert('Đã xóa liên kết thiết bị thành công', 'success');
         
         // Kiểm tra và cảnh báo về MAC trùng lặp
         if (macAddress) {
           const confirmRemoveAll = window.confirm(
-            `Địa chỉ MAC ${macAddress} có thể còn được sử dụng trong tab "Lịch sử điểm danh".\n\n` +
+            `Địa chỉ MAC ${macAddress} có thể còn được sử dụng trong tab "Bảng ghi điểm danh".\n\n` +
             `Bạn có muốn xóa địa chỉ MAC này khỏi tất cả bản ghi điểm danh không?`
           );
           
@@ -346,11 +388,11 @@ const DeviceManagement = () => {
         // Refresh data silently
         fetchDevicesSilently();
       } else {
-        toast.error(response.data.message || 'Không thể xóa liên kết thiết bị');
+        showAlert(response.data.message || 'Không thể xóa liên kết thiết bị', 'danger');
       }
     } catch (error) {
       console.error('Error resetting MAC:', error);
-      toast.error('Không thể xóa liên kết thiết bị. Vui lòng thử lại sau.');
+      showAlert('Không thể xóa liên kết thiết bị. Vui lòng thử lại sau.', 'danger');
     }
   };
 
@@ -359,28 +401,63 @@ const DeviceManagement = () => {
     try {
       const response = await api.post('/users/remove-duplicate-mac', { macAddress });
       if (response.data.success) {
-        toast.success(response.data.message);
+        showAlert(response.data.message, 'success');
         // Refresh both tabs silently
         fetchDevicesSilently();
         fetchAttendanceRecordsSilently();
       } else {
-        toast.error(response.data.message || 'Không thể xóa MAC trùng lặp');
+        showAlert(response.data.message || 'Không thể xóa MAC trùng lặp', 'danger');
       }
     } catch (error) {
       console.error('Error removing duplicate MAC:', error);
-      toast.error('Không thể xóa MAC trùng lặp. Vui lòng thử lại sau.');
+      showAlert('Không thể xóa MAC trùng lặp. Vui lòng thử lại sau.', 'danger');
     }
   };
 
   // Handle search
   const handleSearch = () => {
-    setCurrentPage(1);
-    fetchDevices();
+    fetchDevices(false, true); // isRefresh = false, isSearch = true
   };
 
   // Handle search input change
   const handleSearchChange = (e) => {
     setSearchTerm(e.target.value);
+  };
+
+  // Sort devices by last login
+  const sortDevices = (devices) => {
+    return [...devices].sort((a, b) => {
+      // Handle null/undefined last_login values
+      const aTime = a.last_login ? new Date(a.last_login).getTime() : 0;
+      const bTime = b.last_login ? new Date(b.last_login).getTime() : 0;
+      
+      if (sortBy === 'last_login') {
+        if (sortOrder === 'desc') {
+          // Gần nhất ở trên (desc): từ mới đến cũ, null/undefined ở dưới
+          if (aTime === 0 && bTime === 0) return 0;
+          if (aTime === 0) return 1;
+          if (bTime === 0) return -1;
+          return bTime - aTime;
+        } else {
+          // Xa nhất ở trên (asc): null/undefined ở trên, sau đó từ cũ đến mới
+          if (aTime === 0 && bTime === 0) return 0;
+          if (aTime === 0) return -1;
+          if (bTime === 0) return 1;
+          return aTime - bTime;
+        }
+      }
+      return 0;
+    });
+  };
+
+  // Handle sort
+  const handleSort = (column) => {
+    if (column === sortBy) {
+      setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSortBy(column);
+      setSortOrder('desc');
+    }
   };
 
   // Remove MAC from attendance record
@@ -392,7 +469,7 @@ const DeviceManagement = () => {
     try {
       const response = await api.delete(`/users/attendance-records/${recordId}/mac`);
       if (response.data.success) {
-        toast.success('Đã xóa địa chỉ MAC khỏi bản ghi điểm danh thành công');
+        showAlert('Đã xóa địa chỉ MAC khỏi bản ghi điểm danh thành công', 'success');
         
         // Kiểm tra và cảnh báo về MAC trùng lặp
         if (macAddress) {
@@ -409,11 +486,11 @@ const DeviceManagement = () => {
         // Refresh data silently
         fetchAttendanceRecordsSilently();
       } else {
-        toast.error(response.data.message || 'Không thể xóa địa chỉ MAC');
+        showAlert(response.data.message || 'Không thể xóa địa chỉ MAC', 'danger');
       }
     } catch (error) {
       console.error('Error removing attendance MAC:', error);
-      toast.error('Không thể xóa địa chỉ MAC. Vui lòng thử lại sau.');
+      showAlert('Không thể xóa địa chỉ MAC. Vui lòng thử lại sau.', 'danger');
     }
   };
 
@@ -427,11 +504,20 @@ const DeviceManagement = () => {
       }
       setAttendanceError('');
 
-      const response = await api.get(`/users/attendance-records?page=${attendanceCurrentPage}&limit=10&search=${attendanceSearchTerm}`);
+      const response = await api.get(`/users/attendance-records?page=1&limit=999999&search=${attendanceSearchTerm}`);
       if (response.data.success) {
         setAttendanceRecords(response.data.data);
-        setAttendanceTotalPages(response.data.pagination.totalPages);
         setAttendanceTotalRecords(response.data.pagination.totalItems);
+        
+        // Update pagination
+        const totalItems = response.data.data?.length || 0;
+        const totalPages = Math.ceil(totalItems / attendancePagination.limit);
+        setAttendancePagination(prev => ({
+          ...prev,
+          totalItems,
+          totalPages,
+          page: prev.page > totalPages && totalPages > 0 ? totalPages : prev.page
+        }));
       } else {
         setAttendanceError('Không thể tải danh sách điểm danh');
       }
@@ -450,10 +536,9 @@ const DeviceManagement = () => {
       setIsAutoRefreshing(true);
       setAttendanceError('');
 
-      const response = await api.get(`/users/attendance-records?page=${attendanceCurrentPage}&limit=10&search=${attendanceSearchTerm}`);
+      const response = await api.get(`/users/attendance-records?page=1&limit=999999&search=${attendanceSearchTerm}`);
       if (response.data.success) {
         setAttendanceRecords(response.data.data);
-        setAttendanceTotalPages(response.data.pagination.totalPages);
         setAttendanceTotalRecords(response.data.pagination.totalItems);
       }
     } catch (error) {
@@ -466,80 +551,8 @@ const DeviceManagement = () => {
   // Handle filter change - removed since we only show devices with MAC
   const handleFilterChange = (filter) => {
     // No longer needed since we only show devices with MAC
-    setCurrentPage(1);
     setFilterStatus(filter);
-    fetchDevices();
-  };
-
-  // Pagination
-  const renderPagination = () => {
-    if (totalPages <= 1) return null;
-
-    // Tối ưu hiển thị phân trang, chỉ hiển thị trang hiện tại và các trang lân cận
-    const maxPagesToShow = 5;
-    const items = [];
-    
-    let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
-    let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
-    
-    // Điều chỉnh lại startPage nếu endPage đã đạt giới hạn
-    if (endPage - startPage + 1 < maxPagesToShow) {
-      startPage = Math.max(1, endPage - maxPagesToShow + 1);
-    }
-    
-    // Thêm nút trang đầu tiên nếu cần
-    if (startPage > 1) {
-      items.push(
-        <Button 
-          key="device-page-1" 
-          variant="outline-primary" 
-          onClick={() => setCurrentPage(1)}
-          className="mx-1 view-btn"
-        >
-          1
-        </Button>
-      );
-      
-      // Thêm dấu "..." nếu cần
-      if (startPage > 2) {
-        items.push(<span key="device-ellipsis1" className="mx-1">...</span>);
-      }
-    }
-    
-    // Thêm các trang giữa
-    for (let i = startPage; i <= endPage; i++) {
-      items.push(
-        <Button 
-          key={`device-page-${i}`} 
-          variant={currentPage === i ? 'primary' : 'outline-primary'} 
-          onClick={() => setCurrentPage(i)}
-          className="mx-1 view-btn"
-        >
-          {i}
-        </Button>
-      );
-    }
-    
-    // Thêm nút trang cuối cùng nếu cần
-    if (endPage < totalPages) {
-      // Thêm dấu "..." nếu cần
-      if (endPage < totalPages - 1) {
-        items.push(<span key="device-ellipsis2" className="mx-1">...</span>);
-      }
-      
-      items.push(
-        <Button 
-          key={`device-page-${totalPages}`} 
-          variant="outline-primary" 
-          onClick={() => setCurrentPage(totalPages)}
-          className="mx-1 view-btn"
-        >
-          {totalPages}
-        </Button>
-      );
-    }
-    
-    return items;
+    fetchDevices(false, true); // isRefresh = false, isSearch = true
   };
 
   if (loading) {
@@ -607,7 +620,7 @@ const DeviceManagement = () => {
               <Nav.Link eventKey="attendance">
                 <span className="tab-title">
                   <i className="fas fa-check-circle me-2"></i>
-                  Lịch sử điểm danh
+                  Bảng ghi điểm danh
                 </span>
               </Nav.Link>
             </Nav.Item>
@@ -622,17 +635,13 @@ const DeviceManagement = () => {
                 <div className="search-input" style={{ position: 'relative' }}>
                   <input
                     type="text"
-                    placeholder="Tìm kiếm theo tên, mã SV, email, MAC..."
+                    placeholder="Tìm kiếm theo tên, mã SV, email, lớp, MAC..."
                     value={searchTerm}
                     onChange={handleSearchChange}
                     onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
                     className="search-input"
                   />
                 </div>
-                <Button variant="primary" onClick={handleSearch} className="filter-btn">
-                  <i className="fas fa-search me-2"></i>
-                  Tìm kiếm
-                </Button>
               </div>
             </div>
 
@@ -655,7 +664,20 @@ const DeviceManagement = () => {
                     <th>Lớp</th>
                     <th>Địa chỉ MAC</th>
                     <th>Trạng thái</th>
-                    <th>Lần đăng nhập cuối</th>
+                    <th>
+                      <div className="d-flex align-items-center justify-content-between">
+                        <span>Lần đăng nhập cuối</span>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          onClick={() => handleSort('last_login')}
+                          className="p-0 ms-2 text-decoration-none"
+                          title={`Sắp xếp theo lần đăng nhập cuối (${sortOrder === 'desc' ? 'Gần nhất ở trên' : 'Xa nhất ở trên'})`}
+                        >
+                          <i className={`fas fa-sort ${sortBy === 'last_login' ? (sortOrder === 'desc' ? 'fa-sort-down' : 'fa-sort-up') : 'fa-sort'}`}></i>
+                        </Button>
+                      </div>
+                    </th>
                     <th>Thao tác</th>
                   </tr>
                 </thead>
@@ -667,9 +689,11 @@ const DeviceManagement = () => {
                       </td>
                     </tr>
                   ) : devices.length > 0 ? (
-                    devices.map((device, index) => (
+                    sortDevices(devices)
+                      .slice((devicesPagination.page - 1) * devicesPagination.limit, devicesPagination.page * devicesPagination.limit)
+                      .map((device, index) => (
                       <tr key={`device-${device.id}-${index}`}>
-                        <td>{(currentPage - 1) * 10 + index + 1}</td>
+                        <td>{(devicesPagination.page - 1) * devicesPagination.limit + index + 1}</td>
                         <td>{device.student_id || '-'}</td>
                         <td>{device.full_name || '-'}</td>
                         <td>{device.email || '-'}</td>
@@ -715,29 +739,26 @@ const DeviceManagement = () => {
                 </tbody>
               </Table>
             </div>
+            
+            {/* Pagination for Devices */}
+            {devices.length > 0 && devicesPagination.totalPages > 1 && (
+              <div className="mt-3">
+                <Pagination
+                  currentPage={devicesPagination.page}
+                  totalPages={devicesPagination.totalPages}
+                  onPageChange={(page) => setDevicesPagination(prev => ({ ...prev, page }))}
+                  maxVisiblePages={5}
+                  showFirstLast={true}
+                />
+              </div>
+            )}
 
-            {/* Pagination */}
-            {totalPages > 1 && (
+            {/* Show total count */}
+            {devices.length > 0 && (
               <div className="d-flex justify-content-center mt-3">
-                <Button 
-                  variant="outline-secondary" 
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                  className="me-2 calendar-nav-btn"
-                >
-                  &laquo; Trước
-                </Button>
-                
-                {renderPagination()}
-                
-                <Button 
-                  variant="outline-secondary" 
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages}
-                  className="ms-2 calendar-nav-btn"
-                >
-                  Sau &raquo;
-                </Button>
+                <Badge bg="info" className="fs-6">
+                  Tổng cộng: {totalDevices} sinh viên có địa chỉ MAC
+                </Badge>
               </div>
             )}
           </Tab.Pane>
@@ -795,9 +816,11 @@ const DeviceManagement = () => {
                       </td>
                     </tr>
                   ) : attendanceRecords.length > 0 ? (
-                    attendanceRecords.map((record, index) => (
+                    attendanceRecords
+                      .slice((attendancePagination.page - 1) * attendancePagination.limit, attendancePagination.page * attendancePagination.limit)
+                      .map((record, index) => (
                       <tr key={`attendance-${record.id}-${index}`}>
-                        <td>{(attendanceCurrentPage - 1) * 10 + index + 1}</td>
+                        <td>{(attendancePagination.page - 1) * attendancePagination.limit + index + 1}</td>
                         <td>{record.student_code || '-'}</td>
                         <td>{record.full_name || '-'}</td>
                         <td>{record.email || '-'}</td>
@@ -832,6 +855,7 @@ const DeviceManagement = () => {
                              record.attendance_type === 'present' ? 'Có mặt' :
                              record.attendance_type === 'early' ? 'Điểm danh sớm' :
                              record.attendance_type === 'late' ? 'Điểm danh trễ' :
+                             record.attendance_type === 'late_before' ? 'Điểm danh đi trễ' :
                              record.attendance_type === 'late_leave' ? 'Về trễ' :
                              record.attendance_type === 'absent' ? 'Vắng mặt' :
                              record.attendance_type === 'absent_perm' ? 'Vắng có phép' :
@@ -873,7 +897,7 @@ const DeviceManagement = () => {
                         <div className="text-center p-5">
                           <i className="fas fa-check-circle fa-4x mb-3 text-muted"></i>
                           <h5>Chưa có bản ghi điểm danh nào</h5>
-                          <p className="text-muted">Lịch sử điểm danh sẽ hiển thị khi sinh viên thực hiện điểm danh</p>
+                          <p className="text-muted">Bảng ghi điểm danh sẽ hiển thị khi sinh viên thực hiện điểm danh</p>
                         </div>
                       </td>
                     </tr>
@@ -883,85 +907,24 @@ const DeviceManagement = () => {
             </div>
 
             {/* Pagination for Attendance Records */}
-            {attendanceTotalPages > 1 && (
+            {attendanceRecords.length > 0 && attendancePagination.totalPages > 1 && (
+              <div className="mt-3">
+                <Pagination
+                  currentPage={attendancePagination.page}
+                  totalPages={attendancePagination.totalPages}
+                  onPageChange={(page) => setAttendancePagination(prev => ({ ...prev, page }))}
+                  maxVisiblePages={5}
+                  showFirstLast={true}
+                />
+              </div>
+            )}
+
+            {/* Show total count */}
+            {attendanceRecords.length > 0 && (
               <div className="d-flex justify-content-center mt-3">
-                <Button 
-                  variant="outline-secondary" 
-                  onClick={() => setAttendanceCurrentPage(prev => Math.max(prev - 1, 1))}
-                  disabled={attendanceCurrentPage === 1}
-                  className="me-2 calendar-nav-btn"
-                >
-                  &laquo; Trước
-                </Button>
-                
-                {(() => {
-                  const items = [];
-                  const maxPagesToShow = 5;
-                  let startPage = Math.max(1, attendanceCurrentPage - Math.floor(maxPagesToShow / 2));
-                  let endPage = Math.min(attendanceTotalPages, startPage + maxPagesToShow - 1);
-                  
-                  if (endPage - startPage + 1 < maxPagesToShow) {
-                    startPage = Math.max(1, endPage - maxPagesToShow + 1);
-                  }
-                  
-                  if (startPage > 1) {
-                    items.push(
-                      <Button 
-                        key="attendance-page-1" 
-                        variant="outline-primary" 
-                        onClick={() => setAttendanceCurrentPage(1)}
-                        className="mx-1 view-btn"
-                      >
-                        1
-                      </Button>
-                    );
-                    
-                    if (startPage > 2) {
-                      items.push(<span key="attendance-ellipsis1" className="mx-1">...</span>);
-                    }
-                  }
-                  
-                  for (let i = startPage; i <= endPage; i++) {
-                    items.push(
-                      <Button 
-                        key={`attendance-page-${i}`} 
-                        variant={attendanceCurrentPage === i ? 'primary' : 'outline-primary'} 
-                        onClick={() => setAttendanceCurrentPage(i)}
-                        className="mx-1 view-btn"
-                      >
-                        {i}
-                      </Button>
-                    );
-                  }
-                  
-                  if (endPage < attendanceTotalPages) {
-                    if (endPage < attendanceTotalPages - 1) {
-                      items.push(<span key="attendance-ellipsis2" className="mx-1">...</span>);
-                    }
-                    
-                    items.push(
-                      <Button 
-                        key={`attendance-page-${attendanceTotalPages}`} 
-                        variant="outline-primary" 
-                        onClick={() => setAttendanceCurrentPage(attendanceTotalPages)}
-                        className="mx-1 view-btn"
-                      >
-                        {attendanceTotalPages}
-                      </Button>
-                    );
-                  }
-                  
-                  return items;
-                })()}
-                
-                <Button 
-                  variant="outline-secondary" 
-                  onClick={() => setAttendanceCurrentPage(prev => Math.min(prev + 1, attendanceTotalPages))}
-                  disabled={attendanceCurrentPage === attendanceTotalPages}
-                  className="ms-2 calendar-nav-btn"
-                >
-                  Sau &raquo;
-                </Button>
+                <Badge bg="info" className="fs-6">
+                  Tổng cộng: {attendanceTotalRecords} bản ghi điểm danh
+                </Badge>
               </div>
             )}
           </Tab.Pane>

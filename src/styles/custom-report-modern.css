@@ -1,0 +1,583 @@
+/* Custom Report Modern Design - Soft Colors, Animations, Professional */
+
+/* Color Palette - Soft & Modern */
+:root {
+  --cr-primary: #3d7ddd;
+  --cr-primary-light: #2d6ecf;
+  --cr-primary-dark: #0b5ed7;
+  --cr-secondary: #0b5ed7;
+  --cr-success: #10b981;
+  --cr-success-light: #34d399;
+  --cr-info: #06b6d4;
+  --cr-warning: #f59e0b;
+  --cr-danger: #ef4444;
+  --cr-gray-50: #f9fafb;
+  --cr-gray-100: #f3f4f6;
+  --cr-gray-200: #e5e7eb;
+  --cr-gray-300: #d1d5db;
+  --cr-gray-400: #9ca3af;
+  --cr-gray-500: #6b7280;
+  --cr-gray-600: #4b5563;
+  --cr-gray-700: #374151;
+  --cr-gray-800: #1f2937;
+  --cr-gray-900: #111827;
+  --cr-white: #ffffff;
+  --cr-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --cr-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --cr-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --cr-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --cr-shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* Custom Report Container */
+.custom-report-container {
+  animation: fadeInUp 0.5s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Modern Card Styles */
+.custom-report-card {
+  background: var(--cr-white);
+  border-radius: 16px;
+  box-shadow: var(--cr-shadow-md);
+  border: 1px solid var(--cr-gray-200);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  animation: slideIn 0.4s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+
+.custom-report-card-header {
+  background: linear-gradient(135deg, #0b5ed7 0%, #276eda 100%);
+  padding: 20px 24px;
+  border-bottom: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Hover effect for collapsible header */
+.custom-report-card-header[style*="cursor: pointer"]:hover {
+  background: linear-gradient(135deg, #0952c4 0%, #1e5bc7 100%);
+  box-shadow: 0 4px 12px rgba(11, 94, 215, 0.2);
+}
+
+.custom-report-card-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 100%);
+  pointer-events: none;
+}
+
+.custom-report-card-header-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cr-white);
+  font-size: 20px;
+  backdrop-filter: blur(10px);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.custom-report-card-header h6 {
+  color: var(--cr-white);
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.custom-report-card-body {
+  padding: 24px;
+  background: var(--cr-gray-50);
+}
+
+/* Section Labels */
+.custom-report-section-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cr-gray-700);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: -0.01em;
+}
+
+.custom-report-section-label i {
+  color: var(--cr-primary);
+  font-size: 16px;
+  animation: iconFloat 3s ease-in-out infinite;
+}
+
+@keyframes iconFloat {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+/* Modern Buttons */
+.custom-report-btn {
+  border-radius: 10px;
+  padding: 10px 20px;
+  font-weight: 500;
+  font-size: 14px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: none;
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: -0.01em;
+}
+
+.custom-report-btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: translate(-50%, -50%);
+  transition: width 0.6s, height 0.6s;
+}
+
+.custom-report-btn:hover::before {
+  width: 300px;
+  height: 300px;
+}
+
+.custom-report-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--cr-shadow-lg);
+}
+
+.custom-report-btn:active {
+  transform: translateY(0);
+}
+
+.custom-report-btn-primary {
+  background: linear-gradient(135deg, var(--cr-primary) 0%, var(--cr-primary-dark) 100%);
+  color: var(--cr-white);
+  box-shadow: 0 4px 14px 0 rgba(99, 102, 241, 0.3);
+}
+
+.custom-report-btn-primary:hover {
+  background: linear-gradient(135deg, var(--cr-primary-light) 0%, var(--cr-primary) 100%);
+  box-shadow: 0 6px 20px 0 rgba(99, 102, 241, 0.4);
+}
+
+.custom-report-btn-active {
+  background: linear-gradient(135deg, var(--cr-primary) 0%, var(--cr-primary-dark) 100%);
+  color: var(--cr-white);
+  box-shadow: 0 4px 14px 0 rgba(99, 102, 241, 0.3);
+  transform: scale(1.05);
+}
+
+.custom-report-btn-outline {
+  background: var(--cr-white);
+  color: var(--cr-gray-700);
+  border: 2px solid var(--cr-gray-200);
+  box-shadow: var(--cr-shadow-sm);
+}
+
+.custom-report-btn-outline:hover {
+  border-color: var(--cr-primary);
+  color: var(--cr-primary);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.custom-report-btn-success {
+  background: linear-gradient(135deg, var(--cr-success) 0%, #059669 100%);
+  color: var(--cr-white);
+  box-shadow: 0 4px 14px 0 rgba(16, 185, 129, 0.3);
+}
+
+.custom-report-btn-success:hover {
+  background: linear-gradient(135deg, var(--cr-success-light) 0%, var(--cr-success) 100%);
+  box-shadow: 0 6px 20px 0 rgba(16, 185, 129, 0.4);
+}
+
+.custom-report-btn-secondary {
+  background: var(--cr-white);
+  color: var(--cr-gray-700);
+  border: 2px solid var(--cr-gray-300);
+  box-shadow: var(--cr-shadow-sm);
+}
+
+.custom-report-btn-secondary:hover {
+  background: var(--cr-gray-50);
+  border-color: var(--cr-gray-400);
+  color: var(--cr-gray-900);
+}
+
+/* Form Controls */
+.custom-report-form-control {
+  border-radius: 10px;
+  border: 2px solid var(--cr-gray-200);
+  padding: 12px 16px;
+  font-size: 14px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: var(--cr-white);
+  color: var(--cr-gray-700);
+}
+
+.custom-report-form-control:focus {
+  outline: none;
+  border-color: var(--cr-primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  background: var(--cr-white);
+}
+
+.custom-report-form-control:hover {
+  border-color: var(--cr-gray-300);
+}
+
+.custom-report-form-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cr-gray-700);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: -0.01em;
+}
+
+.custom-report-form-label i {
+  color: var(--cr-primary);
+  font-size: 14px;
+  width: 16px;
+}
+
+/* Badge Styles */
+.custom-report-badge {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  letter-spacing: -0.01em;
+}
+
+.custom-report-badge-primary {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(99, 102, 241, 0.15) 100%);
+  color: var(--cr-gray-50);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.custom-report-badge-info {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.1) 0%, rgba(6, 182, 212, 0.15) 100%);
+  color: #0891b2;
+  border: 1px solid rgba(6, 182, 212, 0.2);
+}
+
+/* Table Styles */
+.custom-report-table {
+  background: var(--cr-white);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--cr-shadow-sm);
+}
+
+.custom-report-table thead {
+  background: linear-gradient(135deg, var(--cr-gray-50) 0%, var(--cr-gray-100) 100%);
+}
+
+.custom-report-table thead th {
+  padding: 16px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--cr-gray-700);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid var(--cr-gray-200);
+}
+
+.custom-report-table tbody tr {
+  transition: all 0.2s ease;
+  border-bottom: 1px solid var(--cr-gray-100);
+}
+
+.custom-report-table tbody tr:hover {
+  background: rgba(99, 102, 241, 0.03);
+  transform: scale(1.01);
+}
+
+.custom-report-table tbody td {
+  padding: 14px 16px;
+  font-size: 14px;
+  color: var(--cr-gray-700);
+  vertical-align: middle;
+}
+
+/* Column Selector */
+.custom-report-column-selector {
+  background: var(--cr-white);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: var(--cr-shadow);
+  border: 1px solid var(--cr-gray-200);
+  animation: expandDown 0.3s ease-out;
+}
+
+@keyframes expandDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    max-height: 500px;
+    transform: translateY(0);
+  }
+}
+
+.custom-report-checkbox {
+  padding: 8px 0;
+}
+
+.custom-report-checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 2px solid var(--cr-gray-300);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-right: 8px;
+}
+
+.custom-report-checkbox input[type="checkbox"]:checked {
+  background: var(--cr-primary);
+  border-color: var(--cr-primary);
+}
+
+.custom-report-checkbox label {
+  font-size: 14px;
+  color: var(--cr-gray-700);
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.2s ease;
+}
+
+.custom-report-checkbox:hover label {
+  color: var(--cr-primary);
+}
+
+/* Loading State */
+.custom-report-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.custom-report-loading-spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid var(--cr-gray-200);
+  border-top-color: var(--cr-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Empty State */
+.custom-report-empty {
+  text-align: center;
+  padding: 60px 20px;
+  animation: fadeInUp 0.5s ease-out;
+}
+
+.custom-report-empty-icon {
+  font-size: 64px;
+  color: var(--cr-gray-300);
+  margin-bottom: 16px;
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.custom-report-empty-text {
+  font-size: 16px;
+  color: var(--cr-gray-500);
+  margin-bottom: 8px;
+}
+
+.custom-report-empty-subtext {
+  font-size: 14px;
+  color: var(--cr-gray-400);
+}
+
+/* Student Search Dropdown */
+.custom-report-student-dropdown {
+  position: fixed;
+  z-index: 10000;
+  background: var(--cr-white);
+  border: 1px solid var(--cr-gray-200);
+  border-radius: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  box-shadow: var(--cr-shadow-lg);
+  margin-top: 4px;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.custom-report-student-item {
+  padding: 12px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--cr-gray-100);
+  transition: all 0.2s ease;
+}
+
+.custom-report-student-item:hover {
+  background: rgba(99, 102, 241, 0.05);
+  transform: translateX(4px);
+}
+
+.custom-report-student-item:last-child {
+  border-bottom: none;
+}
+
+/* Action Buttons Container */
+.custom-report-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .custom-report-card-body {
+    padding: 16px;
+  }
+  
+  .custom-report-card-header {
+    padding: 16px 20px;
+  }
+  
+  .custom-report-btn {
+    padding: 8px 16px;
+    font-size: 13px;
+  }
+}
+
+/* Smooth Transitions */
+* {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* Scrollbar Styling */
+.custom-report-table::-webkit-scrollbar,
+.custom-report-student-dropdown::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-report-table::-webkit-scrollbar-track,
+.custom-report-student-dropdown::-webkit-scrollbar-track {
+  background: var(--cr-gray-100);
+  border-radius: 4px;
+}
+
+.custom-report-table::-webkit-scrollbar-thumb,
+.custom-report-student-dropdown::-webkit-scrollbar-thumb {
+  background: var(--cr-gray-300);
+  border-radius: 4px;
+}
+
+.custom-report-table::-webkit-scrollbar-thumb:hover,
+.custom-report-student-dropdown::-webkit-scrollbar-thumb:hover {
+  background: var(--cr-gray-400);
+}
+
+
+
+
+
+
+

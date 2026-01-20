@@ -3,9 +3,11 @@ import { Card, Row, Col, Button, Alert, Table, Modal, Spinner } from 'react-boot
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { format, parseISO } from 'date-fns';
-import { toast } from 'react-toastify';
-import { Calendar, Clock, MapPin, RefreshCcw, ArrowRight, CheckCircle, AlertTriangle, Info, User, List, Eye } from 'lucide-react';
+import { useAlert } from '../../contexts/AlertContext';
+import { useTranslation } from 'react-i18next';
+import { Calendar, Clock, MapPin, RefreshCcw, ArrowRight, CheckCircle, AlertTriangle, Info, User, List, Eye, Search, X } from 'lucide-react';
 import '../../styles/modern-ui.css';
+import usePageTitle from '../../hooks/usePageTitle';
 
 // Custom CSS for refresh overlay
 const refreshOverlayStyle = {
@@ -43,6 +45,9 @@ const useInterval = (callback, delay) => {
 };
 
 const StudentDashboard = () => {
+  const { t } = useTranslation();
+  usePageTitle(t('studentDashboard.title'));
+  const { showAlert } = useAlert();
   const { currentUser, api } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -57,6 +62,14 @@ const StudentDashboard = () => {
   const [showGeofenceModal, setShowGeofenceModal] = useState(false);
   const [lastRefreshTime, setLastRefreshTime] = useState(new Date());
   const [allSessions, setAllSessions] = useState([]);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // Filter sessions based on search term
+  const filteredSessions = allSessions.filter(session => 
+    session.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    session.location?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
   
   // Function to calculate distance between two coordinates in meters
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -103,21 +116,32 @@ const StudentDashboard = () => {
         setLoading(true);
       }
       
-      // Get active sessions the student is part of (through groups)
-      const sessionsResponse = await api.get('/sessions/student/dashboard?status=active');
+      // Get active sessions and sessions ended today the student is part of (through groups)
+      const sessionsResponse = await api.get('/sessions/student/attendance?status=active');
       if (sessionsResponse.data.success) {
-        console.log('Active sessions:', sessionsResponse.data.data);
-        setUpcomingSessions(sessionsResponse.data.data);
+        
+        // Also get sessions that ended today
+        const todayEndedResponse = await api.get('/sessions/student/attendance?status=ended&today=true');
+        let todayEndedSessions = [];
+        if (todayEndedResponse.data.success) {
+          todayEndedSessions = todayEndedResponse.data.data;
+        }
+        
+        // Combine active sessions and today's ended sessions, removing duplicates
+        const activeSessionIds = new Set(sessionsResponse.data.data.map(s => s.id));
+        const uniqueTodayEndedSessions = todayEndedSessions.filter(s => !activeSessionIds.has(s.id));
+        const combinedSessions = [...sessionsResponse.data.data, ...uniqueTodayEndedSessions];
+        setUpcomingSessions(combinedSessions);
       }
       
       // Get attendance history
-      const attendanceResponse = await api.get('/sessions/student/dashboard?attended=true');
+      const attendanceResponse = await api.get('/sessions/student/attendance?attended=true');
       if (attendanceResponse.data.success) {
         setAttendedSessions(attendanceResponse.data.data);
       }
       
       // Get all sessions for the list tab
-      const allSessionsResponse = await api.get('/sessions/student/dashboard?all=true');
+      const allSessionsResponse = await api.get('/sessions/student/attendance?all=true');
       if (allSessionsResponse.data.success) {
         setAllSessions(allSessionsResponse.data.data);
       }
@@ -144,17 +168,18 @@ const StudentDashboard = () => {
       setError('');
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
-      setError('Không thể tải dữ liệu. Vui lòng thử lại sau.');
+      setError(t('studentDashboard.errors.cannotLoadData'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
   
-  // Initial data fetch
+  // Initial data fetch - only run once on mount
   useEffect(() => {
     fetchDashboardData();
-  }, [api]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array - only fetch on mount
   
   // Set up auto-refresh interval (every 30 seconds)
   useInterval(() => {
@@ -231,7 +256,7 @@ const StudentDashboard = () => {
           session.monitoring_options?.location?.geofence?.enabled) {
         
         if (!hasLocationPermission) {
-          toast.error('Vui lòng cấp quyền truy cập vị trí để tham gia buổi học.');
+          showAlert(t('studentDashboard.errors.locationPermissionRequired'), 'danger');
           return;
         }
         
@@ -261,12 +286,12 @@ const StudentDashboard = () => {
           }
         } catch (tokenError) {
           console.error('Error generating token:', tokenError);
-          toast.error('Không thể tạo token điểm danh. Vui lòng liên hệ quản trị viên.');
+          showAlert(t('studentDashboard.errors.cannotGenerateToken'), 'danger');
         }
       }
     } catch (error) {
       console.error('Error joining session:', error);
-      toast.error('Không thể tham gia buổi học. Vui lòng thử lại sau.');
+      showAlert(t('studentDashboard.errors.cannotJoinSession'), 'danger');
     } finally {
       setCheckingGeofence(false);
       setSelectedSession(null);
@@ -286,6 +311,16 @@ const StudentDashboard = () => {
     return today.getFullYear() === sessionDate.getFullYear() &&
            today.getMonth() === sessionDate.getMonth() &&
            today.getDate() === sessionDate.getDate();
+  };
+
+  // Format date range for multi-day sessions
+  const formatDateRange = (startDate, endDate) => {
+    const start = format(parseISO(startDate), 'dd/MM/yyyy');
+    if (!endDate || startDate === endDate) {
+      return start;
+    }
+    const end = format(parseISO(endDate), 'dd/MM/yyyy');
+    return `${start} - ${end}`;
   };
 
   // Function to get session status
@@ -317,13 +352,13 @@ const StudentDashboard = () => {
     attendanceStartTime.setMinutes(attendanceStartTime.getMinutes() - 30);
 
     if (now < attendanceStartTime) {
-      return { status: 'upcoming', text: 'Sắp diễn ra', color: 'info' };
+      return { status: 'upcoming', text: t('studentDashboard.sessionStatus.upcoming'), color: 'info' };
     } else if (now >= attendanceStartTime && now < sessionStartTime) {
-      return { status: 'upcoming', text: 'Có thể điểm danh', color: 'warning' };
+      return { status: 'upcoming', text: t('studentDashboard.sessionStatus.canAttend'), color: 'warning' };
     } else if (now >= sessionStartTime && now <= sessionEndTime) {
-      return { status: 'active', text: 'Đang diễn ra', color: 'success' };
+      return { status: 'active', text: t('studentDashboard.sessionStatus.active'), color: 'success' };
     } else {
-      return { status: 'ended', text: 'Đã kết thúc', color: 'secondary' };
+      return { status: 'ended', text: t('studentDashboard.sessionStatus.ended'), color: 'secondary' };
     }
   };
 
@@ -334,8 +369,8 @@ const StudentDashboard = () => {
     return (
       <div key={session.id} className="bg-white rounded-lg p-4 mb-3 shadow-sm border">
         <div className="d-flex justify-content-between align-items-start mb-3">
-          <h6 className="fw-bold mb-0">{session.title}</h6>
-          <span className={`badge bg-${sessionStatus.color}`}>
+          <h6 className="fw-bold mb-0 text-dark session-title-truncated">{session.title}</h6>
+          <span className={`badge bg-${sessionStatus.color} ${sessionStatus.status === 'active' ? 'badge-live-status' : ''} ${sessionStatus.text === 'Có thể điểm danh' ? 'badge-live-status' : ''}`}>
             {sessionStatus.text}
           </span>
         </div>
@@ -343,7 +378,7 @@ const StudentDashboard = () => {
         <div className="d-flex flex-wrap gap-3 mb-3 text-muted small">
           <div className="d-flex align-items-center">
             <Calendar size={14} className="me-1" />
-            <span>{format(new Date(session.date), 'dd/MM/yyyy')}</span>
+            <span>{formatDateRange(session.date, session.end_date)}</span>
           </div>
           <div className="d-flex align-items-center">
             <Clock size={14} className="me-1" />
@@ -363,14 +398,14 @@ const StudentDashboard = () => {
                <button
                  className="btn-modern btn-modern-outline"
                  onClick={() => handleAccessMonitoring(session)}
+                 title={t('studentDashboard.viewDetails')}
                  style={{ 
-                   padding: '0.5rem 1rem',
-                   fontSize: '0.875rem',
-                   minWidth: '120px'
+                   padding: '0.5rem 0.5rem',
+                   fontSize: '1.875rem',
+                   minWidth: '50px'
                  }}
                >
                  <Eye size={14} className="me-1" />
-                 Xem chi tiết
                </button>
              )}
              
@@ -381,6 +416,7 @@ const StudentDashboard = () => {
                <button
                  className="btn-modern"
                  onClick={() => handleJoinSession(session)}
+                 title={t('studentDashboard.joinSession')}
                  disabled={checkingGeofence && selectedSession?.id === session.id}
                  style={{ 
                    padding: '0.5rem 1rem',
@@ -392,20 +428,92 @@ const StudentDashboard = () => {
                  {checkingGeofence && selectedSession?.id === session.id ? (
                    <>
                      <div className="spinner-border spinner-border-sm me-1" role="status">
-                       <span className="visually-hidden">Loading...</span>
+                       <span className="visually-hidden">{t('common.loading')}</span>
                      </div>
-                     <span>Đang kiểm tra...</span>
+                     <span>{t('studentDashboard.checking')}</span>
                    </>
                  ) : (
                    <>
-                     <ArrowRight size={14} className="me-1" />
-                     <span>Tham gia điểm danh</span>
+                     <ArrowRight size={19} className="me-1 arrow-bounce" />
+                     <span>{t('studentDashboard.joinAttendance')}</span>
                    </>
                  )}
                </button>
              )}
            </div>
          )}
+      </div>
+    );
+  };
+
+  // Function to render session list item (for the session list tab)
+  const renderSessionListItem = (session) => {
+    const sessionStatus = getSessionStatus(session);
+    
+    return (
+      <div key={session.id} className="session-list-item">
+        <div className="d-flex align-items-center">
+          <div className="flex-grow-1">
+            <div className="d-flex align-items-start mb-2">
+              <h6 className="fw-bold mb-0 text-dark session-title-truncated me-3">{session.title}</h6>
+              <span className={`badge bg-${sessionStatus.color} ${sessionStatus.status === 'active' ? 'badge-live-status' : ''} ${sessionStatus.text === 'Có thể điểm danh' ? 'badge-live-status' : ''}`}>
+                {sessionStatus.text}
+              </span>
+            </div>
+            <div className="session-info-compact">
+              <span className="text-muted small">{formatDateRange(session.date, session.end_date)}</span>
+              <span className="text-muted small mx-2">|</span>
+              <span className="text-muted small">{session.start_time} - {session.end_time}</span>
+              {session.location && (
+                <>
+                  <span className="text-muted small mx-1">•</span>
+                  <span className="text-muted small">{session.location}</span>
+                </>
+              )}
+            </div>
+          </div>
+          <div className="session-actions-compact">
+            {(sessionStatus.status === 'active' || sessionStatus.status === 'ended') && (
+              <button
+                className="btn-modern btn-modern-outline"
+                onClick={() => handleAccessMonitoring(session)}
+                title={t('studentDashboard.viewDetails')}
+                style={{ 
+                  padding: '0.5rem 0.5rem',
+                  fontSize: '0.6rem',
+                  minWidth: '30px'
+                }}
+              >
+                <Eye size={12} className="me-1" />
+              </button>
+            )}
+            {(sessionStatus.status === 'upcoming' || sessionStatus.status === 'active' || 
+              (sessionStatus.status === 'ended' && isToday(session.date))) && (
+              <button
+                className="btn-modern"
+                onClick={() => handleJoinSession(session)}
+                title={t('studentDashboard.joinSession')}
+                disabled={checkingGeofence && selectedSession?.id === session.id}
+                style={{ 
+                  padding: '0.5rem 0.5rem',
+                  fontSize: '0.6rem',
+                  minWidth: '30px',
+                  backgroundColor: sessionStatus.status === 'ended' ? '#dc3545' : '#256176' // Red for ended sessions
+                }}
+              >
+                {checkingGeofence && selectedSession?.id === session.id ? (
+                  <div className="spinner-border spinner-border-sm" role="status">
+                    <span className="visually-hidden">{t('common.loading')}</span>
+                  </div>
+                ) : (
+                  <>
+                    <ArrowRight size={14} className="me-1" />
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     );
   };
@@ -419,7 +527,7 @@ const StudentDashboard = () => {
             <div className="spinner-border text-primary mb-3" role="status">
               <span className="visually-hidden">Loading...</span>
             </div>
-            <p className="mb-0">Đang tải thông tin buổi học...</p>
+            <p className="mb-0">{t('studentDashboard.loadingSessions')}</p>
           </div>
         </div>
       </div>
@@ -432,11 +540,11 @@ const StudentDashboard = () => {
         <div className="card-header">
           <div className="d-flex align-items-center">
             <i className="fas fa-exclamation-triangle me-2 text-danger"></i>
-            <h5 className="mb-0 fw-bold">Không thể tải thông tin</h5>
+            <h5 className="mb-0 fw-bold">{t('studentDashboard.cannotLoadData')}</h5>
           </div>
         </div>
         <div className="card-body">
-          <p className="mb-3">{error || 'Có lỗi xảy ra. Vui lòng thử lại sau.'}</p>
+          <p className="mb-3">{error || t('studentDashboard.errorOccurred')}</p>
           <div className="d-flex justify-content-end">
             <button 
               className="btn-modern" 
@@ -444,7 +552,7 @@ const StudentDashboard = () => {
               onClick={() => window.location.reload()}
             >
               <i className="fas fa-refresh me-2"></i>
-              Tải lại trang
+              {t('studentDashboard.reloadPage')}
             </button>
           </div>
         </div>
@@ -458,16 +566,10 @@ const StudentDashboard = () => {
         <Row>
           <Col md={7}>
             <div className="d-flex align-items-center">
-              <div className="rounded-circle bg-primary bg-opacity-10 p-3 me-3">
-                <User size={28} className="text-primary" />
-              </div>
               <div>
-                <h2 className="mb-1 fw-bold">Xin chào, {currentUser?.full_name || currentUser?.username}</h2>
+                <h2 className="mb-1 fw-bold">{t('studentDashboard.hello')}, {currentUser?.full_name || currentUser?.username}</h2>
                 <div className="d-flex align-items-center">
-                  <span className="badge modern-badge-primary me-2">Sinh viên</span>
-                  <span className="text-muted small">
-                    Cập nhật lần cuối: {format(lastRefreshTime, 'HH:mm:ss')}
-                  </span>
+                  <span className="badge modern-badge-primary me-2">{t('studentDashboard.student')}</span>
                 </div>
               </div>
             </div>
@@ -476,26 +578,35 @@ const StudentDashboard = () => {
             <div className="d-flex justify-content-end align-items-center h-100 gap-2">
               <button 
                 className="btn-modern"
+                onClick={() => navigate('/student/schedule')}
+                title={t('studentDashboard.schedule')}
+                style={{ backgroundColor: '#256176' }}
+              >
+                <i className="fas fa-calendar-alt"></i>
+              </button>
+              
+              <button 
+                className="btn-modern"
                 onClick={() => navigate('/student/absence-requests')}
+                title={t('studentDashboard.absenceRequests')}
                 style={{ backgroundColor: '#f59e0b' }}
               >
                 <i className="fas fa-calendar-times"></i>
-                <span>Xin phép vắng học</span>
               </button>
               
               <button 
                 className="btn-modern"
                 onClick={() => fetchDashboardData(true)}
                 disabled={refreshing}
+                title={t('studentDashboard.update')}
               >
                 {refreshing ? (
                   <div className="spinner-border spinner-border-sm" role="status">
-                    <span className="visually-hidden">Loading...</span>
+                    <span className="visually-hidden">{t('common.loading')}</span>
                   </div>
                 ) : (
                   <RefreshCcw size={16} />
                 )}
-                <span>{refreshing ? 'Đang cập nhật...' : 'Cập nhật'}</span>
               </button>
             </div>
           </Col>
@@ -518,7 +629,7 @@ const StudentDashboard = () => {
             <div className="rounded-circle bg-danger bg-opacity-10 p-2 me-2">
               <MapPin size={20} className="text-danger" />
             </div>
-            <Modal.Title className="fw-bold">Không thể tham gia buổi học</Modal.Title>
+            <Modal.Title className="fw-bold">{t('studentDashboard.geofenceModal.title')}</Modal.Title>
           </div>
         </Modal.Header>
         <Modal.Body className="pt-0">
@@ -526,8 +637,8 @@ const StudentDashboard = () => {
             <div className="rounded-circle bg-danger bg-opacity-10 d-inline-flex align-items-center justify-content-center mb-3" style={{width: '80px', height: '80px'}}>
               <MapPin size={32} className="text-danger" />
             </div>
-            <h5 className="fw-bold mb-2">Ngoài phạm vi cho phép</h5>
-            <p className="text-muted">Bạn đang ở ngoài phạm vi cho phép của buổi học này. Vui lòng di chuyển đến địa điểm buổi học để tham gia.</p>
+            <h5 className="fw-bold mb-2">{t('studentDashboard.geofenceModal.outOfRange')}</h5>
+            <p className="text-muted">{t('studentDashboard.geofenceModal.outOfRangeDesc')}</p>
           </div>
           
           {selectedSession && selectedSession.monitoring_options?.location?.geofence && (
@@ -535,7 +646,7 @@ const StudentDashboard = () => {
               <div className="d-flex align-items-center">
                 <Info size={20} className="me-2 text-info" />
                 <div>
-                  <strong>Bán kính cho phép:</strong> {selectedSession.monitoring_options.location.geofence.radius} mét từ vị trí buổi học.
+                  <strong>{t('studentDashboard.geofenceModal.allowedRadius')}:</strong> {selectedSession.monitoring_options.location.geofence.radius} {t('studentDashboard.geofenceModal.metersFromLocation')}
                 </div>
               </div>
             </div>
@@ -547,7 +658,7 @@ const StudentDashboard = () => {
             onClick={() => setShowGeofenceModal(false)}
             style={{ backgroundColor: '#6b7280' }}
           >
-            Đóng
+            {t('studentDashboard.geofenceModal.close')}
           </button>
           </div>
         </Modal.Body>
@@ -555,7 +666,7 @@ const StudentDashboard = () => {
       
       {/* Main Content Layout */}
       <Row className="mb-4">
-        {/* Buổi học đang diễn ra */}
+        {/* Buổi học hôm nay */}
         <Col md={6} className="mb-4">
           <div className="modern-card h-100 shadow-sm">
             <div className="card-header bg-white border-0">
@@ -563,7 +674,7 @@ const StudentDashboard = () => {
                 <div className="rounded-circle bg-primary bg-opacity-10 p-2 me-2">
                   <Calendar size={18} className="text-primary" />
                 </div>
-                <h5 className="mb-0 fw-bold">Buổi học đang diễn ra</h5>
+                <h5 className="mb-0 fw-bold">{t('studentDashboard.todaySessions')}</h5>
                 {upcomingSessions.length > 0 && (
                   <span className="badge bg-primary ms-2">{upcomingSessions.length}</span>
                 )}
@@ -592,7 +703,7 @@ const StudentDashboard = () => {
                       <div className="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style={{width: '80px', height: '80px'}}>
                         <Calendar size={32} className="text-muted" />
                       </div>
-                      <p>Không có buổi học nào đang diễn ra</p>
+                      <p>{t('studentDashboard.noSessionsToday')}</p>
                     </div>
                   )}
                 </div>
@@ -605,7 +716,7 @@ const StudentDashboard = () => {
                   <div className="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style={{width: '80px', height: '80px'}}>
                     <Calendar size={32} className="text-muted" />
                   </div>
-                  <p>Không có buổi học nào đang diễn ra</p>
+                  <p>{t('studentDashboard.noSessionsToday')}</p>
                 </div>
               )}
             </div>
@@ -615,16 +726,50 @@ const StudentDashboard = () => {
         {/* Danh sách buổi học */}
         <Col md={6} className="mb-4">
           <div className="modern-card h-100 shadow-sm">
-            <div className="card-header bg-white border-0">
-              <div className="d-flex align-items-center">
-                <div className="rounded-circle bg-info bg-opacity-10 p-2 me-2">
-                  <List size={18} className="text-info" />
+            <div className="card-header bg-white border-0 position-relative">
+              {!showSearch ? (
+                <div className="d-flex align-items-center justify-content-between">
+                  <div className="d-flex align-items-center">
+                    <div className="rounded-circle bg-info bg-opacity-10 p-2 me-2">
+                      <List size={18} className="text-info" />
+                    </div>
+                    <h5 className="mb-0 fw-bold">{t('studentDashboard.sessionList')}</h5>
+                    {allSessions.length > 0 && (
+                      <span className="badge bg-info ms-2">{allSessions.length}</span>
+                    )}
+                  </div>
+                  <button
+                    className="btn btn-sm btn-outline-info"
+                    onClick={() => setShowSearch(true)}
+                    title={t('studentDashboard.searchSessions')}
+                  >
+                    <Search size={16} />
+                  </button>
                 </div>
-                <h5 className="mb-0 fw-bold">Danh sách buổi học</h5>
-                {allSessions.length > 0 && (
-                  <span className="badge bg-info ms-2">{allSessions.length}</span>
-                )}
-              </div>
+              ) : (
+                <div className="search-header-overlay">
+                  <div className="input-group">
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder={t('studentDashboard.searchPlaceholder')}
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      autoFocus
+                    />
+                    <button
+                      className="btn btn-outline-secondary"
+                      onClick={() => {
+                        setShowSearch(false);
+                        setSearchTerm('');
+                      }}
+                      title={t('studentDashboard.closeSearch')}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="card-body">
               {loading ? (
@@ -633,23 +778,23 @@ const StudentDashboard = () => {
                     <span className="visually-hidden">Đang tải...</span>
                   </div>
                 </div>
-              ) : allSessions.length > 0 ? (
+              ) : (showSearch ? filteredSessions : allSessions).length > 0 ? (
                 <div 
                   className="modern-list-group"
                   style={{
-                    maxHeight: '400px',
+                    maxHeight: '600px',
                     overflowY: 'auto',
                     paddingRight: '8px'
                   }}
                 >
-                  {allSessions.map(session => renderSessionCard(session))}
-                    </div>
+                  {(showSearch ? filteredSessions : allSessions).map(session => renderSessionListItem(session))}
+                </div>
               ) : (
                 <div className="text-center text-muted py-5">
                   <div className="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style={{width: '80px', height: '80px'}}>
                     <List size={32} className="text-muted" />
                   </div>
-                  <p>Không có buổi học nào</p>
+                  <p>{showSearch && searchTerm ? t('studentDashboard.noSessionsFound') : t('studentDashboard.noSessions')}</p>
                 </div>
               )}
             </div>
@@ -666,7 +811,7 @@ const StudentDashboard = () => {
                 <div className="rounded-circle bg-success bg-opacity-10 p-2 me-2">
                   <i className="fas fa-history text-success"></i>
                                           </div>
-                <h5 className="mb-0 fw-bold">Lịch sử buổi học</h5>
+                <h5 className="mb-0 fw-bold">{t('studentDashboard.attendanceHistory')}</h5>
                 {attendedSessions.length > 0 && (
                   <span className="badge bg-success ms-2">{attendedSessions.length}</span>
                                       )}
@@ -684,26 +829,26 @@ const StudentDashboard = () => {
                 className="table-responsive"
                 style={{ maxHeight: '400px', overflowY: 'auto' }}
                 >
-                  <table className="modern-table modern-table-hover w-100">
+                  <table className="modern-table modern-table-hover w-100 col-custom">
                     <thead>
                       <tr>
-                        <th>Tên buổi học</th>
-                        <th>Ngày</th>
-                        <th>Thời gian</th>
-                        <th>Điểm danh</th>
-                        <th>Thao tác</th>
+                        <th>{t('studentDashboard.sessionName')}</th>
+                        <th>{t('studentDashboard.date')}</th>
+                        <th>{t('studentDashboard.time')}</th>
+                        <th>{t('studentDashboard.attendance')}</th>
+                        <th>{t('studentDashboard.actions')}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {attendedSessions.map(session => (
                         <tr key={session.id}>
                           <td>
-                            <div className="fw-medium">{session.title}</div>
+                            <div className="fw-bold mb-0 text-dark session-title-truncated">{session.title}</div>
                           </td>
                           <td>
                             <div className="d-flex align-items-center">
                               <Calendar size={14} className="me-1 text-primary" />
-                              <span>{format(new Date(session.date), 'dd/MM/yyyy')}</span>
+                              <span>{formatDateRange(session.date, session.end_date)}</span>
                             </div>
                           </td>
                           <td>
@@ -747,89 +892,99 @@ const StudentDashboard = () => {
                               
                               // Hiển thị badge theo loại điểm danh
                               const getAttendanceBadge = (record) => {
+                                const formatTime = (timestamp) => {
+                                  if (!timestamp) return '';
+                                  try {
+                                    return format(new Date(timestamp), 'HH:mm');
+                                  } catch {
+                                    return '';
+                                  }
+                                };
+                                
                                 if (!record.attendance_type) return (
-                                  <div className="modern-badge modern-badge-success">
-                                    <CheckCircle size={12} className="me-1" />
-                                    <span>Đã điểm danh</span>
+                                  <div className="modern-badge modern-badge-success" title={`${t('studentDashboard.time')}: ${formatTime(record.timestamp)}`}>
+                                    <span>{t('studentDashboard.attendanceTypes.present')}</span>
+                                    {formatTime(record.timestamp) && <small className="ms-1">({formatTime(record.timestamp)})</small>}
                                   </div>
                                 );
                                 
                                 switch (record.attendance_type) {
                                   case 'before':
                                     return (
-                                      <div className="modern-badge modern-badge-success">
-                                        <i className="fas fa-hourglass-start me-1"></i>
-                                        <span>Điểm danh trước</span>
+                                      <div className="modern-badge modern-badge-success" title={`${t('studentDashboard.time')}: ${formatTime(record.timestamp)}`}>
+                                        <span>{t('studentDashboard.attendanceTypes.before')}</span>
+                                        {formatTime(record.timestamp) && <small className="ms-1">({formatTime(record.timestamp)})</small>}
                                       </div>
                                     );
                                   case 'during':
                                     return (
-                                      <div className="modern-badge modern-badge-success">
-                                        <i className="fas fa-clock me-1"></i>
-                                        <span>Điểm danh trong</span>
+                                      <div className="modern-badge modern-badge-success" title={`${t('studentDashboard.time')}: ${formatTime(record.timestamp)}`}>
+                                        <span>{t('studentDashboard.attendanceTypes.during')}</span>
+                                        {formatTime(record.timestamp) && <small className="ms-1">({formatTime(record.timestamp)})</small>}
                                       </div>
                                     );
                                   case 'after':
                                     return (
-                                      <div className="modern-badge modern-badge-success">
-                                        <i className="fas fa-hourglass-end me-1"></i>
-                                        <span>Điểm danh sau</span>
+                                      <div className="modern-badge modern-badge-success" title={`${t('studentDashboard.time')}: ${formatTime(record.timestamp)}`}>
+                                        <span>{t('studentDashboard.attendanceTypes.after')}</span>
+                                        {formatTime(record.timestamp) && <small className="ms-1">({formatTime(record.timestamp)})</small>}
                                       </div>
                                     );
                                   case 'early':
                                     return (
-                                      <div className="modern-badge modern-badge-info">
-                                        <i className="fas fa-running me-1"></i>
-                                        <span>Đi trước {record.minutes_early}p</span>
+                                      <div className="modern-badge modern-badge-info" title={`${t('studentDashboard.time')}: ${formatTime(record.timestamp)}`}>
+                                        <span>{t('studentDashboard.attendanceTypes.early', { minutes: record.minutes_early })}</span>
+                                        {formatTime(record.timestamp) && <small className="ms-1">({formatTime(record.timestamp)})</small>}
                                       </div>
                                     );
                                   case 'late':
+                                  case 'late_before':
                                     return (
-                                      <div className="modern-badge modern-badge-warning">
-                                        <i className="fas fa-user-clock me-1"></i>
-                                        <span>Đi trễ {record.minutes_late}p</span>
+                                      <div className="modern-badge modern-badge-warning" title={`${t('studentDashboard.time')}: ${formatTime(record.timestamp)}`}>
+                                        <span>{t('studentDashboard.attendanceTypes.late', { minutes: record.minutes_late })}</span>
+                                        {formatTime(record.timestamp) && <small className="ms-1">({formatTime(record.timestamp)})</small>}
                                       </div>
                                     );
                                   case 'late_leave':
                                     return (
-                                      <div className="modern-badge modern-badge-warning">
-                                        <i className="fas fa-sign-out-alt me-1"></i>
-                                        <span>Về trễ {record.minutes_late}p</span>
+                                      <div className="modern-badge modern-badge-warning" title={`${t('studentDashboard.time')}: ${formatTime(record.timestamp)}`}>
+                                        <span>{t('studentDashboard.attendanceTypes.late', { minutes: record.minutes_late })}</span>
+                                        {formatTime(record.timestamp) && <small className="ms-1">({formatTime(record.timestamp)})</small>}
                                       </div>
                                     );
                                   case 'absent_perm':
                                     return (
-                                      <div className="modern-badge modern-badge-danger">
-                                        <i className="fas fa-user-times me-1"></i>
-                                        <span>Phép cả buổi</span>
+                                      <div className="modern-badge modern-badge-danger" title={`${t('studentDashboard.time')}: ${formatTime(record.timestamp)}`}>
+                                        <span>{t('studentDashboard.attendanceTypes.absentPerm')}</span>
+                                        {formatTime(record.timestamp) && <small className="ms-1">({formatTime(record.timestamp)})</small>}
                                       </div>
                                     );
                                   case 'absent_before_perm':
                                     return (
-                                      <div className="modern-badge modern-badge-info">
-                                        <i className="fas fa-user-times me-1"></i>
-                                        <span>Phép trước buổi</span>
+                                      <div className="modern-badge modern-badge-info" title={`${t('studentDashboard.time')}: ${formatTime(record.timestamp)}`}>
+                                        <span>{t('studentDashboard.attendanceTypes.absentBeforePerm')}</span>
+                                        {formatTime(record.timestamp) && <small className="ms-1">({formatTime(record.timestamp)})</small>}
                                       </div>
                                     );
                                   case 'absent_during_perm':
                                     return (
-                                      <div className="modern-badge modern-badge-warning">
-                                        <i className="fas fa-user-times me-1"></i>
-                                        <span>Phép trong buổi</span>
+                                      <div className="modern-badge modern-badge-warning" title={`${t('studentDashboard.time')}: ${formatTime(record.timestamp)}`}>
+                                        <span>{t('studentDashboard.attendanceTypes.absentDuringPerm')}</span>
+                                        {formatTime(record.timestamp) && <small className="ms-1">({formatTime(record.timestamp)})</small>}
                                       </div>
                                     );
                                   case 'absent_after_perm':
                                     return (
-                                      <div className="modern-badge modern-badge-secondary">
-                                        <i className="fas fa-user-times me-1"></i>
-                                        <span>Phép sau buổi</span>
+                                      <div className="modern-badge modern-badge-secondary" title={`${t('studentDashboard.time')}: ${formatTime(record.timestamp)}`}>
+                                        <span>{t('studentDashboard.attendanceTypes.absentAfterPerm')}</span>
+                                        {formatTime(record.timestamp) && <small className="ms-1">({formatTime(record.timestamp)})</small>}
                                       </div>
                                     );
                                   default:
                                     return (
                                       <div className="modern-badge modern-badge-success">
                                         <CheckCircle size={12} className="me-1" />
-                                        <span>Đã điểm danh</span>
+                                        <span>{t('studentDashboard.attendanceTypes.present')}</span>
                                       </div>
                                     );
                                 }
@@ -840,19 +995,22 @@ const StudentDashboard = () => {
                                 return (
                                   <div className="modern-badge modern-badge-success">
                                     <CheckCircle size={12} className="me-1" />
-                                    <span>Đã điểm danh</span>
                                   </div>
                                 );
                               }
                               
-                              // Hiển thị bản ghi mới nhất
-                              const latestRecord = allAttendanceRecords[0];
+                              // Hiển thị tất cả bản ghi điểm danh
                               return (
-                                <div className="d-flex align-items-center gap-2">
-                                  {getAttendanceBadge(latestRecord)}
-                                  {latestRecord.isCurrent && (
-                                    <div className="modern-badge modern-badge-primary">Hiện tại</div>
-                                  )}
+                                <div className="d-flex flex-wrap align-items-center gap-1">
+                                  {allAttendanceRecords.map((record, index) => (
+                                    <div key={index} className="d-flex align-items-center">
+                                      {getAttendanceBadge(record)}
+                                      {record.isCurrent && (
+                                        <small className="text-success ms-1" title={t('studentDashboard.attendanceTypes.currentRecord')}>
+                                        </small>
+                                      )}
+                                    </div>
+                                  ))}
                                 </div>
                               );
                             })()}
@@ -871,7 +1029,6 @@ const StudentDashboard = () => {
                                    }}
                                  >
                                    <Eye size={12} className="me-1" />
-                                   Xem chi tiết điểm danh
                             </button>
 
 
@@ -888,7 +1045,7 @@ const StudentDashboard = () => {
                   <div className="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style={{width: '80px', height: '80px'}}>
                     <i className="fas fa-history fa-2x text-muted"></i>
                   </div>
-                  <p>Chưa có lịch sử buổi học</p>
+                  <p>{t('studentDashboard.noAttendanceHistory')}</p>
                 </div>
               )}
             </div>
@@ -905,7 +1062,7 @@ const StudentDashboard = () => {
                 <div className="rounded-circle bg-info bg-opacity-10 p-2 me-2">
                   <i className="fas fa-info-circle text-info"></i>
                 </div>
-                <h5 className="mb-0 fw-bold">Hướng dẫn sử dụng và Quy định</h5>
+                <h5 className="mb-0 fw-bold">{t('studentDashboard.guidelines.title')}</h5>
               </div>
             </div>
             <div className="card-body">
@@ -914,7 +1071,7 @@ const StudentDashboard = () => {
                 <Col md={6} className="mb-4">
                   <h6 className="fw-bold mb-3">
                     <i className="fas fa-book me-2"></i>
-                    Hướng dẫn sử dụng
+                    {t('studentDashboard.guidelines.usageGuide')}
                   </h6>
                   <div className="modern-list-group">
                     <div className="modern-list-item">
@@ -923,8 +1080,8 @@ const StudentDashboard = () => {
                           <i className="fas fa-qrcode text-muted" style={{fontSize: '12px'}}></i>
                         </div>
                         <div>
-                          <strong>Điểm danh bằng QR Code:</strong>
-                          <p className="mb-1 small text-muted">Quét mã QR được cung cấp bởi giảng viên để điểm danh tham gia buổi học. (nếu có)</p>
+                          <strong>{t('studentDashboard.guidelines.qrCodeAttendance.title')}</strong>
+                          <p className="mb-1 small text-muted">{t('studentDashboard.guidelines.qrCodeAttendance.desc')}</p>
                         </div>
                       </div>
                     </div>
@@ -935,8 +1092,8 @@ const StudentDashboard = () => {
                           <i className="fas fa-map-marker-alt text-muted" style={{fontSize: '12px'}}></i>
                         </div>
                         <div>
-                          <strong>Xác nhận vị trí:</strong>
-                          <p className="mb-1 small text-muted">Cấp quyền truy cập vị trí để hệ thống xác nhận bạn đang ở đúng địa điểm buổi học.</p>
+                          <strong>{t('studentDashboard.guidelines.locationConfirmation.title')}</strong>
+                          <p className="mb-1 small text-muted">{t('studentDashboard.guidelines.locationConfirmation.desc')}</p>
                         </div>
                       </div>
                     </div>
@@ -947,8 +1104,8 @@ const StudentDashboard = () => {
                           <i className="fas fa-video text-muted" style={{fontSize: '12px'}}></i>
                         </div>
                         <div>
-                          <strong>Giám sát webcam:</strong>
-                          <p className="mb-1 small text-muted">Cho phép webcam để giảng viên có thể giám sát quá trình học tập (nếu được yêu cầu).</p>
+                          <strong>{t('studentDashboard.guidelines.webcamMonitoring.title')}</strong>
+                          <p className="mb-1 small text-muted">{t('studentDashboard.guidelines.webcamMonitoring.desc')}</p>
                         </div>
                       </div>
                     </div>
@@ -959,8 +1116,8 @@ const StudentDashboard = () => {
                           <i className="fas fa-clock text-muted" style={{fontSize: '12px'}}></i>
                         </div>
                         <div>
-                          <strong>Thời gian điểm danh:</strong>
-                          <p className="mb-1 small text-muted">Điểm danh đúng giờ theo khung thời gian được quy định cho từng buổi học.</p>
+                          <strong>{t('studentDashboard.guidelines.attendanceTime.title')}</strong>
+                          <p className="mb-1 small text-muted">{t('studentDashboard.guidelines.attendanceTime.desc')}</p>
                         </div>
                       </div>
                     </div>
@@ -971,41 +1128,41 @@ const StudentDashboard = () => {
                 <Col md={6} className="mb-4">
                   <h6 className="fw-bold mb-3">
                     <i className="fas fa-check-circle me-2"></i>
-                    Các loại điểm danh
+                    {t('studentDashboard.guidelines.attendanceTypes')}
                   </h6>
                   <div className="modern-list-group">
                     <div className="modern-list-item">
                       <div className="d-flex align-items-center mb-2">
-                        <span className="badge bg-light text-dark me-2">Điểm danh trước</span>
-                        <small className="text-muted">Trước khi buổi học bắt đầu</small>
+                        <span className="badge bg-light text-dark me-2">{t('studentDashboard.guidelines.attendanceTypeBefore.label')}</span>
+                        <small className="text-muted">{t('studentDashboard.guidelines.attendanceTypeBefore.desc')}</small>
                       </div>
                     </div>
                     
                     <div className="modern-list-item">
                       <div className="d-flex align-items-center mb-2">
-                        <span className="badge bg-light text-dark me-2">Điểm danh trong</span>
-                        <small className="text-muted">Trong thời gian buổi học diễn ra</small>
+                        <span className="badge bg-light text-dark me-2">{t('studentDashboard.guidelines.attendanceTypeDuring.label')}</span>
+                        <small className="text-muted">{t('studentDashboard.guidelines.attendanceTypeDuring.desc')}</small>
                       </div>
                     </div>
                     
                     <div className="modern-list-item">
                       <div className="d-flex align-items-center mb-2">
-                        <span className="badge bg-light text-dark me-2">Điểm danh sau</span>
-                        <small className="text-muted">Sau khi buổi học kết thúc</small>
+                        <span className="badge bg-light text-dark me-2">{t('studentDashboard.guidelines.attendanceTypeAfter.label')}</span>
+                        <small className="text-muted">{t('studentDashboard.guidelines.attendanceTypeAfter.desc')}</small>
                       </div>
                     </div>
                     
                     <div className="modern-list-item">
                       <div className="d-flex align-items-center mb-2">
-                        <span className="badge bg-light text-dark me-2">Đi trễ</span>
-                        <small className="text-muted">Đến muộn so với giờ bắt đầu</small>
+                        <span className="badge bg-light text-dark me-2">{t('studentDashboard.guidelines.attendanceTypeLate.label')}</span>
+                        <small className="text-muted">{t('studentDashboard.guidelines.attendanceTypeLate.desc')}</small>
                       </div>
                     </div>
                     
                     <div className="modern-list-item">
                       <div className="d-flex align-items-center mb-2">
-                        <span className="badge bg-light text-dark me-2">Về trễ</span>
-                        <small className="text-muted">Rời khỏi buổi học trễ sau giờ kết thúc</small>
+                        <span className="badge bg-light text-dark me-2">{t('studentDashboard.guidelines.attendanceTypeLateLeave.label')}</span>
+                        <small className="text-muted">{t('studentDashboard.guidelines.attendanceTypeLateLeave.desc')}</small>
                       </div>
                     </div>
                   </div>
@@ -1016,13 +1173,13 @@ const StudentDashboard = () => {
               <div className="mt-4">
                 <h6 className="fw-bold mb-3">
                   <i className="fas fa-exclamation-triangle me-2"></i>
-                  Định nghĩa các hành vi vi phạm
+                  {t('studentDashboard.guidelines.violationDefinitions')}
                 </h6>
                 <div className="alert alert-warning mb-3">
                   <div className="d-flex align-items-start">
                     <i className="fas fa-exclamation-triangle me-2 mt-1"></i>
                     <div>
-                      <strong>Lưu ý quan trọng:</strong> Các hành vi dưới đây được coi là vi phạm và có thể dẫn đến việc bị đánh dấu vắng học hoặc học lại.
+                      <strong>{t('studentDashboard.guidelines.importantNote')}:</strong> {t('studentDashboard.guidelines.importantNoteDesc')}
                     </div>
                   </div>
                 </div>
@@ -1033,25 +1190,25 @@ const StudentDashboard = () => {
                       <div className="modern-list-item border-start border-dark border-3 ps-3">
                         <h6 className="fw-bold mb-2">
                           <i className="fas fa-times-circle me-2"></i>
-                          Vi phạm về thời gian
+                          {t('studentDashboard.guidelines.timeViolations.title')}
                         </h6>
                         <ul className="list-unstyled small mb-0">
-                          <li className="mb-1">• <strong>Đi trễ quá 5 phút:</strong> Đến muộn hơn 5 phút so với giờ bắt đầu buổi học</li>
-                          <li className="mb-1">• <strong>Về sớm không có lý do:</strong> Rời khỏi buổi học trước giờ kết thúc mà không có phép</li>
-                          <li className="mb-1">• <strong>Không điểm danh:</strong> Hoàn toàn không thực hiện điểm danh trong suốt buổi học</li>
-                          <li className="mb-1">• <strong>Điểm danh giả:</strong> Sử dụng mã QR hoặc thông tin của người khác để điểm danh</li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.timeViolations.lateOver5Min')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.timeViolations.earlyLeaveNoReason')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.timeViolations.noAttendance')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.timeViolations.fakeAttendance')}</strong></li>
                         </ul>
                       </div>
                       
                       <div className="modern-list-item border-start border-dark border-3 ps-3 mt-3">
                         <h6 className="fw-bold mb-2">
                           <i className="fas fa-map-marker-alt me-2"></i>
-                          Vi phạm về vị trí
+                          {t('studentDashboard.guidelines.locationViolations.title')}
                         </h6>
                         <ul className="list-unstyled small mb-0">
-                          <li className="mb-1">• <strong>Không ở đúng địa điểm:</strong> Điểm danh khi không có mặt tại địa điểm buổi học</li>
-                          <li className="mb-1">• <strong>Rời khỏi khu vực:</strong> Rời khỏi phạm vi khi đã điểm danh xong</li>
-                          <li className="mb-1">• <strong>Gian lận vị trí:</strong> Sử dụng công nghệ để giả mạo vị trí GPS</li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.locationViolations.wrongLocation')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.locationViolations.leaveArea')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.locationViolations.locationFraud')}</strong></li>
                         </ul>
                       </div>
                     </div>
@@ -1062,25 +1219,25 @@ const StudentDashboard = () => {
                       <div className="modern-list-item border-start border-dark border-3 ps-3">
                         <h6 className="fw-bold mb-2">
                           <i className="fas fa-video me-2"></i>
-                          Vi phạm về giám sát
+                          {t('studentDashboard.guidelines.monitoringViolations.title')}
                         </h6>
                         <ul className="list-unstyled small mb-0">
-                          <li className="mb-1">• <strong>Tắt webcam:</strong> Tắt camera khi được yêu cầu giám sát</li>
-                          <li className="mb-1">• <strong>Che camera:</strong> Che hoặc chặn tầm nhìn của camera</li>
-                          <li className="mb-1">• <strong>Không có mặt trước camera:</strong> Để người khác thay thế trong khung hình</li>
-                          <li className="mb-1">• <strong>Làm gián đoạn giám sát:</strong> Cố tình làm gián đoạn quá trình giám sát</li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.monitoringViolations.turnOffWebcam')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.monitoringViolations.coverCamera')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.monitoringViolations.notInFrame')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.monitoringViolations.interruptMonitoring')}</strong></li>
                         </ul>
                       </div>
                       
                       <div className="modern-list-item border-start border-dark border-3 ps-3 mt-3">
                         <h6 className="fw-bold mb-2">
                           <i className="fas fa-user-times me-2"></i>
-                          Vi phạm về tham gia
+                          {t('studentDashboard.guidelines.participationViolations.title')}
                         </h6>
                         <ul className="list-unstyled small mb-0">
-                          <li className="mb-1">• <strong>Vắng không phép:</strong> Không tham gia buổi học mà không có đơn xin phép vắng</li>
-                          <li className="mb-1">• <strong>Tham gia giả:</strong> Chỉ điểm danh mà không thực sự tham gia học tập</li>
-                          <li className="mb-1">• <strong>Gian lận danh tính:</strong> Để người khác tham gia thay thế</li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.participationViolations.absentNoPermit')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.participationViolations.fakeParticipation')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.participationViolations.identityFraud')}</strong></li>
                         </ul>
                       </div>
                     </div>
@@ -1093,12 +1250,12 @@ const StudentDashboard = () => {
                     <div className="d-flex align-items-start">
                       <i className="fas fa-gavel me-2 mt-1"></i>
                       <div>
-                        <h6 className="fw-bold mb-2">Hậu quả của vi phạm:</h6>
+                        <h6 className="fw-bold mb-2">{t('studentDashboard.guidelines.violationConsequences.title')}</h6>
                         <ul className="list-unstyled small mb-0">
-                          <li className="mb-1">• <strong>Vi phạm nhẹ:</strong> Cảnh báo và ghi nhận vào hồ sơ</li>
-                          <li className="mb-1">• <strong>Vi phạm trung bình:</strong> Đánh dấu vắng học, ảnh hưởng đến điểm số và có thể học lại</li>
-                          <li className="mb-1">• <strong>Vi phạm nghiêm trọng:</strong> Xử lý kỷ luật theo quy định của trường</li>
-                          <li className="mb-1">• <strong>Gian lận:</strong> Có thể bị đình chỉ học tập hoặc hủy kết quả buổi học</li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.violationConsequences.minor')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.violationConsequences.moderate')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.violationConsequences.severe')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.violationConsequences.fraud')}</strong></li>
                         </ul>
                       </div>
                     </div>
@@ -1109,23 +1266,23 @@ const StudentDashboard = () => {
                 <div className="mt-4">
                   <h6 className="fw-bold mb-3">
                     <i className="fas fa-shield-alt me-2"></i>
-                    Chính sách bảo mật thiết bị
+                    {t('studentDashboard.guidelines.devicePolicy')}
                   </h6>
                   <div className="alert alert-warning mb-3">
                     <div className="d-flex align-items-start">
                       <i className="fas fa-shield-alt me-2 mt-1"></i>
                       <div>
-                        <strong>Quy định quan trọng:</strong>
+                        <strong>{t('studentDashboard.guidelines.devicePolicyTitle')}:</strong>
                         <ul className="list-unstyled small mb-0 mt-2">
-                          <li className="mb-1">• <strong>Mỗi thiết bị chỉ được đăng nhập 1 tài khoản</strong></li>
-                          <li className="mb-1">• <strong>Mỗi tài khoản chỉ được đăng nhập 1 thiết bị</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.devicePolicyRule1')}</strong></li>
+                          <li className="mb-1">• <strong>{t('studentDashboard.guidelines.devicePolicyRule2')}</strong></li>
                         </ul>
                         <p className="small mb-0 mt-2">
-                          <strong>Lưu ý:</strong> Nếu gặp lỗi đăng nhập do vi phạm chính sách thiết bị, vui lòng liên hệ:
+                          <strong>{t('studentDashboard.guidelines.devicePolicyNote')}:</strong> {t('studentDashboard.guidelines.devicePolicyNoteDesc')}
                         </p>
                         <ul className="list-unstyled small mb-0 mt-1">
-                          <li>📞 Phòng đào tạo</li>
-                          <li>📧 Email: <a href="mailto:system@pctu.edu.vn" className="text-decoration-none">system@pctu.edu.vn</a></li>
+                          <li>📞 {t('studentDashboard.guidelines.contactTraining')}</li>
+                          <li>📧 {t('studentDashboard.guidelines.contactEmail')}: <a href="mailto:system@pctu.edu.vn" className="text-decoration-none">system@pctu.edu.vn</a></li>
                         </ul>
                       </div>
                     </div>
@@ -1138,7 +1295,7 @@ const StudentDashboard = () => {
                     <div className="d-flex align-items-center justify-content-center">
                       <i className="fas fa-question-circle me-2"></i>
                       <div>
-                        <strong>Cần hỗ trợ?</strong> Liên hệ với giảng viên phụ trách hoặc quản trị viên hệ thống qua email: 
+                        <strong>{t('studentDashboard.guidelines.support')}</strong> {t('studentDashboard.guidelines.supportDesc')}: 
                         <a href="mailto:system@pctu.edu.vn" className="text-decoration-none ms-1">system@pctu.edu.vn</a>
                       </div>
                     </div>

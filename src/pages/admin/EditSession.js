@@ -1,11 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Button, Card, Row, Col, Alert, Spinner, Table, Tabs, Tab, Badge, InputGroup } from 'react-bootstrap';
+import { Form, Button, Card, Row, Col, Alert, Spinner, Table, Tabs, Tab, Badge, InputGroup, Modal } from 'react-bootstrap';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { toast } from 'react-toastify';
+import { useAlert } from '../../contexts/AlertContext';
 import MapPreview from '../../components/MapPreview';
+import { useHospitalLocations } from '../../hooks/useHospitalLocations';
+import usePageTitle from '../../hooks/usePageTitle';
+
+// Helper to format date as YYYY-MM-DD
+const formatDate = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// Function to get the next day
+const getNextDay = (dateString) => {
+  const date = new Date(dateString);
+  date.setDate(date.getDate() + 1);
+  return formatDate(date);
+};
 
 const EditSession = () => {
+  usePageTitle('Chỉnh sửa buổi học');
+  const { showAlert } = useAlert();
   const navigate = useNavigate();
   const { id } = useParams();
   const { api } = useAuth();
@@ -14,10 +33,13 @@ const EditSession = () => {
   const [classes, setClasses] = useState([]);
   const [faculties, setFaculties] = useState([]);
   const [majors, setMajors] = useState([]);
+  const [studentGroups, setStudentGroups] = useState([]);
   const [classFilter, setClassFilter] = useState('');
   const [facultyFilter, setFacultyFilter] = useState('');
   const [majorFilter, setMajorFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('Đang học');
+  const [groupFilter, setGroupFilter] = useState('');
+  const [useGroupMode, setUseGroupMode] = useState(false);
   const [sortField, setSortField] = useState('student_id');
   const [sortOrder, setSortOrder] = useState('asc');
   const [pageSize, setPageSize] = useState(70);
@@ -28,30 +50,23 @@ const EditSession = () => {
   const [error, setError] = useState('');
   const [validated, setValidated] = useState(false);
   const [selectedLocationIndex, setSelectedLocationIndex] = useState(0);
+  const [showStudentSelectionModal, setShowStudentSelectionModal] = useState(false);
   
-  // Predefined hospital locations
-  const predefinedLocations = [
-    { name: "-- Chọn vị trí có sẵn --", latitude: null, longitude: null },
-    { name: "Bệnh viện Tâm Trí Đà Nẵng", latitude: 16.022910377179983, longitude: 108.21418877313431 },
-    { name: "Bệnh viện Tâm Trí Quảng Nam", latitude: 15.83878188925367, longitude: 108.28529005010874 },
-    { name: "Bệnh viện Tâm Trí Sài Gòn", latitude: 10.831702813877188, longitude: 106.62179071788216 },
-    { name: "Bệnh viện Tâm Trí Nha Trang", latitude: 12.212506709091144, longitude: 109.19488283420932 },
-    { name: "Bệnh viện Tâm Trí Đồng Tháp", latitude: 10.476168701979864, longitude: 105.61251450982436 },
-    { name: "Bệnh viện Tâm Trí Hồng Ngự", latitude: 10.808029003252175, longitude: 105.34998297903213 },
-    { name: "Bệnh viện Tâm Trí Cao Lãnh", latitude: 10.465413477175426, longitude: 105.62900633746764 },
-    { name: "Bệnh viện ĐH Y Khoa Phan Châu Trinh", latitude: 15.96252601077044, longitude: 108.25985382432913 },
-    { name: "Bệnh viện TEST", latitude: 15.962683045139078, longitude: 108.25037464216163 }
-  ];
+  // Use hospital locations from API
+  const { hospitalLocations, loading: locationsLoading } = useHospitalLocations();
+  const predefinedLocations = hospitalLocations;
   
   const [formData, setFormData] = useState({
     name: '',
     date: '',
+    endDate: '', // For multi-day sessions
     startTime: '',
     endTime: '',
     location: '',
     description: '',
     studentIds: [],
     status: '',
+    nightShift: false, // For night shift sessions (2 days)
     password: '',
     monitoringOptions: {
       location: {
@@ -82,12 +97,14 @@ const EditSession = () => {
         before_session: {
           enabled: true,
           minutes_before: 30, // Điểm danh bắt đầu trước giờ học bao nhiêu phút
-          duration: 30 // Thời gian cho phép điểm danh kéo dài bao nhiêu phút
+          duration: 30, // Thời gian cho phép điểm danh kéo dài bao nhiêu phút
+          max_late_minutes: 30 // Cho phép sinh viên điểm danh đi trễ tối đa bao nhiêu phút
         },
         during_session: {
           enabled: true,
           minutes_after_start: 120, // Điểm danh bắt đầu sau giờ bắt đầu buổi học bao nhiêu phút
-          minutes_before_end: 120 // Điểm danh kết thúc trước giờ kết thúc buổi học bao nhiêu phút
+          minutes_before_end: 120, // Điểm danh kết thúc trước giờ kết thúc buổi học bao nhiêu phút
+          duty_students: [] // Danh sách sinh viên ra ca trực
         },
         after_session: {
           enabled: true,
@@ -112,8 +129,10 @@ const EditSession = () => {
           setFaculties(filterResponse.data.faculties.map(f => f.name));
           setMajors(filterResponse.data.majors.map(m => m.name));
         } else {
-          toast.error('Không thể tải danh sách lớp/khoa/ngành');
+          showAlert('Không thể tải danh sách lớp/khoa/ngành', 'danger');
         }
+
+        // Student groups sẽ được fetch trong useEffect riêng
         
         // Fetch session data
         const sessionResponse = await api.get(`/sessions/${id}`);
@@ -177,6 +196,8 @@ const EditSession = () => {
             ...formData,
             name: session.title || '',
             date: formatDate(session.date),
+            endDate: session.end_date ? formatDate(session.end_date) : '',
+            nightShift: session.night_shift || false,
             startTime: session.start_time || '',
             endTime: session.end_time || '',
             location: session.location || '',
@@ -213,12 +234,14 @@ const EditSession = () => {
                 before_session: {
                   enabled: serverMonitoringOptions.attendance?.before_session?.enabled ?? true,
                   minutes_before: serverMonitoringOptions.attendance?.before_session?.minutes_before ?? 30,
-                  duration: serverMonitoringOptions.attendance?.before_session?.duration ?? 30
+                  duration: serverMonitoringOptions.attendance?.before_session?.duration ?? 30,
+                  max_late_minutes: serverMonitoringOptions.attendance?.before_session?.max_late_minutes ?? 30
                 },
                 during_session: {
                   enabled: serverMonitoringOptions.attendance?.during_session?.enabled ?? false,
                   minutes_after_start: serverMonitoringOptions.attendance?.during_session?.minutes_after_start ?? 120,
-                  minutes_before_end: serverMonitoringOptions.attendance?.during_session?.minutes_before_end ?? 120
+                  minutes_before_end: serverMonitoringOptions.attendance?.during_session?.minutes_before_end ?? 120,
+                  duty_students: serverMonitoringOptions.attendance?.during_session?.duty_students ?? []
                 },
                 after_session: {
                   enabled: serverMonitoringOptions.attendance?.after_session?.enabled ?? false,
@@ -228,6 +251,12 @@ const EditSession = () => {
               }
             }
           });
+          
+          // Lưu session data để sử dụng sau khi studentGroups được load
+          setFormData(prev => ({
+            ...prev,
+            _sessionData: session // Lưu session data tạm thời
+          }));
           
           // Fetch session students
           try {
@@ -327,7 +356,7 @@ const EditSession = () => {
             }
           } catch (err) {
             console.error('Error fetching session students:', err);
-            toast.error('Không thể tải danh sách sinh viên của buổi học');
+            showAlert('Không thể tải danh sách sinh viên của buổi học', 'danger');
           }
         } else {
           setError('Không thể tải thông tin buổi học');
@@ -342,6 +371,27 @@ const EditSession = () => {
     
     fetchData();
   }, [id, api]);
+
+  // Cập nhật selectedLocationIndex khi predefinedLocations được load xong
+  useEffect(() => {
+    if (predefinedLocations.length > 0 && formData.location) {
+      const locationIndex = predefinedLocations.findIndex(loc => loc.name === formData.location);
+      if (locationIndex !== -1 && locationIndex !== selectedLocationIndex) {
+        setSelectedLocationIndex(locationIndex);
+      } else if (locationIndex === -1 && formData.monitoringOptions?.location?.geofence?.coordinates?.latitude) {
+        // Check if coordinates match any predefined hospital
+        const coordsIndex = predefinedLocations.findIndex(loc =>
+          loc.latitude &&
+          loc.longitude &&
+          Math.abs(loc.latitude - formData.monitoringOptions.location.geofence.coordinates.latitude) < 0.0001 &&
+          Math.abs(loc.longitude - formData.monitoringOptions.location.geofence.coordinates.longitude) < 0.0001
+        );
+        if (coordsIndex !== -1 && coordsIndex !== selectedLocationIndex) {
+          setSelectedLocationIndex(coordsIndex);
+        }
+      }
+    }
+  }, [predefinedLocations, formData.location]);
   
   // Fetch students based on filters
   useEffect(() => {
@@ -407,16 +457,304 @@ const EditSession = () => {
             setStudents(updatedStudentsList);
           }
         } else {
-          toast.error('Không thể tải danh sách sinh viên');
+          showAlert('Không thể tải danh sách sinh viên', 'danger');
         }
       } catch (error) {
         console.error('Error fetching students:', error);
-        toast.error('Đã xảy ra lỗi khi tải danh sách sinh viên');
+        showAlert('Đã xảy ra lỗi khi tải danh sách sinh viên', 'danger');
       }
     };
     
     fetchStudents();
   }, [api, classFilter, facultyFilter, majorFilter, statusFilter, sortField, sortOrder, loading, currentPage, pageSize]);
+
+  // Fetch students by group when group filter changes
+  useEffect(() => {
+    console.log('Debug - Group useEffect triggered:', {
+      useGroupMode,
+      groupFilter,
+      hasGroupFilter: !!groupFilter
+    });
+    
+    if (useGroupMode && groupFilter) {
+      console.log('Debug - Fetching students for group:', groupFilter);
+      const fetchStudentsByGroup = async () => {
+        try {
+          const response = await api.get(`/student-groups/${groupFilter}`);
+          console.log('Debug - Group students response:', response.data);
+          if (response.data && response.data.success) {
+            const groupStudents = response.data.data.students || [];
+            console.log('Debug - Group students loaded:', groupStudents.length);
+            setStudents(groupStudents);
+            setTotalStudents(groupStudents.length);
+            
+            // Tự động chọn tất cả sinh viên trong nhóm
+            setSelectedStudents(groupStudents);
+            console.log('Debug - Selected students set:', groupStudents.length);
+          }
+        } catch (error) {
+          console.error('Error fetching students by group:', error);
+          showAlert('Đã xảy ra lỗi khi tải sinh viên theo nhóm', 'danger');
+        }
+      };
+      
+      fetchStudentsByGroup();
+    } else if (!useGroupMode || !groupFilter) {
+      console.log('Debug - Clearing selected students (no group mode)');
+      // Nếu không chọn nhóm, xóa tất cả sinh viên đã chọn
+      setSelectedStudents([]);
+    }
+  }, [api, groupFilter, useGroupMode]);
+
+  // Xác định nhóm sinh viên đã chọn khi cả session data và studentGroups đều được load
+  useEffect(() => {
+    console.log('Debug - useEffect triggered:', {
+      hasSessionData: !!formData._sessionData,
+      studentGroupsLength: studentGroups.length,
+      loading: loading
+    });
+    
+    if (formData._sessionData && studentGroups.length > 0) {
+      const session = formData._sessionData;
+      
+      console.log('Debug - Session data:', {
+        sessionId: session.id,
+        group_names: session.group_names,
+        class_names: session.class_names,
+        selected_group_ids: session.selected_group_ids,
+        selected_group_ids_type: typeof session.selected_group_ids,
+        selected_group_ids_length: session.selected_group_ids ? session.selected_group_ids.length : 'null/undefined'
+      });
+      
+      // Debug thêm về cấu trúc dữ liệu
+      console.log('Debug - Full session object keys:', Object.keys(session));
+      console.log('Debug - Raw selected_group_ids:', JSON.stringify(session.selected_group_ids));
+      
+      console.log('Debug - Available student groups:', studentGroups.map(g => ({
+        id: g.id,
+        group_name: g.group_name
+      })));
+      
+      // Parse selected_group_ids nếu nó là string
+      let parsedSelectedGroupIds = session.selected_group_ids;
+      if (typeof session.selected_group_ids === 'string') {
+        try {
+          parsedSelectedGroupIds = JSON.parse(session.selected_group_ids);
+          console.log('Parsed selected_group_ids from string:', parsedSelectedGroupIds);
+        } catch (error) {
+          console.error('Error parsing selected_group_ids:', error);
+          parsedSelectedGroupIds = null;
+        }
+      }
+      
+      // Ưu tiên sử dụng selected_group_ids nếu có
+      if (parsedSelectedGroupIds && Array.isArray(parsedSelectedGroupIds) && parsedSelectedGroupIds.length > 0) {
+        console.log('Using selected_group_ids:', parsedSelectedGroupIds);
+        const firstGroupId = parsedSelectedGroupIds[0];
+        
+        // Kiểm tra nếu là class identifier
+        if (typeof firstGroupId === 'string' && firstGroupId.startsWith('class:')) {
+          const className = firstGroupId.replace('class:', '');
+          console.log('Detected class identifier:', className);
+          setGroupFilter('');
+          setUseGroupMode(false);
+          // Set class filter để hiển thị đúng lớp
+          setClassFilter(className);
+          
+          // Trigger load students from class immediately
+          setTimeout(() => {
+            console.log('Debug - Triggering manual class students load');
+            const fetchStudentsFromClass = async () => {
+              try {
+                const response = await api.get(`/users?role=student&class_name=${encodeURIComponent(className)}&page=1&limit=1000`);
+                console.log('Debug - Class students response:', response.data);
+                if (response.data && response.data.success) {
+                  const classStudents = response.data.data || [];
+                  console.log('Debug - Class students loaded:', classStudents.length);
+                  setStudents(classStudents);
+                  setTotalStudents(classStudents.length);
+                  setSelectedStudents(classStudents);
+                  console.log('Debug - Class selected students set:', classStudents.length);
+                }
+              } catch (error) {
+                console.error('Error in manual class students fetch:', error);
+              }
+            };
+            fetchStudentsFromClass();
+          }, 100);
+        } else {
+          // Tìm group theo ID
+          const matchingGroup = studentGroups.find(group => group.id === firstGroupId);
+          
+          if (matchingGroup) {
+            console.log('Found matching group by ID:', matchingGroup.group_name);
+            setGroupFilter(matchingGroup.id);
+            setUseGroupMode(true);
+            
+            // Trigger load students immediately
+            setTimeout(() => {
+              console.log('Debug - Triggering manual group students load');
+              const fetchStudentsByGroup = async () => {
+                try {
+                  const response = await api.get(`/student-groups/${matchingGroup.id}`);
+                  console.log('Debug - Manual group students response:', response.data);
+                  if (response.data && response.data.success) {
+                    const groupStudents = response.data.data.students || [];
+                    console.log('Debug - Manual group students loaded:', groupStudents.length);
+                    setStudents(groupStudents);
+                    setTotalStudents(groupStudents.length);
+                    setSelectedStudents(groupStudents);
+                    console.log('Debug - Manual selected students set:', groupStudents.length);
+                  }
+                } catch (error) {
+                  console.error('Error in manual group students fetch:', error);
+                }
+              };
+              fetchStudentsByGroup();
+            }, 100);
+          } else {
+            console.log('No matching group found by ID:', firstGroupId);
+            // Fallback: thử tìm theo group_names
+            if (session.group_names && session.group_names.trim()) {
+              console.log('Fallback to group_names:', session.group_names);
+              const sessionGroupNames = session.group_names.split(',').map(name => name.trim());
+              const matchingGroupByName = studentGroups.find(group => 
+                sessionGroupNames.includes(group.group_name)
+              );
+              
+              if (matchingGroupByName) {
+                console.log('Found matching group by name:', matchingGroupByName.group_name);
+                setGroupFilter(matchingGroupByName.id);
+                setUseGroupMode(true);
+                
+                // Trigger load students immediately for fallback
+                setTimeout(() => {
+                  console.log('Debug - Triggering manual group students load (fallback)');
+                  const fetchStudentsByGroup = async () => {
+                    try {
+                      const response = await api.get(`/student-groups/${matchingGroupByName.id}`);
+                      console.log('Debug - Manual group students response (fallback):', response.data);
+                      if (response.data && response.data.success) {
+                        const groupStudents = response.data.data.students || [];
+                        console.log('Debug - Manual group students loaded (fallback):', groupStudents.length);
+                        setStudents(groupStudents);
+                        setTotalStudents(groupStudents.length);
+                        setSelectedStudents(groupStudents);
+                        console.log('Debug - Manual selected students set (fallback):', groupStudents.length);
+                      }
+                    } catch (error) {
+                      console.error('Error in manual group students fetch (fallback):', error);
+                    }
+                  };
+                  fetchStudentsByGroup();
+                }, 100);
+              } else {
+                setGroupFilter('');
+                setUseGroupMode(false);
+              }
+            } else {
+              setGroupFilter('');
+              setUseGroupMode(false);
+            }
+          }
+        }
+      } else if (session.group_names && session.group_names.trim()) {
+        // Fallback: sử dụng group_names nếu không có selected_group_ids
+        console.log('Using group_names fallback:', session.group_names);
+        const sessionGroupNames = session.group_names.split(',').map(name => name.trim());
+        
+        // Tìm nhóm đầu tiên khớp (có thể có nhiều nhóm nhưng chỉ chọn nhóm đầu tiên)
+        const matchingGroup = studentGroups.find(group => 
+          sessionGroupNames.includes(group.group_name)
+        );
+        
+        if (matchingGroup) {
+          console.log('Found matching group by name:', {
+            sessionGroupNames,
+            matchingGroup: matchingGroup.group_name,
+            groupId: matchingGroup.id
+          });
+          setGroupFilter(matchingGroup.id);
+          setUseGroupMode(true);
+        } else {
+          console.log('No matching group found by name:', {
+            sessionGroupNames,
+            availableGroups: studentGroups.map(g => g.group_name)
+          });
+          setGroupFilter('');
+          setUseGroupMode(false);
+        }
+      } else {
+        // Nếu không có nhóm, thử sử dụng class_names
+        if (session.class_names && session.class_names.trim()) {
+          console.log('Using class_names fallback:', session.class_names);
+          const classNames = session.class_names.split(',').map(name => name.trim());
+          if (classNames.length > 0) {
+            const className = classNames[0];
+            console.log('Setting class filter to:', className);
+            setClassFilter(className);
+            setGroupFilter('');
+            setUseGroupMode(false);
+            
+            // Trigger load students from class immediately
+            setTimeout(() => {
+              console.log('Debug - Triggering manual class students load (class_names fallback)');
+              const fetchStudentsFromClass = async () => {
+                try {
+                  const response = await api.get(`/users?role=student&class_name=${encodeURIComponent(className)}&page=1&limit=1000`);
+                  console.log('Debug - Class students response (class_names fallback):', response.data);
+                  if (response.data && response.data.success) {
+                    const classStudents = response.data.data || [];
+                    console.log('Debug - Class students loaded (class_names fallback):', classStudents.length);
+                    setStudents(classStudents);
+                    setTotalStudents(classStudents.length);
+                    setSelectedStudents(classStudents);
+                    console.log('Debug - Class selected students set (class_names fallback):', classStudents.length);
+                  }
+                } catch (error) {
+                  console.error('Error in manual class students fetch (class_names fallback):', error);
+                }
+              };
+              fetchStudentsFromClass();
+            }, 100);
+          }
+        } else {
+          // Nếu không có nhóm, reset về chế độ lớp
+          console.log('Session has no group information, using class mode');
+          setGroupFilter('');
+          setUseGroupMode(false);
+        }
+      }
+      
+      // Xóa session data tạm thời
+      setFormData(prev => {
+        const { _sessionData, ...rest } = prev;
+        return rest;
+      });
+    }
+  }, [formData._sessionData, studentGroups, loading]);
+
+  // Thêm useEffect riêng để đảm bảo studentGroups được load trước
+  useEffect(() => {
+    const fetchStudentGroups = async () => {
+      try {
+        console.log('Debug - Fetching student groups...');
+        const groupsResponse = await api.get('/student-groups');
+        if (groupsResponse.data && groupsResponse.data.success) {
+          const groups = groupsResponse.data.data || [];
+          setStudentGroups(groups);
+          console.log('Debug - Student groups loaded:', groups.length);
+          console.log('Debug - Groups data:', groups.map(g => ({ id: g.id, name: g.group_name })));
+        } else {
+          console.error('Error fetching student groups:', groupsResponse.data?.message);
+        }
+      } catch (error) {
+        console.error('Error fetching student groups:', error);
+      }
+    };
+
+    fetchStudentGroups();
+  }, [api]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -480,7 +818,7 @@ const EditSession = () => {
       
       // Just validate the format is YYYY-MM-DD
       if (sessionDate && !/^\d{4}-\d{2}-\d{2}$/.test(sessionDate)) {
-        toast.error('Định dạng ngày không hợp lệ. Vui lòng sử dụng định dạng YYYY-MM-DD.');
+        showAlert('Định dạng ngày không hợp lệ. Vui lòng sử dụng định dạng YYYY-MM-DD.', 'danger');
         setSubmitting(false);
         return;
       }
@@ -501,11 +839,14 @@ const EditSession = () => {
         description: formData.description,
         studentIds: studentIdsList,
         date: sessionDate,
+        endDate: formData.nightShift ? getNextDay(formData.date) : (formData.endDate || null), // Include endDate for multi-day sessions
         startTime: formData.startTime,
         endTime: formData.endTime,
         location: formData.location,
         status: formData.status,
-        monitoringOptions: formData.monitoringOptions
+        monitoringOptions: formData.monitoringOptions,
+        useGroupMode: useGroupMode, // Thêm thông tin về chế độ chọn nhóm/lớp
+        selectedGroupId: groupFilter // Thêm ID nhóm đã chọn (nếu có)
       };
       
       // Log the data being sent to help with debugging
@@ -520,7 +861,7 @@ const EditSession = () => {
       const response = await api.put(`/sessions/${id}`, sessionData);
       
       if (response.data.success) {
-        toast.success('Cập nhật buổi học thành công');
+        showAlert('Cập nhật buổi học thành công', 'success');
         navigate('/admin/sessions');
       } else {
         setError(response.data.message || 'Không thể cập nhật buổi học');
@@ -547,19 +888,19 @@ const EditSession = () => {
   return (
     <div>
       <div className="d-flex justify-content-between align-items-center mb-4">
-        <h2 className="m-0">Chỉnh sửa buổi học lâm sàng</h2>
+        <h2 className="m-0 fw-bold">Chỉnh sửa buổi học</h2>
         <div>
-          <Button 
-            variant="outline-secondary" 
-            className="me-2"
+          <button
+            className="btn-modern me-2"
+            style={{ backgroundColor: '#6c757d' }}
             onClick={() => navigate('/admin/sessions')}
             disabled={submitting}
           >
             <i className="fas fa-times me-1"></i> Hủy
-          </Button>
-          <Button 
-            type="submit" 
-            variant="primary"
+          </button>
+          <button
+            type="submit"
+            className="btn-modern"
             disabled={submitting}
             onClick={handleSubmit}
           >
@@ -568,15 +909,15 @@ const EditSession = () => {
             ) : (
               <><i className="fas fa-save me-1"></i> Cập nhật buổi học</>
             )}
-          </Button>
+          </button>
         </div>
       </div>
       
       {error && <Alert variant="danger"><i className="fas fa-exclamation-triangle me-2"></i>{error}</Alert>}
       
       <Form noValidate validated={validated} onSubmit={handleSubmit}>
-        <Tabs defaultActiveKey="basic" id="session-tabs" className="mb-3">
-          <Tab eventKey="basic" title={<span><i className="fas fa-info-circle me-1"></i>Thông tin cơ bản</span>}>
+        <Tabs defaultActiveKey="basic" id="session-tabs" className="custom-tabs mb-3">
+          <Tab eventKey="basic" title={<span className="tab-title"><i className="fas fa-info-circle"></i> Thông tin cơ bản</span>}>
             <Card className="shadow-sm">
               <Card.Body>
                 <Row>
@@ -649,9 +990,9 @@ const EditSession = () => {
                   
                   <Col md={6}>
                     <Row>
-                      <Col md={12}>
+                      <Col md={6}>
                         <Form.Group className="mb-3">
-                          <Form.Label>Ngày</Form.Label>
+                          <Form.Label>Ngày bắt đầu</Form.Label>
                           <InputGroup>
                             <InputGroup.Text><i className="fas fa-calendar-alt"></i></InputGroup.Text>
                             <Form.Control
@@ -663,11 +1004,35 @@ const EditSession = () => {
                             />
                           </InputGroup>
                           <Form.Control.Feedback type="invalid">
-                            Vui lòng chọn ngày.
+                            Vui lòng chọn ngày bắt đầu.
                           </Form.Control.Feedback>
                         </Form.Group>
                       </Col>
+                      
+                      <Col md={6}>
+                        <Form.Group className="mb-3">
+                          <Form.Label>Ngày kết thúc <span className="text-muted">(Tùy chọn - cho nhiều ngày)</span></Form.Label>
+                          <InputGroup>
+                            <InputGroup.Text><i className="fas fa-calendar-check"></i></InputGroup.Text>
+                            <Form.Control
+                              type="date"
+                              name="endDate"
+                              value={formData.endDate}
+                              onChange={handleChange}
+                              min={formData.date}
+                              disabled={formData.nightShift}
+                            />
+                          </InputGroup>
+                          <Form.Text className="text-muted">
+                            {formData.nightShift 
+                              ? "Trực đêm: Buổi học sẽ kéo dài 2 ngày (ngày bắt đầu + ngày kế tiếp)"
+                              : "Để trống nếu buổi học chỉ diễn ra trong 1 ngày. Dành cho buổi trực đêm, nhiều ngày."
+                            }
+                          </Form.Text>
+                        </Form.Group>
+                      </Col>
                     </Row>
+                    
                     
                     <Row>
                       <Col md={6}>
@@ -709,92 +1074,151 @@ const EditSession = () => {
                       </Col>
                     </Row>
                     
-                    <Form.Group className="mb-3">
-                      <Form.Label>Địa điểm</Form.Label>
-                      <InputGroup>
-                        <InputGroup.Text><i className="fas fa-map-marker-alt"></i></InputGroup.Text>
-                        <Form.Select
-                          value={predefinedLocations.some(loc => loc.name === formData.location) ? formData.location : "custom"}
-                          onChange={(e) => {
-                            const selectedValue = e.target.value;
-                            
-                            if (selectedValue === "custom") {
-                              setFormData({
-                                ...formData,
-                                location: ""
-                              });
-                            } else {
-                              setFormData({
-                                ...formData,
-                                location: selectedValue
-                              });
-                              
-                              const selectedLocation = predefinedLocations.find(loc => loc.name === selectedValue);
-                              
-                              if (selectedLocation && selectedLocation.latitude && selectedLocation.longitude) {
-                                const locationIndex = predefinedLocations.findIndex(loc => loc.name === selectedValue);
-                                if (locationIndex !== -1) {
-                                  setSelectedLocationIndex(locationIndex);
-                                }
+                    <Row className="mb-3">
+                      <Col md={6}>
+                        <Form.Group className="mb-3">
+                          <Form.Label>Địa điểm</Form.Label>
+                          <InputGroup>
+                            <InputGroup.Text><i className="fas fa-map-marker-alt"></i></InputGroup.Text>
+                            <Form.Select
+                              value={predefinedLocations.some(loc => loc.name === formData.location) ? formData.location : "custom"}
+                              onChange={(e) => {
+                                const selectedValue = e.target.value;
                                 
-                                setFormData(prev => ({
-                                  ...prev,
-                                  location: selectedValue,
-                                  monitoringOptions: {
-                                    ...prev.monitoringOptions,
-                                    location: {
-                                      ...prev.monitoringOptions.location,
-                                      geofence: {
-                                        ...prev.monitoringOptions.location.geofence,
-                                        enabled: true,
-                                        coordinates: {
-                                          latitude: selectedLocation.latitude,
-                                          longitude: selectedLocation.longitude
+                                if (selectedValue === "custom") {
+                                  setFormData({
+                                    ...formData,
+                                    location: ""
+                                  });
+                                } else {
+                                  setFormData({
+                                    ...formData,
+                                    location: selectedValue
+                                  });
+                                  
+                                  const selectedLocation = predefinedLocations.find(loc => loc.name === selectedValue);
+                                  
+                                  if (selectedLocation && selectedLocation.latitude && selectedLocation.longitude) {
+                                    const locationIndex = predefinedLocations.findIndex(loc => loc.name === selectedValue);
+                                    if (locationIndex !== -1) {
+                                      setSelectedLocationIndex(locationIndex);
+                                    }
+                                    
+                                    setFormData(prev => ({
+                                      ...prev,
+                                      location: selectedValue,
+                                      monitoringOptions: {
+                                        ...prev.monitoringOptions,
+                                        location: {
+                                          ...prev.monitoringOptions.location,
+                                          geofence: {
+                                            ...prev.monitoringOptions.location.geofence,
+                                            enabled: true,
+                                            coordinates: {
+                                              latitude: selectedLocation.latitude,
+                                              longitude: selectedLocation.longitude
+                                            }
+                                          }
                                         }
                                       }
-                                    }
+                                    }));
                                   }
-                                }));
-                              }
-                            }
-                          }}
-                        >
-                          <option value="">-- Chọn địa điểm --</option>
-                          {predefinedLocations.slice(1).map((location, index) => (
-                            <option key={index} value={location.name}>{location.name}</option>
-                          ))}
-                          <option value="custom">Địa điểm khác</option>
-                        </Form.Select>
-                      </InputGroup>
+                                }
+                              }}
+                            >
+                              <option value="">-- Chọn địa điểm --</option>
+                              {predefinedLocations.slice(1).map((location, index) => (
+                                <option key={index} value={location.name}>{location.name}</option>
+                              ))}
+                              <option value="custom">Địa điểm khác</option>
+                            </Form.Select>
+                          </InputGroup>
+                          
+                          {(!predefinedLocations.some(loc => loc.name === formData.location) || formData.location === "" || formData.location === "custom") && (
+                            <Form.Control
+                              type="text"
+                              name="location"
+                              value={formData.location}
+                              onChange={handleChange}
+                              required
+                              placeholder="Nhập địa điểm buổi học"
+                              className="mt-2"
+                            />
+                          )}
+                          <Form.Control.Feedback type="invalid">
+                            Vui lòng chọn hoặc nhập địa điểm buổi học.
+                          </Form.Control.Feedback>
+                        </Form.Group>
+                      </Col>
                       
-                      {(!predefinedLocations.some(loc => loc.name === formData.location) || formData.location === "" || formData.location === "custom") && (
-                        <Form.Control
-                          type="text"
-                          name="location"
-                          value={formData.location}
-                          onChange={handleChange}
-                          required
-                          placeholder="Nhập địa điểm buổi học"
-                          className="mt-2"
-                        />
-                      )}
-                      <Form.Control.Feedback type="invalid">
-                        Vui lòng chọn hoặc nhập địa điểm buổi học.
-                      </Form.Control.Feedback>
-                    </Form.Group>
+                      <Col md={6}>
+                        <Form.Group className="mb-3">
+                          <Form.Label>Chọn nhóm sinh viên để tham gia buổi học</Form.Label>
+                          <InputGroup>
+                            <InputGroup.Text><i className="fas fa-layer-group"></i></InputGroup.Text>
+                            <Form.Select
+                              value={groupFilter}
+                              onChange={(e) => {
+                                setGroupFilter(e.target.value);
+                                setUseGroupMode(!!e.target.value);
+                                if (!e.target.value) {
+                                  setClassFilter('');
+                                  setFacultyFilter('');
+                                  setMajorFilter('');
+                                }
+                              }}
+                            >
+                              <option value="">-- Chọn nhóm sinh viên --</option>
+                              {studentGroups.map((group) => (
+                                <option key={group.id} value={group.id}>
+                                  {group.group_name} ({group.student_count || 0} sinh viên)
+                                </option>
+                              ))}
+                            </Form.Select>
+                          </InputGroup>
+                          <Form.Text className="text-muted">
+                            Chọn nhóm sinh viên để tham gia buổi học (tùy chọn)
+                          </Form.Text>
+                        </Form.Group>
+                      </Col>
+                    </Row>
                   </Col>
                 </Row>
               </Card.Body>
             </Card>
           </Tab>
           
-          <Tab eventKey="students" title={<span><i className="fas fa-users me-1"></i>Sinh viên tham gia <Badge bg="primary" pill>{selectedStudents.length}</Badge></span>}>
+          <Tab eventKey="students" title={<span className="tab-title"><i className="fas fa-users"></i> Sinh viên tham gia <Badge bg="primary" pill>{selectedStudents.length}</Badge></span>}>
             <Card className="shadow-sm">
               <Card.Body>
                 <Row className="mb-3">
                   <Col md={12}>
                     <div className="d-flex justify-content-between align-items-center mb-3">
                       <div className="d-flex">
+                                              <InputGroup className="me-2" style={{ width: 'auto' }}>
+                          <InputGroup.Text><i className="fas fa-layer-group"></i></InputGroup.Text>
+                          <Form.Select
+                            value={groupFilter}
+                            onChange={(e) => {
+                              setGroupFilter(e.target.value);
+                              setUseGroupMode(!!e.target.value);
+                              if (!e.target.value) {
+                                setClassFilter('');
+                                setFacultyFilter('');
+                                setMajorFilter('');
+                              }
+                            }}
+                            className="modern-form-control"
+                            style={{ width: '250px' }}
+                          >
+                            <option value="">-- Chọn nhóm sinh viên --</option>
+                            {studentGroups.map((group) => (
+                              <option key={group.id} value={group.id}>
+                                {group.group_name} ({group.student_count || 0} sinh viên)
+                              </option>
+                            ))}
+                          </Form.Select>
+                        </InputGroup>
                         <InputGroup className="me-2" style={{ width: 'auto' }}>
                           <InputGroup.Text><i className="fas fa-graduation-cap"></i></InputGroup.Text>
                           <Form.Select
@@ -921,8 +1345,20 @@ const EditSession = () => {
                     <tbody>
                       {students.length > 0 ? (
                         students.map(student => (
-                          <tr key={student.id} className={selectedStudents.some(s => s.id === student.id) ? 'table-active' : ''}>
-                            <td className="text-center">
+                          <tr 
+                            key={student.id} 
+                            className={selectedStudents.some(s => s.id === student.id) ? 'table-active' : ''}
+                            onClick={() => {
+                              const isSelected = selectedStudents.some(s => s.id === student.id);
+                              if (isSelected) {
+                                setSelectedStudents(selectedStudents.filter(s => s.id !== student.id));
+                              } else {
+                                setSelectedStudents([...selectedStudents, student]);
+                              }
+                            }}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <td className="text-center" onClick={(e) => e.stopPropagation()}>
                               <Form.Check
                                 type="checkbox"
                                 checked={selectedStudents.some(s => s.id === student.id)}
@@ -1002,12 +1438,12 @@ const EditSession = () => {
             </Card>
           </Tab>
           
-          <Tab eventKey="monitoring" title={<span><i className="fas fa-video me-1"></i>Tùy chọn giám sát</span>}>
+          <Tab eventKey="monitoring" title={<span className="tab-title"><i className="fas fa-video"></i> Tùy chọn giám sát</span>}>
             <Card className="shadow-sm">
               <Card.Body>
-                <Tabs defaultActiveKey="location" id="monitoring-tabs" className="mb-3">
+                <Tabs defaultActiveKey="location" id="monitoring-tabs" className="custom-tabs mb-3">
                   
-                  <Tab eventKey="location" title={<span><i className="fas fa-map-marker-alt me-1"></i>Vị trí</span>}>
+                  <Tab eventKey="location" title={<span className="tab-title"><i className="fas fa-map-marker-alt"></i> Vị trí</span>}>
                     <Card className="border-0 shadow-sm">
                       <Card.Body>
                         <div className="d-flex justify-content-between align-items-center mb-3">
@@ -1144,10 +1580,17 @@ const EditSession = () => {
                                             }
                                           }
                                         }}
+                                        disabled={locationsLoading || predefinedLocations.length === 0}
                                       >
-                                        {predefinedLocations.map((location, index) => (
-                                          <option key={index} value={index}>{location.name}</option>
-                                        ))}
+                                        {locationsLoading ? (
+                                          <option>Đang tải địa điểm...</option>
+                                        ) : predefinedLocations.length === 0 ? (
+                                          <option>Không có địa điểm nào</option>
+                                        ) : (
+                                          predefinedLocations.map((location, index) => (
+                                            <option key={index} value={index}>{location.name}</option>
+                                          ))
+                                        )}
                                       </Form.Select>
                                     </InputGroup>
                                     <Form.Text className="text-muted">
@@ -1402,7 +1845,7 @@ const EditSession = () => {
                     </Card>
                   </Tab>
                   
-                  <Tab eventKey="files" title={<span><i className="fas fa-file-upload me-1"></i>Tệp tin</span>}>
+                  <Tab eventKey="files" title={<span className="tab-title"><i className="fas fa-file-upload"></i> Tệp tin</span>}>
                     <Card className="border-0 shadow-sm">
                       <Card.Body>
                         <div className="d-flex justify-content-between align-items-center mb-3">
@@ -1597,7 +2040,7 @@ const EditSession = () => {
                     </Card>
                   </Tab>
                   
-                  <Tab eventKey="attendance" title={<span><i className="fas fa-calendar-check me-1"></i>Điểm danh</span>}>
+                  <Tab eventKey="attendance" title={<span className="tab-title"><i className="fas fa-calendar-check"></i> Điểm danh</span>}>
                     <Card className="border-0 shadow-sm">
                       <Card.Body>
                         <h5 className="mb-3">Tùy chọn điểm danh nhiều lần</h5>
@@ -1697,6 +2140,40 @@ const EditSession = () => {
                                       </InputGroup>
                                       <Form.Text className="text-muted">
                                         Mặc định: 30 phút
+                                      </Form.Text>
+                                    </Form.Group>
+                                  </Col>
+                                </Row>
+                                <Row>
+                                  <Col md={6}>
+                                    <Form.Group className="mb-3">
+                                      <Form.Label>Cho phép đi trễ tối đa (phút)</Form.Label>
+                                      <InputGroup>
+                                        <InputGroup.Text><i className="fas fa-exclamation-triangle"></i></InputGroup.Text>
+                                        <Form.Control
+                                          type="number"
+                                          min="0"
+                                          max="60"
+                                          value={formData.monitoringOptions.attendance.before_session.max_late_minutes}
+                                          onChange={(e) => {
+                                            setFormData({
+                                              ...formData,
+                                              monitoringOptions: {
+                                                ...formData.monitoringOptions,
+                                                attendance: {
+                                                  ...formData.monitoringOptions.attendance,
+                                                  before_session: {
+                                                    ...formData.monitoringOptions.attendance.before_session,
+                                                    max_late_minutes: parseInt(e.target.value) || 30
+                                                  }
+                                                }
+                                              }
+                                            });
+                                          }}
+                                        />
+                                      </InputGroup>
+                                      <Form.Text className="text-muted">
+                                        Mặc định: 30 phút (sinh viên có thể điểm danh đi trễ tối đa 30 phút)
                                       </Form.Text>
                                     </Form.Group>
                                   </Col>
@@ -1808,11 +2285,77 @@ const EditSession = () => {
                                       </Form.Text>
                                     </Form.Group>
                                   </Col>
-                                </Row>
-                                <Alert variant="info" className="mb-0">
+                                  <Alert variant="info" className="mb-0">
                                   <i className="fas fa-info-circle me-2"></i>
                                   <small>Ví dụ: Nếu giờ bắt đầu buổi học là 07:00 và giờ kết thúc là 17:00, cấu hình trên sẽ cho phép điểm danh từ 09:00 - 15:00</small>
                                 </Alert>
+                                </Row>
+
+                                {/* Quản lý sinh viên ra ca trực */}
+                                <div className="mt-4">
+                                  <div className="d-flex justify-content-between align-items-center mb-3">
+                                    <div>
+                                      <h6 className="mb-0">Sinh viên ra ca trực</h6>
+                                      <small className="text-muted">Những sinh viên này sẽ được miễn điểm danh sau buổi học</small>
+                                    </div>
+                                    <Button
+                                      variant="outline-primary"
+                                      size="sm"
+                                      onClick={() => {
+                                        setShowStudentSelectionModal(true);
+                                      }}
+                                    >
+                                      <i className="fas fa-plus me-1"></i>
+                                      Thêm sinh viên
+                                    </Button>
+                                  </div>
+
+                                  {formData.monitoringOptions.attendance.during_session.duty_students && formData.monitoringOptions.attendance.during_session.duty_students.length > 0 && (
+                                    <div className="duty-students-list">
+                                      {formData.monitoringOptions.attendance.during_session.duty_students.map((student, index) => (
+                                        <div key={`duty-${student.id}-${index}`} className="duty-student-item d-flex justify-content-between align-items-center p-2 mb-2 bg-white border rounded">
+                                          <div className="d-flex align-items-center">
+                                            <div>
+                                              <div className="fw-medium">{student.full_name || 'N/A'}</div>
+                                              <small className="text-muted">{student.username || 'N/A'}</small>
+                                            </div>
+                                          </div>
+                                          <Button
+                                            variant="outline-danger"
+                                            size="sm"
+                                            onClick={() => {
+                                              const updatedDutyStudents = formData.monitoringOptions.attendance.during_session.duty_students.filter((_, i) => i !== index);
+                                              setFormData({
+                                                ...formData,
+                                                monitoringOptions: {
+                                                  ...formData.monitoringOptions,
+                                                  attendance: {
+                                                    ...formData.monitoringOptions.attendance,
+                                                    during_session: {
+                                                      ...formData.monitoringOptions.attendance.during_session,
+                                                      duty_students: updatedDutyStudents
+                                                    }
+                                                  }
+                                                }
+                                              });
+                                            }}
+                                          >
+                                            <i className="fas fa-times"></i>
+                                          </Button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {(!formData.monitoringOptions.attendance.during_session.duty_students || formData.monitoringOptions.attendance.during_session.duty_students.length === 0) && (
+                                    <div className="text-center py-3 text-muted">
+                                      <i className="fas fa-user-clock fa-2x mb-2"></i>
+                                      <p className="mb-0">Chưa có sinh viên nào được chọn ra ca trực</p>
+                                      <small>Nhấn "Thêm sinh viên" để chọn những sinh viên sẽ ra ca trực</small>
+                                    </div>
+                                  )}
+                                </div>
+
                               </Card.Body>
                             </Card>
                           )}
@@ -1934,6 +2477,64 @@ const EditSession = () => {
           </Tab>
         </Tabs>
       </Form>
+      {/* Modal chọn sinh viên ra ca trực */}
+      <Modal show={showStudentSelectionModal} onHide={() => setShowStudentSelectionModal(false)} size="lg">
+        <Modal.Header closeButton>
+          <Modal.Title>Chọn sinh viên ra ca trực</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <div className="mb-3">
+            <Form.Control
+              type="text"
+              placeholder="Tìm kiếm sinh viên..."
+              onChange={(e) => {
+                // Logic tìm kiếm sinh viên
+              }}
+            />
+          </div>
+          <div className="student-selection-list" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+            {students.filter(student => 
+              !formData.monitoringOptions.attendance.during_session.duty_students?.some(dutyStudent => dutyStudent.id === student.id)
+            ).map(student => (
+              <div key={student.id} className="student-item d-flex justify-content-between align-items-center p-2 mb-2 border rounded">
+                <div className="d-flex align-items-center">
+                  <div>
+                    <div className="fw-medium">{student.full_name || 'N/A'}</div>
+                    <small className="text-muted">{student.username || 'N/A'}</small>
+                  </div>
+                </div>
+                <Button
+                  variant="outline-primary"
+                  size="sm"
+                  onClick={() => {
+                    const currentDutyStudents = formData.monitoringOptions.attendance.during_session.duty_students || [];
+                    setFormData({
+                      ...formData,
+                      monitoringOptions: {
+                        ...formData.monitoringOptions,
+                        attendance: {
+                          ...formData.monitoringOptions.attendance,
+                          during_session: {
+                            ...formData.monitoringOptions.attendance.during_session,
+                            duty_students: [...currentDutyStudents, student]
+                          }
+                        }
+                      }
+                    });
+                  }}
+                >
+                  <i className="fas fa-plus"></i>
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowStudentSelectionModal(false)}>
+            Đóng
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </div>
   );
 };

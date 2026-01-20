@@ -1,12 +1,30 @@
 
-import React, { useState, useEffect } from 'react';
-import { Container, Row, Col, Card, Button, Table, Form, Spinner, Alert, InputGroup, Badge, Tabs, Tab, Dropdown, OverlayTrigger, Tooltip } from 'react-bootstrap';
+import React, { useState, useEffect, useRef, useMemo, startTransition, useTransition } from 'react';
+import { Container, Row, Col, Card, Button, Table, Form, Spinner, Alert, InputGroup, Badge, Tabs, Tab, Dropdown, OverlayTrigger, Tooltip, Modal, ProgressBar } from 'react-bootstrap';
 import { useLocation } from 'react-router-dom';
 import AdminNavbar from '../../components/Navbar';
-import axios from 'axios';
-import { Bar, Line, Doughnut } from 'react-chartjs-2';
+import api from '../../utils/api';
+import { Bar, Line, Doughnut, PolarArea, Radar } from 'react-chartjs-2';
 import * as XLSX from 'xlsx';
-import '../../styles/calendar.css';
+import usePageTitle from '../../hooks/usePageTitle';
+import '../../styles/user.css';
+import '../../styles/custom-report-modern.css';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  horizontalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -15,6 +33,7 @@ import {
   PointElement,
   LineElement,
   ArcElement,
+  RadialLinearScale,
   Title,
   Tooltip as ChartTooltip,
   Legend,
@@ -22,6 +41,42 @@ import {
 } from 'chart.js';
 import { CSVLink } from 'react-csv';
 import JSZip from 'jszip';
+import { useHospitalLocations, getHospitalLocationsForReports } from '../../hooks/useHospitalLocations';
+import Pagination from '../../components/Pagination';
+
+// Định dạng ngày tháng (giống SessionList.js)
+const formatDate = (dateString) => {
+  try {
+    if (!dateString) return '';
+
+    // Remove any time part if present (e.g., "2025-11-25T17:00:00.000Z" -> "2025-11-25")
+    let dateOnly = String(dateString);
+    if (dateOnly.includes('T')) {
+      dateOnly = dateOnly.split('T')[0];
+    }
+    // Remove any trailing characters after date (e.g., "2025-11-25Z" -> "2025-11-25")
+    if (dateOnly.includes('Z')) {
+      dateOnly = dateOnly.split('Z')[0];
+    }
+
+    // The date should be in YYYY-MM-DD format
+    // Parse it and convert to DD/MM/YYYY format
+    const parts = dateOnly.split('-');
+    if (parts.length !== 3) {
+      console.error('Invalid date format:', dateString);
+      return dateString;
+    }
+
+    const year = parts[0];
+    const month = parts[1];
+    const day = parts[2];
+
+    return `${day}/${month}/${year}`;
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return dateString;
+  }
+};
 
 // Register required Chart.js components
 ChartJS.register(
@@ -31,6 +86,7 @@ ChartJS.register(
   PointElement,
   LineElement,
   ArcElement,
+  RadialLinearScale,
   Title,
   ChartTooltip,
   Legend,
@@ -57,45 +113,29 @@ const EnhancedAttendanceReports = () => {
   const queryParams = new URLSearchParams(location.search);
   const initialSessionId = queryParams.get('sessionId');
 
-  // Predefined hospital locations
-  const predefinedLocations = [
-    { name: "Bệnh viện Tâm Trí Đà Nẵng", latitude: 16.022910377179983, longitude: 108.21418877313431 },
-    { name: "Bệnh viện Tâm Trí Quảng Nam", latitude: 15.83878188925367, longitude: 108.28529005010874 },
-    { name: "Bệnh viện Tâm Trí Sài Gòn", latitude: 10.831702813877188, longitude: 106.62179071788216 },
-    { name: "Bệnh viện Tâm Trí Nha Trang", latitude: 12.212506709091144, longitude: 109.19488283420932 },
-    { name: "Bệnh viện Tâm Trí Đồng Tháp", latitude: 10.476168701979864, longitude: 105.61251450982436 },
-    { name: "Bệnh viện Tâm Trí Hồng Ngự", latitude: 10.808029003252175, longitude: 105.34998297903213 },
-    { name: "Bệnh viện Tâm Trí Cao Lãnh", latitude: 10.465413477175426, longitude: 105.62900633746764 },
-    { name: "Bệnh viện ĐH Y Khoa Phan Châu Trinh", latitude: 15.96252601077044, longitude: 108.25985382432913 },
-    { name: "Bệnh viện TEST", latitude: 15.962683045139078, longitude: 108.25037464216163 }
-  ];
+  // Use hospital locations from API
+  const { hospitalLocations } = useHospitalLocations();
+  const predefinedLocations = getHospitalLocationsForReports(hospitalLocations);
 
   // State variables
-  const [sessions, setSessions] = useState([]);
   const [groups, setGroups] = useState([]);
-  const [classes, setClasses] = useState([]);
-  const [hospitals, setHospitals] = useState([]);
   const [attendanceData, setAttendanceData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [loadingMessage, setLoadingMessage] = useState('Đang khởi tạo...');
   const [error, setError] = useState(null);
   const [csvData, setCsvData] = useState([]);
   const [activeTab, setActiveTab] = useState('statusDistribution');
   const [chartData, setChartData] = useState(null);
   
   // Filters
-  const [selectedSession, setSelectedSession] = useState(initialSessionId || '');
   const [selectedGroup, setSelectedGroup] = useState('');
-  const [selectedClass, setSelectedClass] = useState('');
-  const [selectedHospital, setSelectedHospital] = useState('');
   const [dateRange, setDateRange] = useState({
     startDate: '',
     endDate: ''
   });
   const [nameFilter, setNameFilter] = useState('');
   const [classFilter, setClassFilter] = useState('');
-  const [genderFilter, setGenderFilter] = useState('');
-  const [attendanceStatusFilter, setAttendanceStatusFilter] = useState('');
-  const [uniqueClasses, setUniqueClasses] = useState([]);
   const [showFilters, setShowFilters] = useState(false);
   
   // Stats
@@ -139,60 +179,397 @@ const EnhancedAttendanceReports = () => {
 
   // Attendance status data
   const [attendanceByStatus, setAttendanceByStatus] = useState({});
+  
+  // Prevent multiple simultaneous fetches
+  const fetchingRef = useRef(false);
+  
+  // Pagination states for each tab
+  const [detailedListPage, setDetailedListPage] = useState(1);
+  const [classReportPage, setClassReportPage] = useState(1);
+  const [hospitalReportPage, setHospitalReportPage] = useState(1);
+  const [dateReportPage, setDateReportPage] = useState(1);
+  const [sessionReportPage, setSessionReportPage] = useState(1);
+  const itemsPerPage = 10;
+
+  // Custom Report states
+  const [customReportData, setCustomReportData] = useState([]);
+  const [customReportLoading, setCustomReportLoading] = useState(false);
+  const [customReportPagination, setCustomReportPagination] = useState({
+    page: 1,
+    limit: 100, // Increased from 20 to 100 to show more data
+    totalItems: 0,
+    totalPages: 0
+  });
+  const [customReportFilters, setCustomReportFilters] = useState({
+    startDate: '',
+    endDate: '',
+    groupId: '',
+    className: '',
+    studentName: '',
+    attendanceType: '',
+    location: '',
+    facultyName: '',
+    sortField: 'session_date',
+    sortOrder: 'desc'
+  });
+  const [customReportDisplay, setCustomReportDisplay] = useState('table'); // table, bar, line, doughnut
+  const [isFilterSectionOpen, setIsFilterSectionOpen] = useState(true); // Control collapse/expand for filter section
+  const [customReportColumns, setCustomReportColumns] = useState([
+    'student_name',
+    'student_code',
+    'class_name',
+    'session_title',
+    'session_date',
+    'attendance_type',
+    'timestamp',
+    'session_location'
+  ]);
+  const [showColumnSelector, setShowColumnSelector] = useState(false);
+
+  // Weekly Statistics states
+  const [weeklyStatsData, setWeeklyStatsData] = useState([]);
+  const [weeklyStatsLoading, setWeeklyStatsLoading] = useState(false);
+  const [weeklyStatsGroupBy, setWeeklyStatsGroupBy] = useState('faculty'); // faculty, location, class, group, session_title
+  const [weeklyStatsFilters, setWeeklyStatsFilters] = useState({
+    startDate: '',
+    endDate: '',
+    facultyName: '',
+    location: '',
+    className: '',
+    groupId: ''
+  });
+  const [weeklyStatsColumns, setWeeklyStatsColumns] = useState([
+    'group_key',
+    'sub_group',
+    'week',
+    'student_count',
+    'classes',
+    'session_count',
+    'attendance_count'
+  ]);
+  const [weeklyStatsSortField, setWeeklyStatsSortField] = useState('');
+  const [weeklyStatsSortOrder, setWeeklyStatsSortOrder] = useState('desc');
+  const [showWeeklyStatsDetailModal, setShowWeeklyStatsDetailModal] = useState(false);
+  const [weeklyStatsDetailData, setWeeklyStatsDetailData] = useState([]);
+  const [weeklyStatsDetailLoading, setWeeklyStatsDetailLoading] = useState(false);
+  const [selectedWeeklyStat, setSelectedWeeklyStat] = useState(null);
+  
+  // Filter options for weekly statistics dropdown
+  const [weeklyStatsFilterOptions, setWeeklyStatsFilterOptions] = useState([]);
+  const [weeklyStatsSelectedFilter, setWeeklyStatsSelectedFilter] = useState('');
+  
+  // Pagination for weekly statistics (client-side)
+  const [weeklyStatsPage, setWeeklyStatsPage] = useState(1);
+  const weeklyStatsItemsPerPage = 20;
+  
+  // Refs for scrolling to sections
+  const customReportSectionRef = useRef(null);
+  const weeklyStatsSectionRef = useRef(null);
+  
+  // Filter options for custom report
+  const [availableClasses, setAvailableClasses] = useState([]);
+  const [availableFaculties, setAvailableFaculties] = useState([]);
+  const [studentSearchResults, setStudentSearchResults] = useState([]);
+  const [studentSearchTerm, setStudentSearchTerm] = useState('');
+  const [showStudentSearchResults, setShowStudentSearchResults] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const studentSearchInputRef = useRef(null);
+  const studentSearchDropdownRef = useRef(null);
+
+  // Update page title with progress
+  usePageTitle('Báo cáo điểm danh nâng cao', loading && loadingProgress > 0 ? loadingProgress : null);
 
   // Fetch data when component mounts
   useEffect(() => {
-    // Now that the API endpoints exist, make the calls
-    fetchSessions();
-    fetchGroups();
-    fetchClasses();
-    fetchHospitals();
-    fetchAllAttendance();
-    fetchAllMembers();
-    fetchAbsenceStatsByDate();
+    // Use a flag to prevent double execution in React StrictMode
+    let isMounted = true;
+    
+    const initializeData = async () => {
+      if (!isMounted) return;
+      
+      try {
+        // Step 1: Initialize (0-10%)
+        setLoadingProgress(5);
+        setLoadingMessage('Đang khởi tạo...');
+        
+        // Step 2: Fetch groups, classes, faculties (10-20%)
+        setLoadingProgress(10);
+        setLoadingMessage('Đang tải danh sách nhóm...');
+        await fetchGroups();
+        
+        setLoadingProgress(15);
+        setLoadingMessage('Đang tải danh sách lớp và khoa...');
+        await Promise.all([
+          fetchAvailableClasses(),
+          fetchAvailableFaculties()
+        ]);
+        
+        // Step 3: Fetch attendance data (20-100%)
+        // This will handle loading screen and turn it off when ready
+        setLoadingProgress(20);
+        setLoadingMessage('Đang tải dữ liệu điểm danh...');
+        await fetchAllAttendance();
+        
+        // fetchAllAttendance will turn off loading screen after fetching data
+        // Data processing happens in background with startTransition
+        
+        // Step 4: Fetch additional data in background (after loading screen is gone)
+        // This doesn't block the UI from showing
+        if (isMounted) {
+          setTimeout(() => {
+            fetchAbsenceStatsByDate();
+            fetchAllMembers(); // Run in background
+          }, 500);
+        }
+      } catch (error) {
+        console.error('Error initializing data:', error);
+        setLoadingProgress(100);
+        setLoading(false);
+      }
+    };
+    
+    initializeData();
+    
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // Update attendance data when filters change
+  // Search students when search term changes
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (studentSearchTerm) {
+        searchStudents(studentSearchTerm);
+      } else {
+        setStudentSearchResults([]);
+        setShowStudentSearchResults(false);
+      }
+    }, 300); // Debounce 300ms
+
+    return () => clearTimeout(timeoutId);
+  }, [studentSearchTerm]);
+
+  // Calculate dropdown position when it's shown
+  useEffect(() => {
+    if (showStudentSearchResults && studentSearchInputRef.current && studentSearchDropdownRef.current) {
+      const inputRect = studentSearchInputRef.current.getBoundingClientRect();
+      const dropdown = studentSearchDropdownRef.current;
+      
+      dropdown.style.left = inputRect.left + 'px';
+      dropdown.style.top = (inputRect.bottom + 2) + 'px';
+      dropdown.style.width = inputRect.width + 'px';
+    }
+  }, [showStudentSearchResults, studentSearchResults]);
+
+  // Update dropdown position on scroll
+  useEffect(() => {
+    if (!showStudentSearchResults) return;
+
+    const updatePosition = () => {
+      if (studentSearchInputRef.current && studentSearchDropdownRef.current) {
+        const inputRect = studentSearchInputRef.current.getBoundingClientRect();
+        const dropdown = studentSearchDropdownRef.current;
+        
+        dropdown.style.left = inputRect.left + 'px';
+        dropdown.style.top = (inputRect.bottom + 2) + 'px';
+        dropdown.style.width = inputRect.width + 'px';
+      }
+    };
+
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [showStudentSearchResults]);
+
+  // Close student search dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showStudentSearchResults) {
+        const isClickInsideContainer = event.target.closest('.student-search-container');
+        const isClickInsideDropdown = studentSearchDropdownRef.current && 
+                                      studentSearchDropdownRef.current.contains(event.target);
+        
+        if (!isClickInsideContainer && !isClickInsideDropdown) {
+          setShowStudentSearchResults(false);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showStudentSearchResults]);
+
+  // Update attendance data when main filters change
   useEffect(() => {
     // Now that the API endpoints exist, make the calls based on filters
-    if (selectedSession) {
-      fetchAttendanceBySession(selectedSession);
-    } else if (selectedGroup) {
+    if (selectedGroup) {
       fetchAttendanceByGroup(selectedGroup);
-    } else if (selectedClass) {
-      fetchAttendanceByClass(selectedClass);
-    } else if (selectedHospital) {
-      fetchAttendanceByHospital(selectedHospital);
-    } else if (dateRange.startDate && dateRange.endDate) {
+    } else if (dateRange.startDate && dateRange.endDate && dateRange.startDate.trim() && dateRange.endDate.trim()) {
       fetchAttendanceByDateRange(dateRange.startDate, dateRange.endDate);
     } else {
       fetchAllAttendance();
     }
-  }, [selectedSession, selectedGroup, selectedClass, selectedHospital, dateRange.startDate, dateRange.endDate, nameFilter, classFilter, genderFilter, attendanceStatusFilter]);
+  }, [selectedGroup, dateRange.startDate, dateRange.endDate]);
+  
+  // Apply client-side filters when they change
+  useEffect(() => {
+    if (attendanceData && attendanceData.length > 0) {
+      // Re-process the data with the new filters
+      processAttendanceData(attendanceData);
+    }
+  }, [nameFilter, classFilter]);
+
+  // Fetch custom report when tab is active or filters/pagination change
+  useEffect(() => {
+    console.log(`🔍 Custom Report Effect: activeTab=${activeTab}, loading=${loading}, display=${customReportDisplay}`);
+    // Only fetch if not loading main data AND display mode is table
+    if (activeTab === 'customReport' && customReportDisplay === 'table' && !loading) {
+      console.log('✅ Triggering fetchCustomReport...');
+      fetchCustomReport();
+    } else {
+      console.log(`❌ Skipping fetchCustomReport: activeTab=${activeTab}, display=${customReportDisplay}, loading=${loading}`);
+    }
+  }, [activeTab, customReportDisplay, customReportFilters, customReportPagination.page, loading]);
+
+  // Fetch weekly statistics when filters change
+  useEffect(() => {
+    // Only fetch if not loading main data
+    if (activeTab === 'customReport' && customReportDisplay === 'weekly_stats' && !loading) {
+      setWeeklyStatsPage(1); // Reset to first page when filters change
+      fetchWeeklyStatistics();
+    }
+  }, [activeTab, customReportDisplay, weeklyStatsGroupBy, weeklyStatsFilters, weeklyStatsSelectedFilter, loading]);
+
+  // Fetch filter options when groupBy changes
+  useEffect(() => {
+    if (activeTab === 'customReport' && customReportDisplay === 'weekly_stats') {
+      setWeeklyStatsPage(1); // Reset pagination when groupBy changes
+      // Fetch new options based on groupBy type
+      fetchWeeklyStatsFilterOptions(weeklyStatsGroupBy);
+      
+      // Đồng bộ weeklyStatsSelectedFilter với bộ lọc chung dựa trên groupBy mới
+      let filterValue = '';
+      switch (weeklyStatsGroupBy) {
+        case 'faculty':
+          filterValue = customReportFilters.facultyName || weeklyStatsFilters.facultyName || '';
+          break;
+        case 'location':
+          filterValue = customReportFilters.location || weeklyStatsFilters.location || '';
+          break;
+        case 'class':
+          filterValue = customReportFilters.className || weeklyStatsFilters.className || '';
+          break;
+        case 'group':
+          filterValue = customReportFilters.groupId || weeklyStatsFilters.groupId || '';
+          break;
+        default:
+          filterValue = '';
+      }
+      setWeeklyStatsSelectedFilter(filterValue);
+    }
+  }, [activeTab, customReportDisplay, weeklyStatsGroupBy]);
+  
+  // Đồng bộ weeklyStatsSelectedFilter với bộ lọc chung khi thay đổi
+  useEffect(() => {
+    if (activeTab === 'customReport' && customReportDisplay === 'weekly_stats') {
+      let filterValue = '';
+      switch (weeklyStatsGroupBy) {
+        case 'faculty':
+          filterValue = customReportFilters.facultyName || weeklyStatsFilters.facultyName || '';
+          break;
+        case 'location':
+          filterValue = customReportFilters.location || weeklyStatsFilters.location || '';
+          break;
+        case 'class':
+          filterValue = customReportFilters.className || weeklyStatsFilters.className || '';
+          break;
+        case 'group':
+          filterValue = customReportFilters.groupId || weeklyStatsFilters.groupId || '';
+          break;
+        default:
+          filterValue = '';
+      }
+      if (weeklyStatsSelectedFilter !== filterValue) {
+        setWeeklyStatsSelectedFilter(filterValue);
+      }
+    }
+  }, [customReportFilters.facultyName, customReportFilters.location, customReportFilters.className, customReportFilters.groupId, weeklyStatsFilters.facultyName, weeklyStatsFilters.location, weeklyStatsFilters.className, weeklyStatsFilters.groupId, weeklyStatsGroupBy, customReportDisplay, activeTab]);
+
+  // Compute sorted and paginated weekly stats data
+  const sortedWeeklyStatsData = useMemo(() => {
+    if (!weeklyStatsSortField || weeklyStatsData.length === 0) {
+      return weeklyStatsData;
+    }
+    const sorted = [...weeklyStatsData];
+    sorted.sort((a, b) => {
+      let aVal, bVal;
+      switch (weeklyStatsSortField) {
+        case 'group_key':
+          aVal = (a.group_key || '').toString().toLowerCase();
+          bVal = (b.group_key || '').toString().toLowerCase();
+          break;
+        case 'sub_group':
+          aVal = (a.sub_group || '').toString().toLowerCase();
+          bVal = (b.sub_group || '').toString().toLowerCase();
+          break;
+        case 'week':
+          aVal = new Date(a.week_start).getTime();
+          bVal = new Date(b.week_start).getTime();
+          break;
+        case 'student_count':
+          aVal = a.student_count || 0;
+          bVal = b.student_count || 0;
+          break;
+        case 'classes':
+          aVal = a.classes ? a.classes.length : 0;
+          bVal = b.classes ? b.classes.length : 0;
+          break;
+        case 'session_count':
+          aVal = a.session_count || 0;
+          bVal = b.session_count || 0;
+          break;
+        case 'attendance_count':
+          aVal = a.attendance_count || 0;
+          bVal = b.attendance_count || 0;
+          break;
+        default:
+          return 0;
+      }
+      
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        return weeklyStatsSortOrder === 'asc' 
+          ? aVal.localeCompare(bVal)
+          : bVal.localeCompare(aVal);
+      } else {
+        return weeklyStatsSortOrder === 'asc'
+          ? aVal - bVal
+          : bVal - aVal;
+      }
+    });
+    return sorted;
+  }, [weeklyStatsData, weeklyStatsSortField, weeklyStatsSortOrder]);
+
+  // Compute paginated weekly stats data (client-side pagination)
+  const paginatedWeeklyStatsData = useMemo(() => {
+    const startIndex = (weeklyStatsPage - 1) * weeklyStatsItemsPerPage;
+    const endIndex = startIndex + weeklyStatsItemsPerPage;
+    return sortedWeeklyStatsData.slice(startIndex, endIndex);
+  }, [sortedWeeklyStatsData, weeklyStatsPage, weeklyStatsItemsPerPage]);
+
+  // Calculate total pages for weekly stats
+  const weeklyStatsTotalPages = Math.ceil(sortedWeeklyStatsData.length / weeklyStatsItemsPerPage);
 
   // Placeholder for API calls
-  const fetchSessions = async () => {
-    try {
-      setLoading(true);
-      const response = await axios.get('/api/attendance/sessions');
-      
-      if (response.data.success) {
-        // Lấy thêm thông tin nhóm cho mỗi buổi điểm danh
-        const sessionsWithGroup = response.data.data;
-        setLoading(false);
-        setError(null);
-        setSessions(sessionsWithGroup);
-      }
-    } catch (error) {
-      console.error('Error fetching sessions:', error);
-      setError('Không thể lấy danh sách buổi điểm danh. Vui lòng thử lại sau.');
-      setLoading(false);
-    }
-  };
-
   const fetchGroups = async () => {
     try {
-      const response = await axios.get('/api/attendance/groups');
+      // Fetch groups from student_clinical_groups table
+      const response = await api.get('/student-groups');
       
       if (response.data && response.data.data) {
         setGroups(response.data.data);
@@ -203,17 +580,30 @@ const EnhancedAttendanceReports = () => {
         setGroups([]);
       }
     } catch (err) {
-      console.error('Error fetching groups:', err);
-      setError('Không thể tải danh sách nhóm. Vui lòng thử lại sau.');
-      setGroups([]);
+      console.error('Error fetching clinical groups:', err);
+      
+      // Fallback to old API if new one fails
+      try {
+        const fallbackResponse = await api.get('/attendance/groups');
+        if (fallbackResponse.data && fallbackResponse.data.data) {
+          setGroups(fallbackResponse.data.data);
+        } else if (Array.isArray(fallbackResponse.data)) {
+          setGroups(fallbackResponse.data);
+        } else {
+          setGroups([]);
+        }
+      } catch (fallbackErr) {
+        console.error('Error fetching groups (fallback):', fallbackErr);
+        setError('Không thể tải danh sách nhóm. Vui lòng thử lại sau.');
+        setGroups([]);
+      }
     }
   };
   
   // Fetch absence request stats by date
   const fetchAbsenceStatsByDate = async () => {
     try {
-      const response = await axios.get('/api/absence-requests/stats-by-date');
-      console.log('Absence stats by date response:', response.data);
+      const response = await api.get('/absence-requests/stats-by-date');
       setAbsenceStatsByDate(response.data.data || []);
       return response.data.data || [];
     } catch (error) {
@@ -222,133 +612,451 @@ const EnhancedAttendanceReports = () => {
       return [];
     }
   };
-  
-  const fetchAllAttendance = async () => {
+
+  // Fetch custom report data
+  const fetchCustomReport = async (filters = customReportFilters, page = customReportPagination.page) => {
     try {
-      setLoading(true);
+      setCustomReportLoading(true);
+      const queryParams = new URLSearchParams({
+        page: page.toString(),
+        limit: customReportPagination.limit.toString(),
+        sortField: filters.sortField,
+        sortOrder: filters.sortOrder,
+        ...(filters.startDate && { startDate: filters.startDate }),
+        ...(filters.endDate && { endDate: filters.endDate }),
+        ...(filters.groupId && { groupId: filters.groupId }),
+        ...(filters.className && { className: filters.className }),
+        ...(filters.studentName && { studentName: filters.studentName }),
+        ...(filters.attendanceType && { attendanceType: filters.attendanceType }),
+        ...(filters.location && { location: filters.location }),
+        ...(filters.facultyName && { facultyName: filters.facultyName })
+      });
+
+      console.log(`🔍 Fetching custom report from: /attendance/custom-report?${queryParams}`);
+      const response = await api.get(`/attendance/custom-report?${queryParams}`);
       
-      // Fetch attendance data, dashboard stats, and absence request stats
-      const [attendanceResponse, dashboardResponse, absenceStatsResponse] = await Promise.all([
-        axios.get('/api/attendance/reports/all'),
-        axios.get('/api/dashboard/stats'),
-        axios.get('/api/absence-requests/stats')
-      ]);
-      
-      if (attendanceResponse.data && attendanceResponse.data.data) {
-        processAttendanceData(attendanceResponse.data.data, dashboardResponse.data, absenceStatsResponse.data);
-      } else if (Array.isArray(attendanceResponse.data)) {
-        processAttendanceData(attendanceResponse.data, dashboardResponse.data, absenceStatsResponse.data);
+      if (response.data && response.data.success) {
+        const fetchedData = response.data.data || [];
+        const backendPagination = response.data.pagination;
+        
+        // 🔧 FIX: Backend totalItems might be incorrect due to merging attendance_records + attendance_history
+        // Use the larger value between backend totalItems and actual data length
+        const correctedTotalItems = Math.max(
+          backendPagination.totalItems,
+          fetchedData.length,
+          backendPagination.page * backendPagination.limit
+        );
+        
+        const correctedPagination = {
+          ...backendPagination,
+          totalItems: correctedTotalItems,
+          totalPages: Math.ceil(correctedTotalItems / backendPagination.limit)
+        };
+        
+        setCustomReportData(fetchedData);
+        setCustomReportPagination(correctedPagination);
+        
+        console.log(`✅ Fetched ${fetchedData.length} records for page ${correctedPagination.page}`);
+        console.log(`📊 Pagination: ${correctedPagination.totalItems} total items, ${correctedPagination.totalPages} pages`);
+        if (backendPagination.totalItems !== correctedTotalItems) {
+          console.warn(`⚠️ Backend totalItems (${backendPagination.totalItems}) corrected to ${correctedTotalItems}`);
+        }
+        
+        setError(null); // Clear any previous errors
       } else {
-        console.error('Unexpected attendance data format:', attendanceResponse.data);
-        setAttendanceData([]);
-        setError('Định dạng dữ liệu không hợp lệ');
-      }
-    } catch (err) {
-      console.error('Error fetching all attendance:', err);
-      try {
-        const sessionsResponse = await axios.get('/api/attendance/sessions');
-        const allSessions = sessionsResponse.data.data || [];
-        
-        let allAttendanceData = [];
-        
-        for (const session of allSessions) {
-          try {
-            const attendanceResponse = await axios.get(`/api/attendance/sessions/${session._id}/attendances`);
-            if (attendanceResponse.data && attendanceResponse.data.data) {
-              allAttendanceData = [...allAttendanceData, ...attendanceResponse.data.data];
-            }
-          } catch (sessionErr) {
-            console.error(`Error fetching attendance for session ${session._id}:`, sessionErr);
-          }
-        }
-        
-        processAttendanceData(allAttendanceData, null, null);
-      } catch (sessionsErr) {
-        console.error('Error fetching all sessions:', sessionsErr);
-        setError('Không thể tải dữ liệu điểm danh. Vui lòng thử lại sau.');
-        setAttendanceData([]);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchClasses = async () => {
-    try {
-      const response = await axios.get('/api/classes');
-      
-      if (response.data && response.data.data) {
-        setClasses(response.data.data);
-      } else if (Array.isArray(response.data)) {
-        setClasses(response.data);
-      }
-    } catch (err) {
-      console.error('Error fetching classes:', err);
-      setError('Không thể tải danh sách lớp. Vui lòng thử lại sau.');
-      setClasses([]);
-    }
-  };
-
-  const fetchHospitals = async () => {
-    try {
-      // Use the predefined locations instead of API call
-      const hospitalsList = predefinedLocations.map((location, index) => ({
-        id: index.toString(),
-        name: location.name,
-        latitude: location.latitude,
-        longitude: location.longitude,
-        city: "Việt Nam"
-      }));
-      
-      setHospitals(hospitalsList);
-    } catch (err) {
-      console.error('Error setting hospitals:', err);
-      setError('Không thể tải danh sách bệnh viện. Vui lòng thử lại sau.');
-      setHospitals([]);
-    }
-  };
-  
-  const fetchAttendanceBySession = async (sessionId) => {
-    try {
-      if (!sessionId) {
-        console.error('Session ID is undefined');
-        return;
-      }
-      
-      setLoading(true);
-      const response = await axios.get(`/api/attendance/sessions/${sessionId}/attendances`);
-      
-      if (response.data.success) {
-        // Lấy thông tin buổi điểm danh để biết buổi này thuộc nhóm nào
-        const sessionResponse = await axios.get(`/api/attendance/sessions/${sessionId}`);
-        
-        if (sessionResponse.data.success) {
-          const session = sessionResponse.data.data;
-          
-          // Lưu thông tin groupId vào session hiện tại
-          if (sessions && Array.isArray(sessions)) {
-            const currentSession = sessions.find(s => s && s._id === sessionId);
-            if (currentSession) {
-              currentSession.groupId = session.groupId;
-            }
-          }
-          
-          processAttendanceData(response.data.data, null, null);
-          setLoading(false);
-          setError(null);
-        }
+        setCustomReportData([]);
+        console.warn('Custom report: No success flag in response', response.data);
       }
     } catch (error) {
-      console.error('Error fetching attendance by session:', error);
-      setError('Không thể lấy dữ liệu điểm danh. Vui lòng thử lại sau.');
-      setLoading(false);
+      console.error('Error fetching custom report:', error.response?.data || error.message);
+      setCustomReportData([]);
+      // Only show error if it's not a 404 or if there's actually an error
+      if (error.response?.status !== 404) {
+        setError(`Lỗi khi tải dữ liệu báo cáo tùy chỉnh: ${error.response?.data?.message || error.message}`);
+      }
+    } finally {
+      setCustomReportLoading(false);
     }
   };
   
+  // Fetch weekly statistics
+  const fetchWeeklyStatistics = async () => {
+    try {
+      setWeeklyStatsLoading(true);
+      
+      // Build query params, conditionally add filter based on groupBy and selectedFilter
+      const queryParams = new URLSearchParams({
+        groupBy: weeklyStatsGroupBy
+      });
+
+      // Add all filters from weeklyStatsFilters
+      if (weeklyStatsFilters.startDate) {
+        queryParams.append('startDate', weeklyStatsFilters.startDate);
+      }
+      if (weeklyStatsFilters.endDate) {
+        queryParams.append('endDate', weeklyStatsFilters.endDate);
+      }
+      if (weeklyStatsFilters.groupId) {
+        queryParams.append('groupId', weeklyStatsFilters.groupId);
+      }
+      if (weeklyStatsFilters.className) {
+        queryParams.append('className', weeklyStatsFilters.className);
+      }
+      if (weeklyStatsFilters.studentName) {
+        queryParams.append('studentName', weeklyStatsFilters.studentName);
+      }
+      if (weeklyStatsFilters.attendanceType) {
+        queryParams.append('attendanceType', weeklyStatsFilters.attendanceType);
+      }
+      if (weeklyStatsFilters.location) {
+        queryParams.append('location', weeklyStatsFilters.location);
+      }
+      if (weeklyStatsFilters.facultyName) {
+        queryParams.append('facultyName', weeklyStatsFilters.facultyName);
+      }
+
+      // Add specific filter based on groupBy and selectedFilter (override if exists)
+      if (weeklyStatsSelectedFilter) {
+        switch (weeklyStatsGroupBy) {
+          case 'faculty':
+            queryParams.set('facultyName', weeklyStatsSelectedFilter);
+            break;
+          case 'location':
+            queryParams.set('location', weeklyStatsSelectedFilter);
+            break;
+          case 'class':
+            queryParams.set('className', weeklyStatsSelectedFilter);
+            break;
+          case 'group':
+            queryParams.set('groupId', weeklyStatsSelectedFilter);
+            break;
+          case 'session_title':
+            queryParams.set('sessionTitle', weeklyStatsSelectedFilter);
+            break;
+        }
+      }
+
+      const response = await api.get(`/attendance/weekly-statistics?${queryParams}`);
+      
+      if (response.data && response.data.success) {
+        setWeeklyStatsData(response.data.data || []);
+        setError(null); // Clear any previous errors
+      } else {
+        setWeeklyStatsData([]);
+        console.warn('Weekly stats: No success flag in response', response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching weekly statistics:', error.response?.data || error.message);
+      setWeeklyStatsData([]);
+      // Only show error if it's not a 404 or if there's actually an error
+      if (error.response?.status !== 404) {
+        setError(`Lỗi khi tải dữ liệu thống kê theo tuần: ${error.response?.data?.message || error.message}`);
+      }
+    } finally {
+      setWeeklyStatsLoading(false);
+    }
+  };
+
+  // Fetch filter options for weekly statistics based on groupBy
+  const fetchWeeklyStatsFilterOptions = async (type) => {
+    try {
+      const response = await api.get(`/attendance/weekly-statistics/filter-options?type=${type}`);
+      
+      if (response.data && response.data.success) {
+        setWeeklyStatsFilterOptions(response.data.data || []);
+      } else {
+        setWeeklyStatsFilterOptions([]);
+      }
+    } catch (error) {
+      console.error('Error fetching filter options:', error);
+      setWeeklyStatsFilterOptions([]);
+    }
+  };
+
+  // Fetch available classes
+  const fetchAvailableClasses = async () => {
+    try {
+      const response = await api.get('/attendance/classes');
+      if (response.data && response.data.data) {
+        // API returns array of objects with 'name' property
+        const classes = response.data.data.map(item => item.name || item);
+        setAvailableClasses(classes.filter(Boolean));
+      } else if (Array.isArray(response.data)) {
+        const classes = response.data.map(item => item.name || item);
+        setAvailableClasses(classes.filter(Boolean));
+      } else {
+        setAvailableClasses([]);
+      }
+    } catch (error) {
+      console.error('Error fetching classes:', error);
+      setAvailableClasses([]);
+    }
+  };
+
+  // Fetch available faculties
+  const fetchAvailableFaculties = async () => {
+    try {
+      const response = await api.get('/attendance/weekly-statistics/filter-options?type=faculty');
+      if (response.data && response.data.success && response.data.data) {
+        const faculties = response.data.data.map(item => item.label || item.value || item);
+        setAvailableFaculties(faculties.filter(Boolean));
+      } else {
+        setAvailableFaculties([]);
+      }
+    } catch (error) {
+      console.error('Error fetching faculties:', error);
+      setAvailableFaculties([]);
+    }
+  };
+
+  // Search students
+  const searchStudents = async (searchTerm) => {
+    if (!searchTerm || searchTerm.length < 2) {
+      setStudentSearchResults([]);
+      setShowStudentSearchResults(false);
+      return;
+    }
+
+    try {
+      const response = await api.get(`/users?role=student&search=${encodeURIComponent(searchTerm)}&limit=10`);
+      if (response.data && response.data.data) {
+        setStudentSearchResults(response.data.data || []);
+        setShowStudentSearchResults(true);
+      } else if (Array.isArray(response.data)) {
+        setStudentSearchResults(response.data);
+        setShowStudentSearchResults(true);
+      } else {
+        setStudentSearchResults([]);
+        setShowStudentSearchResults(false);
+      }
+    } catch (error) {
+      console.error('Error searching students:', error);
+      setStudentSearchResults([]);
+      setShowStudentSearchResults(false);
+    }
+  };
+
+  // Fetch weekly statistics detail for drill-down
+  const fetchWeeklyStatisticsDetail = async (stat) => {
+    try {
+      setWeeklyStatsDetailLoading(true);
+      setSelectedWeeklyStat(stat);
+      setShowWeeklyStatsDetailModal(true);
+
+      const weekStart = new Date(stat.week_start).toISOString().split('T')[0];
+      const weekEnd = new Date(stat.week_end).toISOString().split('T')[0];
+
+      const queryParams = new URLSearchParams({
+        groupBy: weeklyStatsGroupBy,
+        groupKey: stat.group_key,
+        subGroup: stat.sub_group || '',
+        weekStart,
+        weekEnd
+      });
+
+      const response = await api.get(`/attendance/weekly-statistics/detail?${queryParams}`);
+      
+      if (response.data && response.data.success) {
+        setWeeklyStatsDetailData(response.data.data || []);
+      } else {
+        setWeeklyStatsDetailData([]);
+      }
+    } catch (error) {
+      console.error('Error fetching weekly statistics detail:', error);
+      setWeeklyStatsDetailData([]);
+    } finally {
+      setWeeklyStatsDetailLoading(false);
+    }
+  };
+
+  // Export weekly statistics detail to Excel
+  const exportWeeklyStatsDetailToExcel = () => {
+    if (!weeklyStatsDetailData || weeklyStatsDetailData.length === 0) {
+      alert('Không có dữ liệu để xuất');
+      return;
+    }
+
+    const exportData = weeklyStatsDetailData.map(record => ({
+      'Mã SV': record.student_code || '',
+      'Họ và tên': record.student_name || '',
+      'Email': record.student_email || '',
+      'Lớp': record.class_name || '',
+      'Khoa': record.faculty_name || '',
+      'Giới tính': record.gender === 'male' ? 'Nam' : record.gender === 'female' ? 'Nữ' : 'Khác',
+      'Tên buổi học': record.session_title || '',
+      'Ngày học': record.session_date ? formatDate(record.session_date) : '',
+      'Địa điểm': record.session_location || '',
+      'Nhóm': formatGroupName(record.group_name),
+      'Loại điểm danh': getAttendanceTypeLabel(record.attendance_type),
+      'Thời gian điểm danh': record.timestamp ? new Date(record.timestamp).toLocaleString('vi-VN') : ''
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Chi tiết thống kê');
+    
+    const filename = `thong-ke-tuan-${selectedWeeklyStat?.group_key || 'all'}-${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(workbook, filename);
+  };
+
+  const fetchAllAttendance = async (forceRefresh = false) => {
+    // Prevent multiple simultaneous fetches
+    if (fetchingRef.current && !forceRefresh) {
+      console.log('⚠️ Fetch already in progress, skipping...');
+      return;
+    }
+    
+    try {
+      fetchingRef.current = true;
+      setLoading(true);
+      
+      let attendanceData = [];
+      let dashboardData = null;
+      let absenceStatsData = null;
+      
+      // Fetch from server (caching disabled due to data size)
+      console.log('🌐 Fetching data from server...');
+      
+      // Update progress: Fetching attendance (20-50%)
+      setLoadingProgress(25);
+      setLoadingMessage('Đang kết nối tới server...');
+      
+      // Create fake progress to show activity while waiting for API
+      let currentProgress = 25;
+      const progressInterval = setInterval(() => {
+        // Progressive slowdown - the higher we go, the slower it gets
+        if (currentProgress >= 80) {
+          currentProgress += 0.1; // Extremely slow at the end
+        } else if (currentProgress >= 70) {
+          currentProgress += 0.2; // Very very slow
+        } else if (currentProgress >= 60) {
+          currentProgress += 0.3; // Very slow
+        } else if (currentProgress >= 50) {
+          currentProgress += 0.5; // Slow
+        } else if (currentProgress >= 45) {
+          currentProgress += 1; // Medium
+        } else {
+          currentProgress += 2; // Normal speed
+        }
+        
+        // Continue up to 88% max (leave room for final steps)
+        if (currentProgress <= 88) {
+          setLoadingProgress(Math.min(currentProgress, 88));
+          
+          if (currentProgress < 30) {
+            setLoadingMessage('Đang gửi yêu cầu lấy dữ liệu...');
+          } else if (currentProgress < 35) {
+            setLoadingMessage('Server đang xử lý yêu cầu...');
+          } else if (currentProgress < 40) {
+            setLoadingMessage('Đang tải dữ liệu điểm danh từ database...');
+          } else if (currentProgress < 45) {
+            setLoadingMessage('Server đang đóng gói dữ liệu...');
+          } else if (currentProgress < 50) {
+            setLoadingMessage('Đang truyền dữ liệu từ server...');
+          } else if (currentProgress < 55) {
+            setLoadingMessage('Đang nhận dữ liệu (có thể mất vài giây)...');
+          } else if (currentProgress < 60) {
+            setLoadingMessage('Đang tải dữ liệu lớn, vui lòng chờ...');
+          } else if (currentProgress < 70) {
+            setLoadingMessage('Server đang xử lý dữ liệu lớn...');
+          } else if (currentProgress < 80) {
+            setLoadingMessage('Đang nhận phần cuối của dữ liệu...');
+          } else {
+            setLoadingMessage('Gần hoàn tất, đang hoàn thiện...');
+          }
+        }
+      }, 500); // Check every 500ms
+      
+      try {
+        // Fetch data - all in parallel for speed
+        const [attendanceResponse, dashboardResponse, absenceStatsResponse] = await Promise.all([
+          api.get('/attendance/reports/all'),
+          api.get('/dashboard/stats'),
+          api.get('/absence-requests/stats')
+        ]);
+        
+        // Clear interval when data is received
+        clearInterval(progressInterval);
+        
+        // Update progress: Data received (90%)
+        setLoadingProgress(90);
+        setLoadingMessage('✅ Đã nhận đầy đủ dữ liệu từ server!');
+      
+        dashboardData = dashboardResponse.data;
+        absenceStatsData = absenceStatsResponse.data;
+        
+        // Extract attendance data
+        if (attendanceResponse.data && attendanceResponse.data.data) {
+          attendanceData = attendanceResponse.data.data;
+        } else if (Array.isArray(attendanceResponse.data)) {
+          attendanceData = attendanceResponse.data;
+        }
+        
+        console.log(`✅ Loaded ${attendanceData.length} records from server`);
+      } catch (fetchError) {
+        clearInterval(progressInterval);
+        throw fetchError; // Re-throw to be caught by outer catch
+      }
+      
+      // Check if data exists
+      if (attendanceData && attendanceData.length > 0) {
+        // Update progress: Parsing data (90-95%)
+        setLoadingProgress(92);
+        setLoadingMessage(`📊 Đã tải ${attendanceData.length.toLocaleString('vi-VN')} bản ghi!`);
+        
+        // Small delay to show the message
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        setLoadingProgress(95);
+        setLoadingMessage(`🚀 Đang chuẩn bị hiển thị dữ liệu...`);
+        console.log('⚙️ Data loaded, preparing to show UI...');
+        
+        // IMPORTANT: Turn off loading screen quickly
+        // Data processing will happen in background with startTransition
+        setTimeout(() => {
+          setLoadingProgress(98);
+          setLoadingMessage('⚡ Đang khởi tạo giao diện...');
+        }, 200);
+        
+        setTimeout(() => {
+          setLoadingProgress(100);
+          setLoadingMessage('✅ Hoàn tất!');
+          console.log('✅ Loading screen dismissed, processing data in background...');
+        }, 500);
+        
+        // Turn off loading after showing 100%
+        setTimeout(() => {
+          setLoading(false);
+          fetchingRef.current = false;
+        }, 800);
+        
+        // Process data in background with startTransition (non-blocking)
+        startTransition(() => {
+          console.log('⚙️ Starting data processing...');
+          processAttendanceData(attendanceData, dashboardData, absenceStatsData);
+          console.log('✅ Data processing completed');
+        });
+      } else {
+        console.error('No attendance data available');
+        setAttendanceData([]);
+        setError('Không có dữ liệu điểm danh');
+        setLoading(false);
+        fetchingRef.current = false;
+      }
+      
+    } catch (err) {
+      console.error('Error fetching all attendance:', err);
+      setError('Không thể tải dữ liệu điểm danh. Vui lòng thử lại sau.');
+      setAttendanceData([]);
+      setLoading(false);
+      fetchingRef.current = false;
+    }
+  };
+
   const fetchAttendanceByGroup = async (groupId) => {
     try {
       setLoading(true);
-      const response = await axios.get(`/api/attendance/groups/${groupId}/attendances`);
+      const response = await api.get(`/attendance/group/${groupId}`);
       
       if (response.data && response.data.data) {
         processAttendanceData(response.data.data);
@@ -370,7 +1078,7 @@ const EnhancedAttendanceReports = () => {
   const fetchAttendanceByClass = async (classId) => {
     try {
       setLoading(true);
-      const response = await axios.get(`/api/attendance/reports/class/${classId}`);
+      const response = await api.get(`/attendance/class/${classId}`);
       
       if (response.data && response.data.data) {
         processAttendanceData(response.data.data);
@@ -389,32 +1097,45 @@ const EnhancedAttendanceReports = () => {
     }
   };
   
-  const fetchAttendanceByHospital = async (hospitalId) => {
-    try {
-      setLoading(true);
-      const response = await axios.get(`/api/attendance/reports/hospital/${hospitalId}`);
-      
-      if (response.data && response.data.data) {
-        processAttendanceData(response.data.data);
-      } else if (Array.isArray(response.data)) {
-        processAttendanceData(response.data, null, null);
-      } else {
-        console.error('Unexpected attendance data format:', response.data);
-        setAttendanceData([]);
-      }
-    } catch (err) {
-      console.error('Error fetching attendance data by hospital:', err);
-      setError('Không thể tải dữ liệu điểm danh theo bệnh viện. Vui lòng thử lại sau.');
-      setAttendanceData([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-  
   const fetchAttendanceByDateRange = async (startDate, endDate) => {
     try {
       setLoading(true);
-      const response = await axios.get(`/api/attendance/reports/date-range?startDate=${startDate}&endDate=${endDate}`);
+      
+      // Validate dates
+      if (!startDate || !endDate) {
+        console.error('Invalid date range:', { startDate, endDate });
+        setError('Vui lòng chọn khoảng thời gian hợp lệ');
+        setAttendanceData([]);
+        return;
+      }
+      
+      // Ensure dates are in YYYY-MM-DD format
+      const formatDate = (dateStr) => {
+        if (!dateStr) return '';
+        // If date is already in YYYY-MM-DD format, return as is
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          return dateStr;
+        }
+        // Otherwise, try to format it
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime())) return '';
+        return date.toISOString().split('T')[0];
+      };
+      
+      const formattedStartDate = formatDate(startDate);
+      const formattedEndDate = formatDate(endDate);
+      
+      if (!formattedStartDate || !formattedEndDate) {
+        console.error('Failed to format dates:', { startDate, endDate });
+        setError('Định dạng ngày không hợp lệ');
+        setAttendanceData([]);
+        return;
+      }
+      
+      const url = `/attendance/date-range/${formattedStartDate}/${formattedEndDate}`;
+      console.log('Fetching attendance by date range:', { formattedStartDate, formattedEndDate, url });
+      
+      const response = await api.get(url);
       
       if (response.data && response.data.data) {
         processAttendanceData(response.data.data);
@@ -426,7 +1147,11 @@ const EnhancedAttendanceReports = () => {
       }
     } catch (err) {
       console.error('Error fetching attendance data:', err);
-      setError('Không thể tải dữ liệu điểm danh. Vui lòng thử lại sau.');
+      if (err.response && err.response.status === 404) {
+        setError('Không tìm thấy dữ liệu điểm danh cho khoảng thời gian đã chọn');
+      } else {
+        setError('Không thể tải dữ liệu điểm danh. Vui lòng thử lại sau.');
+      }
       setAttendanceData([]);
     } finally {
       setLoading(false);
@@ -438,15 +1163,10 @@ const EnhancedAttendanceReports = () => {
       setLoadingMembers(true);
       
       // Lấy dữ liệu điểm danh trực tiếp từ API thay vì lấy danh sách sinh viên
-      const attendanceResponse = await axios.get('/api/attendance/reports/all');
+      const attendanceResponse = await api.get('/attendance/reports/all');
       
       if (attendanceResponse.data.success) {
         const allAttendanceRecords = attendanceResponse.data.data;
-        console.log('Total attendance records:', allAttendanceRecords.length);
-        
-        if (allAttendanceRecords.length > 0) {
-          console.log('Sample attendance record:', allAttendanceRecords[0]);
-        }
         
         // Process attendance records to create detailed members list
         // Each record represents a student's attendance in a specific session
@@ -502,12 +1222,11 @@ const EnhancedAttendanceReports = () => {
           };
         });
         
-        console.log(`Processed ${processedMembers.length} attendance records`);
         setDetailedMembers(processedMembers);
         setAttendanceData(allAttendanceRecords);
       } else {
         // Fallback: try to get members if attendance data is not available
-        const membersResponse = await axios.get('/api/attendance/members');
+        const membersResponse = await api.get('/attendance/members');
         
         if (membersResponse.data.success) {
           const allMembers = membersResponse.data.data;
@@ -565,17 +1284,7 @@ const EnhancedAttendanceReports = () => {
   // Process attendance data from API responses
   const processAttendanceData = (data, dashboardData = null, absenceStatsData = null) => {
     // Debug: Log the data structure
-    console.log('Processing attendance data:', {
-      dataLength: data?.length,
-      sampleData: data?.slice(0, 3),
-      allAttendanceTypes: data?.map(item => item.status || item.attendance_type).filter(Boolean),
-      dashboardData: dashboardData,
-      dashboardDataKeys: dashboardData ? Object.keys(dashboardData) : null,
-      absentStudentsFromDashboard: dashboardData?.absentStudents,
-      absentStudentsCountFromDashboard: dashboardData?.absentStudentsCount,
-      fullDashboardData: dashboardData,
-      absenceStatsData: absenceStatsData
-    });
+
     
     // Check if data is empty
     if (!data || !Array.isArray(data) || data.length === 0) {
@@ -602,44 +1311,48 @@ const EnhancedAttendanceReports = () => {
         duringSessionApproved: 0,
         afterSessionApproved: 0
       });
-      setUniqueClasses([]);
       setAttendanceByStatus({});
       setAttendanceData([]);
       setCsvData([['Không có dữ liệu điểm danh']]);
       return;
     }
     
-    // Map field names from database to what the component expects
-    const processedData = data.map(item => ({
-      ...item,
-      // Map session fields
-      sessionId: item.sessionId || { 
-        _id: item.session_id, 
-        name: item.session_name || item.date 
-      },
-      // Map method field
-      method: item.method || item.period,
-      // Map member fields if needed
-      member: item.member || {
-        _id: item.student_id,
-        fullName: item.full_name,
-        class: item.class_name,
-        gender: item.gender,
-        email: item.email,
-        faculty_name: item.faculty_name
-      },
-      // Map faculty field
-      faculty_name: item.faculty_name || item.member?.faculty_name
-    }));
+    // Optimize: Map and filter in single pass
+    const lowerNameFilter = nameFilter ? nameFilter.toLowerCase() : null;
     
+    const processedData = data.reduce((acc, item) => {
+      // Check filter first (early exit if not matching)
+      if (lowerNameFilter) {
+        const fullName = (item.full_name || item.member?.fullName || item.member?.full_name || '').toLowerCase();
+        if (!fullName.includes(lowerNameFilter)) {
+          return acc; // Skip this item
+        }
+      }
+      
+      // Map the item
+      acc.push({
+        ...item,
+        sessionId: item.sessionId || { 
+          _id: item.session_id, 
+          name: item.session_name || item.date 
+        },
+        method: item.method || item.period,
+        member: item.member || {
+          _id: item.student_id,
+          fullName: item.full_name,
+          class: item.class_name,
+          gender: item.gender,
+          email: item.email,
+          faculty_name: item.faculty_name
+        },
+        faculty_name: item.faculty_name || item.member?.faculty_name
+      });
+      
+      return acc;
+    }, []);
+
     // Set processed data
     setAttendanceData(processedData);
-    
-    // Extract unique classes
-    const classes = [...new Set(processedData.map(item => 
-      item.member?.class || item.class_name
-    ).filter(Boolean))];
-    setUniqueClasses(classes);
     
     // Calculate stats
     const sessionIds = [...new Set(processedData.map(item => 
@@ -659,19 +1372,11 @@ const EnhancedAttendanceReports = () => {
     
     const averageAttendance = totalSessions > 0 ? (processedData.length / totalSessions).toFixed(2) : 0;
     
-    // Tính toán số lượng theo giới tính
-    const maleCount = processedData.filter(item => 
-      (item.member?.gender === 'male') || (item.gender === 'male')
-    ).length;
-    const femaleCount = processedData.filter(item => 
-      (item.member?.gender === 'female') || (item.gender === 'female')
-    ).length;
-    const otherCount = processedData.filter(item => 
-      (item.member?.gender !== 'male' && item.member?.gender !== 'female') &&
-      (item.gender !== 'male' && item.gender !== 'female')
-    ).length;
+    // Optimize: Single loop for gender counts and status counts
+    let maleCount = 0;
+    let femaleCount = 0;
+    let otherCount = 0;
     
-    // Tính toán tổng số lượng các trạng thái điểm danh (đếm tất cả các lần xuất hiện)
     const statusCounts = {
       full: 0,
       before: 0,
@@ -688,50 +1393,18 @@ const EnhancedAttendanceReports = () => {
       absent_after_perm: 0
     };
     
-    // Đếm trực tiếp từ dữ liệu gốc - mỗi bản ghi điểm danh được đếm
+    // Single loop to count both gender and status - MUCH FASTER!
     processedData.forEach(item => {
+      // Count gender
+      const gender = item.member?.gender || item.gender;
+      if (gender === 'male') maleCount++;
+      else if (gender === 'female') femaleCount++;
+      else otherCount++;
+      
+      // Count status
       const attendanceType = item.status || item.attendance_type;
-      
-      if (!attendanceType) return;
-      
-      // Đếm trực tiếp theo loại điểm danh
-      switch (attendanceType) {
-        case 'before':
-          statusCounts.before++;
-          break;
-        case 'during':
-          statusCounts.during++;
-          break;
-        case 'after':
-          statusCounts.after++;
-          break;
-        case 'early':
-          statusCounts.early++;
-          break;
-        case 'late':
-          statusCounts.late++;
-          break;
-        case 'late_leave':
-          statusCounts.late_leave++;
-          break;
-        case 'present':
-          statusCounts.present++;
-          break;
-        case 'absent_perm':
-          statusCounts.absent_perm++;
-          break;
-        case 'absent_before_perm':
-        statusCounts.absent_before_perm++;
-          break;
-        case 'absent_during_perm':
-        statusCounts.absent_during_perm++;
-          break;
-        case 'absent_after_perm':
-        statusCounts.absent_after_perm++;
-          break;
-        default:
-          // Các trường hợp khác có thể được xử lý ở đây
-          break;
+      if (attendanceType && statusCounts.hasOwnProperty(attendanceType)) {
+        statusCounts[attendanceType]++;
       }
     });
     
@@ -764,12 +1437,6 @@ const EnhancedAttendanceReports = () => {
       
       if (foundAbsentCount !== null) {
         absentCount = foundAbsentCount;
-        console.log('Absent calculation from dashboard:', {
-          absentStudentsCount: foundAbsentCount,
-          source: 'dashboard data'
-        });
-      } else {
-        console.log('No absent data found in dashboard, using fallback');
       }
     }
     
@@ -815,13 +1482,6 @@ const EnhancedAttendanceReports = () => {
         afterSessionApproved: parseInt(absenceData.after_session_requests || 0)
       };
       
-      console.log('Absence request stats:', {
-        fullSessionApproved: absenceRequestStats.fullSessionApproved,
-        beforeSessionApproved: absenceRequestStats.beforeSessionApproved,
-        duringSessionApproved: absenceRequestStats.duringSessionApproved,
-        afterSessionApproved: absenceRequestStats.afterSessionApproved,
-        rawData: absenceData
-      });
     }
     
     // Tính toán số lượng "Đầy đủ" - đếm tổng số lần xuất hiện
@@ -944,7 +1604,7 @@ const EnhancedAttendanceReports = () => {
     // Chuẩn bị dữ liệu biểu đồ
     prepareChartData(byStatus);
     
-    setAttendanceData(data);
+    setAttendanceData(processedData);
     
     // Prepare CSV data
     const csvData = [
@@ -1039,10 +1699,1003 @@ const EnhancedAttendanceReports = () => {
     });
   };
 
+  // Apply filters to data
+  const applyFilters = (data) => {
+    let filtered = data || [];
+    
+    // Filter by name
+    if (nameFilter) {
+      filtered = filtered.filter(item => {
+        const fullName = item.member?.fullName || item.member?.full_name || item.full_name || item.fullName || '';
+        return fullName.toLowerCase().includes(nameFilter.toLowerCase());
+      });
+    }
+    
+    // Filter by group
+    if (selectedGroup) {
+      filtered = filtered.filter(item => {
+        const groupId = item.group_id || item.group?._id || item.member?.group_id || item.groupName?.group_id;
+        return groupId === selectedGroup;
+      });
+    }
+    
+    // Filter by date range
+    if (dateRange.startDate && dateRange.endDate) {
+      filtered = filtered.filter(item => {
+        const itemDate = item.session_date || item.date || item.timestamp || item.session?.date || item.sessionInfo?.date;
+        if (!itemDate) {
+          // For detailedMembers, check attendanceTimestamp
+          if (item.attendanceTimestamp) {
+            const date = new Date(item.attendanceTimestamp).toISOString().split('T')[0];
+            return date >= dateRange.startDate && date <= dateRange.endDate;
+          }
+          return false;
+        }
+        const date = new Date(itemDate).toISOString().split('T')[0];
+        return date >= dateRange.startDate && date <= dateRange.endDate;
+      });
+    }
+    
+    return filtered;
+  };
+
+  // Export data based on current active tab
+  const exportCurrentTab = () => {
+    let csvData = [];
+    let fileName = 'bao_cao_diem_danh.xlsx';
+    let sheetName = 'Báo cáo điểm danh';
+
+    switch (activeTab) {
+      case 'statusDistribution':
+        // Export statistics summary
+        csvData = [
+          ['Thống kê điểm danh'],
+          ['Trạng thái', 'Số lượng'],
+          ['Có mặt đầy đủ', stats.fullAttendance || 0],
+          ['Có mặt trước', stats.beforeAttendance || 0],
+          ['Có mặt trong', stats.duringAttendance || 0],
+          ['Có mặt sau', stats.afterAttendance || 0],
+          ['Có mặt', stats.presentAttendance || 0],
+          ['Đi trễ', stats.lateAttendance || 0],
+          ['Vắng mặt', stats.absent || 0],
+          ['Phép cả buổi', stats.fullSessionApproved || 0],
+          ['Phép trước buổi', stats.beforeSessionApproved || 0],
+          ['Phép trong buổi', stats.duringSessionApproved || 0],
+          ['Phép sau buổi', stats.afterSessionApproved || 0],
+          [''],
+          ['Tổng số buổi học', stats.totalSessions || 0],
+          ['Tổng số sinh viên', stats.totalAttendees || 0],
+          ['Tỷ lệ điểm danh trung bình', stats.averageAttendance || 0]
+        ];
+        fileName = 'thong_ke_trang_thai.xlsx';
+        sheetName = 'Thống kê trạng thái';
+        break;
+
+      case 'detailedList':
+        // Export detailed list with filters applied
+        const filteredDetailedMembers = applyFilters(detailedMembers);
+        csvData = [
+          ['#', 'Họ và tên', 'Lớp', 'Tên buổi học', 'Giới tính', 'Email', 'Trạng thái điểm danh']
+        ];
+        filteredDetailedMembers.forEach((member, index) => {
+          csvData.push([
+            index + 1,
+            member.fullName || 'N/A',
+            member.class || 'N/A',
+            member.sessionInfo?.title || 'N/A',
+            member.gender === 'male' ? 'Nam' : member.gender === 'female' ? 'Nữ' : 'Khác',
+            member.email || 'N/A',
+            getStatusText(member.attendanceStatus)
+          ]);
+        });
+        fileName = 'danh_sach_chi_tiet.xlsx';
+        sheetName = 'Danh sách chi tiết';
+        break;
+
+      case 'classReport':
+        // Export class report
+        const filteredAttendanceData = applyFilters(attendanceData);
+        const classSummariesForExport = {};
+        
+        filteredAttendanceData.forEach(record => {
+          const className = record.member?.class || record.class_name || record.class;
+          const studentId = record.member?._id || record.student_id || record.member_id;
+          const attendanceType = record.status || record.attendance_type || record.type;
+          
+          if (!className || !studentId || !attendanceType) return;
+          
+          if (!classSummariesForExport[className]) {
+            classSummariesForExport[className] = {
+              name: className,
+              totalStudents: new Set(),
+              fullCount: 0,
+              beforeCount: 0,
+              duringCount: 0,
+              afterCount: 0,
+              presentCount: 0,
+              lateCount: 0,
+              absentCount: 0,
+              fullPermCount: 0,
+              beforePermCount: 0,
+              duringPermCount: 0,
+              afterPermCount: 0
+            };
+          }
+          
+          classSummariesForExport[className].totalStudents.add(studentId);
+          
+          if (attendanceType === 'before') classSummariesForExport[className].beforeCount++;
+          if (attendanceType === 'during') classSummariesForExport[className].duringCount++;
+          if (attendanceType === 'after') classSummariesForExport[className].afterCount++;
+          if (attendanceType === 'present') classSummariesForExport[className].presentCount++;
+          if (attendanceType === 'late') classSummariesForExport[className].lateCount++;
+          if (attendanceType === 'absent') classSummariesForExport[className].absentCount++;
+        });
+        
+        csvData = [
+          ['Lớp', 'Tổng số SV', 'Đầy đủ', 'Trước', 'Trong', 'Sau', 'Có mặt', 'Đi trễ', 'Vắng', 'Phép cả buổi', 'Phép trước', 'Phép trong', 'Phép sau']
+        ];
+        Object.values(classSummariesForExport).forEach(classData => {
+          csvData.push([
+            classData.name,
+            classData.totalStudents.size,
+            classData.fullCount,
+            classData.beforeCount,
+            classData.duringCount,
+            classData.afterCount,
+            classData.presentCount,
+            classData.lateCount,
+            classData.absentCount,
+            classData.fullPermCount,
+            classData.beforePermCount,
+            classData.duringPermCount,
+            classData.afterPermCount
+          ]);
+        });
+        fileName = 'bao_cao_theo_lop.xlsx';
+        sheetName = 'Báo cáo theo lớp';
+        break;
+
+      case 'hospitalReport':
+        // Export hospital report
+        const filteredAttendanceForHospital = applyFilters(attendanceData);
+        const hospitalStatsForExport = {};
+        
+        filteredAttendanceForHospital.forEach(record => {
+          const hospitalName = record.session_location || record.location || record.hospital?.name || record.hospital_name || record.hospital;
+          const studentId = record.student_id || record.studentId || record.member?._id;
+          const attendanceType = record.status || record.attendance_type;
+          
+          if (!hospitalName || hospitalName === "-- Chọn vị trí có sẵn --") return;
+          
+          if (!hospitalStatsForExport[hospitalName]) {
+            hospitalStatsForExport[hospitalName] = {
+              name: hospitalName,
+              totalStudents: new Set(),
+              fullCount: 0,
+              beforeCount: 0,
+              duringCount: 0,
+              afterCount: 0,
+              presentCount: 0,
+              lateCount: 0,
+              absentCount: 0,
+              fullPermCount: 0,
+              beforePermCount: 0,
+              duringPermCount: 0,
+              afterPermCount: 0
+            };
+          }
+          
+          if (studentId) hospitalStatsForExport[hospitalName].totalStudents.add(studentId);
+          
+          if (attendanceType === 'before') hospitalStatsForExport[hospitalName].beforeCount++;
+          if (attendanceType === 'during') hospitalStatsForExport[hospitalName].duringCount++;
+          if (attendanceType === 'after') hospitalStatsForExport[hospitalName].afterCount++;
+          if (attendanceType === 'present') hospitalStatsForExport[hospitalName].presentCount++;
+          if (attendanceType === 'late') hospitalStatsForExport[hospitalName].lateCount++;
+          if (attendanceType === 'absent') hospitalStatsForExport[hospitalName].absentCount++;
+        });
+        
+        csvData = [
+          ['Bệnh viện', 'Tổng số SV', 'Đầy đủ', 'Trước', 'Trong', 'Sau', 'Có mặt', 'Đi trễ', 'Vắng', 'Phép cả buổi', 'Phép trước', 'Phép trong', 'Phép sau']
+        ];
+        Object.values(hospitalStatsForExport).forEach(hospitalData => {
+          csvData.push([
+            hospitalData.name,
+            hospitalData.totalStudents.size,
+            hospitalData.fullCount,
+            hospitalData.beforeCount,
+            hospitalData.duringCount,
+            hospitalData.afterCount,
+            hospitalData.presentCount,
+            hospitalData.lateCount,
+            hospitalData.absentCount,
+            hospitalData.fullPermCount,
+            hospitalData.beforePermCount,
+            hospitalData.duringPermCount,
+            hospitalData.afterPermCount
+          ]);
+        });
+        fileName = 'bao_cao_theo_benh_vien.xlsx';
+        sheetName = 'Báo cáo theo bệnh viện';
+        break;
+
+      case 'dateReport':
+        // Export date report
+        const filteredAttendanceForDate = applyFilters(attendanceData);
+        const dateStatsForExport = {};
+        
+        filteredAttendanceForDate.forEach(record => {
+          const sessionDate = record.session_date || record.date || record.timestamp || record.session?.date;
+          const studentId = record.student_id || record.studentId || record.member?._id;
+          const attendanceType = record.status || record.attendance_type;
+          
+          if (!sessionDate) return;
+          
+          const dateStr = new Date(sessionDate).toLocaleDateString('vi-VN');
+          
+          if (!dateStatsForExport[dateStr]) {
+            dateStatsForExport[dateStr] = {
+              date: dateStr,
+              totalSessions: new Set(),
+              totalStudents: new Set(),
+              fullCount: 0,
+              beforeCount: 0,
+              duringCount: 0,
+              afterCount: 0,
+              presentCount: 0,
+              lateCount: 0,
+              absentCount: 0,
+              fullPermCount: 0,
+              beforePermCount: 0,
+              duringPermCount: 0,
+              afterPermCount: 0
+            };
+          }
+          
+          const sessionId = record.session_id || record.sessionId?._id || record.session?._id;
+          if (sessionId) dateStatsForExport[dateStr].totalSessions.add(sessionId);
+          if (studentId) dateStatsForExport[dateStr].totalStudents.add(studentId);
+          
+          if (attendanceType === 'before') dateStatsForExport[dateStr].beforeCount++;
+          if (attendanceType === 'during') dateStatsForExport[dateStr].duringCount++;
+          if (attendanceType === 'after') dateStatsForExport[dateStr].afterCount++;
+          if (attendanceType === 'present') dateStatsForExport[dateStr].presentCount++;
+          if (attendanceType === 'late') dateStatsForExport[dateStr].lateCount++;
+          if (attendanceType === 'absent') dateStatsForExport[dateStr].absentCount++;
+        });
+        
+        csvData = [
+          ['Ngày', 'Tổng số buổi', 'Tổng số SV', 'Đầy đủ', 'Trước', 'Trong', 'Sau', 'Có mặt', 'Đi trễ', 'Vắng', 'Phép cả buổi', 'Phép trước', 'Phép trong', 'Phép sau']
+        ];
+        Object.values(dateStatsForExport).sort((a, b) => {
+          const dateA = new Date(a.date.split('/').reverse().join('-'));
+          const dateB = new Date(b.date.split('/').reverse().join('-'));
+          return dateB - dateA;
+        }).forEach(dateData => {
+          csvData.push([
+            dateData.date,
+            dateData.totalSessions.size,
+            dateData.totalStudents.size,
+            dateData.fullCount,
+            dateData.beforeCount,
+            dateData.duringCount,
+            dateData.afterCount,
+            dateData.presentCount,
+            dateData.lateCount,
+            dateData.absentCount,
+            dateData.fullPermCount,
+            dateData.beforePermCount,
+            dateData.duringPermCount,
+            dateData.afterPermCount
+          ]);
+        });
+        fileName = 'bao_cao_theo_ngay.xlsx';
+        sheetName = 'Báo cáo theo ngày';
+        break;
+
+      default:
+        // Default: export attendance data
+        const filteredDefault = applyFilters(attendanceData);
+        csvData = [
+          ['Họ và tên', 'Lớp', 'Giới tính', 'Email', 'Buổi điểm danh', 'Ngày', 'Giờ điểm danh', 'Phương thức', 'Trạng thái']
+        ];
+        filteredDefault.forEach(item => {
+          csvData.push([
+            item.member?.full_name || item.member?.fullName || 'N/A',
+            item.member?.class_name || item.member?.class || 'N/A',
+            item.member?.gender === 'male' ? 'Nam' : item.member?.gender === 'female' ? 'Nữ' : 'Khác',
+            item.member?.email || 'N/A',
+            item.sessionId?.name || 'N/A',
+            item.timestamp ? new Date(item.timestamp).toLocaleDateString('vi-VN') : 'N/A',
+            item.timestamp ? new Date(item.timestamp).toLocaleTimeString('vi-VN') : 'N/A',
+            item.method === 'qr' ? 'QR Code' : item.method === 'manual' ? 'Thủ công' : item.method || 'N/A',
+            getStatusText(item.status)
+          ]);
+        });
+        break;
+    }
+
+    const worksheet = XLSX.utils.aoa_to_sheet(csvData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+    XLSX.writeFile(workbook, fileName);
+  };
+
+  // Custom Report Helper Functions
+  const availableColumns = [
+    { key: 'student_name', label: 'Tên sinh viên' },
+    { key: 'student_code', label: 'Mã sinh viên' },
+    { key: 'student_email', label: 'Email' },
+    { key: 'class_name', label: 'Lớp' },
+    { key: 'faculty_name', label: 'Khoa' },
+    { key: 'gender', label: 'Giới tính' },
+    { key: 'session_title', label: 'Tên buổi học' },
+    { key: 'session_date', label: 'Ngày học' },
+    { key: 'session_location', label: 'Địa điểm' },
+    { key: 'group_name', label: 'Nhóm' },
+    { key: 'attendance_type', label: 'Loại điểm danh' },
+    { key: 'timestamp', label: 'Thời gian điểm danh' },
+    { key: 'minutes_early', label: 'Số phút sớm' },
+    { key: 'minutes_late', label: 'Số phút muộn' },
+    { key: 'device_mac', label: 'Địa chỉ MAC' },
+    { key: 'ip_address', label: 'Địa chỉ IP' }
+  ];
+
+  // Column label mapping
+  const columnLabels = {
+    'student_name': 'Tên sinh viên',
+    'student_code': 'Mã SV',
+    'student_email': 'Email',
+    'class_name': 'Lớp',
+    'faculty_name': 'Khoa',
+    'gender': 'Giới tính',
+    'session_title': 'Tên buổi học',
+    'session_date': 'Ngày học',
+    'session_location': 'Địa điểm',
+    'group_name': 'Nhóm',
+    'attendance_type': 'Loại điểm danh',
+    'timestamp': 'Thời gian',
+    'minutes_early': 'Phút sớm',
+    'minutes_late': 'Phút muộn',
+    'device_mac': 'MAC',
+    'ip_address': 'IP'
+  };
+
+  // Weekly stats column label mapping
+  const getWeeklyStatsColumnLabel = (columnKey, groupBy) => {
+    const labels = {
+      'group_key': groupBy === 'faculty' ? 'Khoa' :
+                   groupBy === 'location' ? 'Bệnh viện' :
+                   groupBy === 'class' ? 'Lớp' :
+                   groupBy === 'group' ? 'Nhóm' :
+                   'Tên buổi học',
+      'sub_group': groupBy === 'faculty' ? 'Bệnh viện' : 'Khoa',
+      'week': 'Tuần',
+      'student_count': 'Số SV',
+      'classes': 'Lớp',
+      'session_count': 'Số buổi học',
+      'attendance_count': 'Lần điểm danh'
+    };
+    return labels[columnKey] || columnKey;
+  };
+
+  const toggleColumn = (columnKey) => {
+    setCustomReportColumns(prev => {
+      if (prev.includes(columnKey)) {
+        // Don't allow removing all columns
+        if (prev.length > 1) {
+          return prev.filter(col => col !== columnKey);
+        }
+        return prev;
+      } else {
+        return [...prev, columnKey];
+      }
+    });
+  };
+
+  // Helper function to get attendance type label
+  const getAttendanceTypeLabel = (attendanceType) => {
+    const labels = {
+      'before': 'Trước giờ',
+      'during': 'Trong giờ',
+      'after': 'Sau giờ',
+      'early': 'Sớm',
+      'late': 'Đi trễ',
+      'late_before': 'Đi trễ (Trước)',
+      'late_leave': 'Về trễ',
+      'absent': 'Vắng',
+      'absent_perm': 'Phép cả buổi',
+      'absent_before_perm': 'Phép trước giờ',
+      'absent_during_perm': 'Phép trong giờ',
+      'absent_after_perm': 'Phép sau giờ'
+    };
+    return labels[attendanceType] || 'Không xác định';
+  };
+
+  // Helper function to get badge color for attendance type
+  const getAttendanceTypeBadgeColor = (attendanceType) => {
+    const colors = {
+      'before': 'success',
+      'during': 'info',
+      'after': 'warning',
+      'early': 'success',
+      'late': 'warning',
+      'late_before': 'warning',
+      'late_leave': 'warning',
+      'absent': 'danger',
+      'absent_perm': 'secondary',
+      'absent_before_perm': 'secondary',
+      'absent_during_perm': 'secondary',
+      'absent_after_perm': 'secondary'
+    };
+    return colors[attendanceType] || 'secondary';
+  };
+
+  const handleCustomReportFilterChange = (key, value) => {
+    setCustomReportFilters(prev => ({
+      ...prev,
+      [key]: value
+    }));
+    
+    // Đồng bộ với weeklyStatsFilters nếu đang ở weekly_stats view
+    if (customReportDisplay === 'weekly_stats') {
+      setWeeklyStatsFilters(prev => ({
+        ...prev,
+        [key]: value
+      }));
+      
+      // Đồng bộ weeklyStatsSelectedFilter nếu key tương ứng với groupBy
+      if (weeklyStatsGroupBy === 'faculty' && key === 'facultyName') {
+        setWeeklyStatsSelectedFilter(value);
+      } else if (weeklyStatsGroupBy === 'location' && key === 'location') {
+        setWeeklyStatsSelectedFilter(value);
+      } else if (weeklyStatsGroupBy === 'class' && key === 'className') {
+        setWeeklyStatsSelectedFilter(value);
+      } else if (weeklyStatsGroupBy === 'group' && key === 'groupId') {
+        setWeeklyStatsSelectedFilter(value);
+      }
+    }
+  };
+
+  const handleCustomReportSort = (field) => {
+    setCustomReportFilters(prev => ({
+      ...prev,
+      sortField: field,
+      sortOrder: prev.sortField === field && prev.sortOrder === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  // Drag and drop handlers for column reordering
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event) => {
+    const { active, over } = event;
+    if (active.id !== over?.id) {
+      setCustomReportColumns((items) => {
+        const oldIndex = items.indexOf(active.id);
+        const newIndex = items.indexOf(over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
+
+  const handleWeeklyStatsDragEnd = (event) => {
+    const { active, over } = event;
+    if (active.id !== over?.id) {
+      setWeeklyStatsColumns((items) => {
+        const oldIndex = items.indexOf(active.id);
+        const newIndex = items.indexOf(over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
+
+  const handleWeeklyStatsSort = (field) => {
+    setWeeklyStatsSortField(field);
+    setWeeklyStatsSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+  };
+
+  // Sortable header component
+  const SortableHeader = ({ id, children, onSort, sortField, sortOrder }) => {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ id });
+
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.5 : 1,
+    };
+
+    return (
+      <th
+        ref={setNodeRef}
+        style={style}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <span
+            {...attributes}
+            {...listeners}
+            style={{ cursor: 'grab', userSelect: 'none', padding: '2px 4px' }}
+            title="Kéo để sắp xếp lại cột"
+          >
+            <i className="fas fa-grip-vertical" style={{ color: '#999', fontSize: '12px' }}></i>
+          </span>
+          <span
+            onClick={onSort}
+            style={{ cursor: 'pointer', flex: 1 }}
+            title="Click để sắp xếp"
+          >
+            {children}
+            {sortField === id && (
+              <i className={`fas fa-sort-${sortOrder === 'asc' ? 'up' : 'down'} ms-1`}></i>
+            )}
+          </span>
+        </div>
+      </th>
+    );
+  };
+
+  // Helper function to format group name
+  const formatGroupName = (groupName) => {
+    if (!groupName) return '-';
+    
+    // If it's a JSON array string, parse and format it
+    if (typeof groupName === 'string' && (groupName.startsWith('[') || groupName.startsWith('{'))) {
+      try {
+        const parsed = JSON.parse(groupName);
+        if (Array.isArray(parsed)) {
+          // Format array items
+          return parsed.map(item => {
+            if (typeof item === 'string' && item.startsWith('class:')) {
+              return item.replace('class:', 'Lớp ');
+            }
+            return item;
+          }).join(', ');
+        }
+        return groupName;
+      } catch (e) {
+        return groupName;
+      }
+    }
+    
+    return groupName;
+  };
+
+  const exportCustomReportToExcel = async () => {
+    try {
+      // Show loading indicator
+      const exportButton = document.querySelector('.custom-report-btn-success');
+      if (exportButton) {
+        exportButton.disabled = true;
+        exportButton.innerHTML = '<i className="fas fa-spinner fa-spin"></i> Đang xuất...';
+      }
+
+      // Fetch all data without pagination limit
+      const queryParams = new URLSearchParams({
+        page: '1',
+        limit: '100000', // Large limit to get all data
+        sortField: customReportFilters.sortField,
+        sortOrder: customReportFilters.sortOrder,
+        ...(customReportFilters.startDate && { startDate: customReportFilters.startDate }),
+        ...(customReportFilters.endDate && { endDate: customReportFilters.endDate }),
+        ...(customReportFilters.groupId && { groupId: customReportFilters.groupId }),
+        ...(customReportFilters.className && { className: customReportFilters.className }),
+        ...(customReportFilters.studentName && { studentName: customReportFilters.studentName }),
+        ...(customReportFilters.attendanceType && { attendanceType: customReportFilters.attendanceType }),
+        ...(customReportFilters.location && { location: customReportFilters.location }),
+        ...(customReportFilters.facultyName && { facultyName: customReportFilters.facultyName })
+      });
+
+      console.log(`📥 Fetching all data for Excel export: /attendance/custom-report?${queryParams}`);
+      const response = await api.get(`/attendance/custom-report?${queryParams}`);
+      
+      if (!response.data || !response.data.success || !response.data.data || response.data.data.length === 0) {
+        alert('Không có dữ liệu để xuất');
+        if (exportButton) {
+          exportButton.disabled = false;
+          exportButton.innerHTML = '<i className="fas fa-file-excel"></i> Xuất Excel';
+        }
+        return;
+      }
+
+      const allData = response.data.data || [];
+
+      // Create column order based on customReportColumns array
+      const columnOrder = customReportColumns.map(key => {
+        const col = availableColumns.find(c => c.key === key);
+        return col ? { key: col.key, label: col.label } : null;
+      }).filter(Boolean);
+
+      const exportData = allData.map(record => {
+        const row = {};
+        // Use columnOrder to maintain the user-defined order
+        columnOrder.forEach(col => {
+          let value = record[col.key];
+          if (col.key === 'session_date' && value) {
+            value = formatDate(value);
+          } else if (col.key === 'timestamp' && value) {
+            value = new Date(value).toLocaleString('vi-VN');
+          } else if (col.key === 'attendance_type') {
+            const typeMap = {
+              'before': 'Trước giờ',
+              'during': 'Đúng giờ',
+              'after': 'Sau giờ',
+              'late': 'Muộn',
+              'absent': 'Vắng'
+            };
+            value = typeMap[value] || value;
+          } else if (col.key === 'gender') {
+            // Handle gender mapping with various formats
+            if (!value || value === null || value === undefined) {
+              value = 'Chưa có';
+            } else if (value === 'male' || value === 'Male' || value === 'Nam') {
+              value = 'Nam';
+            } else if (value === 'female' || value === 'Female' || value === 'Nữ') {
+              value = 'Nữ';
+            } else if (value === 'other' || value === 'Khác') {
+              value = 'Khác';
+            } else {
+              value = value || 'Chưa có';
+            }
+          } else if (col.key === 'group_name') {
+            value = formatGroupName(value);
+          }
+          row[col.label] = value || '';
+        });
+        return row;
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Báo cáo tùy chỉnh');
+      XLSX.writeFile(workbook, `bao-cao-tuy-chinh-${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      alert(`Đã xuất thành công ${exportData.length} dòng dữ liệu!`);
+    } catch (error) {
+      console.error('Error exporting custom report to Excel:', error);
+      alert('Có lỗi xảy ra khi xuất file Excel. Vui lòng thử lại.');
+    } finally {
+      // Restore button
+      const exportButton = document.querySelector('.custom-report-btn-success');
+      if (exportButton) {
+        exportButton.disabled = false;
+        exportButton.innerHTML = '<i className="fas fa-file-excel"></i> Xuất Excel';
+      }
+    }
+  };
+
+  // Export chart data to Excel
+  const exportChartToExcel = async () => {
+    try {
+      // Show loading indicator
+      const exportButton = document.querySelector('.custom-report-btn-success');
+      if (exportButton) {
+        exportButton.disabled = true;
+        exportButton.innerHTML = '<i className="fas fa-spinner fa-spin"></i> Đang xuất...';
+      }
+
+      // Fetch all data without pagination limit to ensure accurate chart data
+      const queryParams = new URLSearchParams({
+        page: '1',
+        limit: '100000', // Large limit to get all data
+        sortField: customReportFilters.sortField,
+        sortOrder: customReportFilters.sortOrder,
+        ...(customReportFilters.startDate && { startDate: customReportFilters.startDate }),
+        ...(customReportFilters.endDate && { endDate: customReportFilters.endDate }),
+        ...(customReportFilters.groupId && { groupId: customReportFilters.groupId }),
+        ...(customReportFilters.className && { className: customReportFilters.className }),
+        ...(customReportFilters.studentName && { studentName: customReportFilters.studentName }),
+        ...(customReportFilters.attendanceType && { attendanceType: customReportFilters.attendanceType }),
+        ...(customReportFilters.location && { location: customReportFilters.location }),
+        ...(customReportFilters.facultyName && { facultyName: customReportFilters.facultyName })
+      });
+
+      console.log(`📥 Fetching all data for chart Excel export: /attendance/custom-report?${queryParams}`);
+      const response = await api.get(`/attendance/custom-report?${queryParams}`);
+      
+      if (!response.data || !response.data.success || !response.data.data || response.data.data.length === 0) {
+        alert('Không có dữ liệu để xuất');
+        if (exportButton) {
+          exportButton.disabled = false;
+          exportButton.innerHTML = '<i className="fas fa-file-excel"></i> Xuất Excel';
+        }
+        return;
+      }
+
+      const allData = response.data.data || [];
+
+      // Prepare chart data based on attendance type from all data
+      const attendanceTypeCounts = {};
+      allData.forEach(record => {
+        const type = record.attendance_type || 'unknown';
+        attendanceTypeCounts[type] = (attendanceTypeCounts[type] || 0) + 1;
+      });
+
+      const typeMap = {
+        'before': 'Trước giờ',
+        'during': 'Đúng giờ',
+        'after': 'Sau giờ',
+        'late': 'Muộn',
+        'absent': 'Vắng'
+      };
+
+      const exportData = Object.keys(attendanceTypeCounts).map(key => ({
+        'Loại điểm danh': typeMap[key] || key,
+        'Số lượng': attendanceTypeCounts[key]
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Biểu đồ phân tích');
+      XLSX.writeFile(workbook, `bieu-do-phan-tich-${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      alert(`Đã xuất thành công! Tổng số: ${allData.length} bản ghi, ${exportData.length} loại điểm danh.`);
+    } catch (error) {
+      console.error('Error exporting chart to Excel:', error);
+      alert('Có lỗi xảy ra khi xuất file Excel. Vui lòng thử lại.');
+    } finally {
+      // Restore button
+      const exportButton = document.querySelector('.custom-report-btn-success');
+      if (exportButton) {
+        exportButton.disabled = false;
+        exportButton.innerHTML = '<i className="fas fa-file-excel"></i> Xuất Excel';
+      }
+    }
+  };
+
+  // Export weekly statistics to Excel with details
+  const exportWeeklyStatsToExcel = async () => {
+    if (!weeklyStatsData || weeklyStatsData.length === 0) {
+      alert('Không có dữ liệu để xuất');
+      return;
+    }
+
+    try {
+      // Show loading indicator
+      const exportButton = document.querySelector('.custom-report-btn-success');
+      if (exportButton) {
+        exportButton.disabled = true;
+        exportButton.innerHTML = '<i className="fas fa-spinner fa-spin"></i> Đang xuất...';
+      }
+
+      // Note: This may take a while as it fetches details for all rows
+      const groupByLabel = {
+        'faculty': 'Khoa',
+        'location': 'Bệnh viện',
+        'class': 'Lớp',
+        'group': 'Nhóm',
+        'session_title': 'Tên buổi học'
+      };
+
+      // Create summary sheet with column order from weeklyStatsColumns
+      const columnMapping = {
+        'group_key': groupByLabel[weeklyStatsGroupBy] || 'Nhóm',
+        'sub_group': weeklyStatsGroupBy === 'faculty' ? 'Bệnh viện' : 'Khoa',
+        'week': 'Tuần',
+        'student_count': 'Số sinh viên',
+        'classes': 'Số lớp',
+        'session_count': 'Số buổi học',
+        'attendance_count': 'Lần điểm danh'
+      };
+
+      // Use sorted data to match what's displayed in the table
+      const dataToExport = sortedWeeklyStatsData.length > 0 ? sortedWeeklyStatsData : weeklyStatsData;
+
+      const summaryData = dataToExport.map((stat, index) => {
+        const row = { 'STT': index + 1 };
+        // Use weeklyStatsColumns order to maintain user-defined column order
+        weeklyStatsColumns.forEach(columnKey => {
+          const label = columnMapping[columnKey] || columnKey;
+          switch (columnKey) {
+            case 'group_key':
+              row[label] = stat.group_key || '-';
+              break;
+            case 'sub_group':
+              row[label] = stat.sub_group || '-';
+              break;
+            case 'week':
+              row[label] = `${new Date(stat.week_start).toLocaleDateString('vi-VN')} - ${new Date(stat.week_end).toLocaleDateString('vi-VN')}`;
+              break;
+            case 'student_count':
+              row[label] = stat.student_count || 0;
+              break;
+            case 'classes':
+              row[label] = stat.classes ? stat.classes.length : 0;
+              break;
+            case 'session_count':
+              row[label] = stat.session_count || 0;
+              break;
+            case 'attendance_count':
+              row[label] = stat.attendance_count || 0;
+              break;
+            default:
+              row[label] = '-';
+          }
+        });
+        return row;
+      });
+
+      // Fetch details for all stats (use sorted data to match display order)
+      const allDetailData = [];
+      
+      for (const stat of dataToExport) {
+        try {
+          const weekStart = new Date(stat.week_start).toISOString().split('T')[0];
+          const weekEnd = new Date(stat.week_end).toISOString().split('T')[0];
+
+          const queryParams = new URLSearchParams({
+            groupBy: weeklyStatsGroupBy,
+            groupKey: stat.group_key,
+            subGroup: stat.sub_group || '',
+            weekStart,
+            weekEnd
+          });
+
+          const response = await api.get(`/attendance/weekly-statistics/detail?${queryParams}`);
+          
+          if (response.data && response.data.success && response.data.data) {
+            // Add group info to each detail record
+            const details = response.data.data.map(record => ({
+              'Nhóm thống kê': stat.group_key || '-',
+              'Khoa/Bệnh viện': stat.sub_group || '-',
+              'Tuần': `${new Date(stat.week_start).toLocaleDateString('vi-VN')} - ${new Date(stat.week_end).toLocaleDateString('vi-VN')}`,
+              'Mã SV': record.student_code || '',
+              'Họ và tên': record.student_name || '',
+              'Email': record.student_email || '',
+              'Lớp': record.class_name || '',
+              'Khoa': record.faculty_name || '',
+              'Giới tính': record.gender === 'male' ? 'Nam' : record.gender === 'female' ? 'Nữ' : 'Khác',
+              'Tên buổi học': record.session_title || '',
+              'Ngày học': record.session_date ? formatDate(record.session_date) : '',
+              'Địa điểm': record.session_location || '',
+              'Nhóm': formatGroupName(record.group_name),
+              'Loại điểm danh': getAttendanceTypeLabel(record.attendance_type),
+              'Thời gian điểm danh': record.timestamp ? new Date(record.timestamp).toLocaleString('vi-VN') : ''
+            }));
+            
+            allDetailData.push(...details);
+          }
+        } catch (error) {
+          console.error(`Error fetching details for stat ${stat.group_key}:`, error);
+          // Continue with other stats even if one fails
+        }
+      }
+
+      // Create workbook with multiple sheets
+      const workbook = XLSX.utils.book_new();
+      
+      // Add summary sheet
+      const summaryWorksheet = XLSX.utils.json_to_sheet(summaryData);
+      XLSX.utils.book_append_sheet(workbook, summaryWorksheet, 'Tổng quan');
+      
+      // Add details sheet
+      if (allDetailData.length > 0) {
+        const detailWorksheet = XLSX.utils.json_to_sheet(allDetailData);
+        XLSX.utils.book_append_sheet(workbook, detailWorksheet, 'Chi tiết');
+      }
+
+      // Save file
+      const filename = `thong-ke-theo-tuan-${weeklyStatsGroupBy}-${new Date().toISOString().split('T')[0]}.xlsx`;
+      XLSX.writeFile(workbook, filename);
+      
+      alert(`Đã xuất file Excel thành công!\n- Tổng quan: ${summaryData.length} dòng\n- Chi tiết: ${allDetailData.length} dòng`);
+    } catch (error) {
+      console.error('Error exporting weekly statistics:', error);
+      alert('Có lỗi xảy ra khi xuất file Excel. Vui lòng thử lại.');
+    } finally {
+      // Restore button
+      const exportButton = document.querySelector('.custom-report-btn-success');
+      if (exportButton) {
+        exportButton.disabled = false;
+        exportButton.innerHTML = '<i className="fas fa-file-excel"></i> Xuất Excel';
+      }
+    }
+  };
+
+  const renderCustomReportChart = () => {
+    if (!customReportData || customReportData.length === 0) {
+      return (
+        <div className="text-center py-5">
+          <i className="fas fa-chart-bar fa-3x text-muted mb-3"></i>
+          <p className="text-muted">Không có dữ liệu để hiển thị biểu đồ</p>
+        </div>
+      );
+    }
+
+    // Prepare chart data based on attendance type
+    const attendanceTypeCounts = {};
+    customReportData.forEach(record => {
+      const type = record.attendance_type || 'unknown';
+      attendanceTypeCounts[type] = (attendanceTypeCounts[type] || 0) + 1;
+    });
+
+    const typeMap = {
+      'before': 'Trước giờ',
+      'during': 'Đúng giờ',
+      'after': 'Sau giờ',
+      'late': 'Muộn',
+      'absent': 'Vắng'
+    };
+
+    const labels = Object.keys(attendanceTypeCounts).map(key => typeMap[key] || key);
+    const data = Object.values(attendanceTypeCounts);
+
+    const chartColors = {
+      'before': '#28a745',
+      'during': '#17a2b8',
+      'after': '#ffc107',
+      'late': '#fd7e14',
+      'absent': '#dc3545'
+    };
+
+    const backgroundColors = Object.keys(attendanceTypeCounts).map(key => chartColors[key] || '#6c757d');
+
+    const chartDataConfig = {
+      labels,
+      datasets: [{
+        label: 'Số lượng',
+        data,
+        backgroundColor: customReportDisplay === 'doughnut' ? backgroundColors : backgroundColors.map(c => c + '80'),
+        borderColor: backgroundColors,
+        borderWidth: 2
+      }]
+    };
+
+    const chartOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top'
+        },
+        title: {
+          display: true,
+          text: 'Phân bố loại điểm danh'
+        }
+      }
+    };
+
+    switch (customReportDisplay) {
+      case 'bar':
+        return (
+          <div style={{ height: '400px' }}>
+            <Bar data={chartDataConfig} options={chartOptions} />
+          </div>
+        );
+      case 'line':
+        return (
+          <div style={{ height: '400px' }}>
+            <Line data={chartDataConfig} options={chartOptions} />
+          </div>
+        );
+      case 'doughnut':
+        return (
+          <div style={{ height: '400px', maxWidth: '500px', margin: '0 auto' }}>
+            <Doughnut data={chartDataConfig} options={chartOptions} />
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <>
       <AdminNavbar />
-              <div>
+      <Container fluid className="session-main-container">
         {/* Header Section */}
         <div className="session-header">
           <div className="header-content">
@@ -1062,35 +2715,11 @@ const EnhancedAttendanceReports = () => {
               <Button 
                 variant="outline-light" 
                 className="create-session-btn"
-                onClick={() => {
-                  // Export functionality
-                  const csvData = [
-                    ['Họ và tên', 'Lớp', 'Giới tính', 'Email', 'Buổi điểm danh', 'Ngày', 'Giờ điểm danh', 'Phương thức', 'Trạng thái']
-                  ];
-                  
-                  attendanceData.forEach(item => {
-                    csvData.push([
-                      item.member?.full_name || item.member?.fullName || 'N/A',
-                      item.member?.class_name || item.member?.class || 'N/A',
-                      item.member?.gender === 'male' ? 'Nam' : item.member?.gender === 'female' ? 'Nữ' : 'Khác',
-                      item.member?.email || 'N/A',
-                      item.sessionId?.name || 'N/A',
-                      new Date(item.timestamp).toLocaleDateString('vi-VN'),
-                      new Date(item.timestamp).toLocaleTimeString('vi-VN'),
-                      item.method === 'qr' ? 'QR Code' : item.method === 'manual' ? 'Thủ công' : item.method,
-                      getStatusText(item.status)
-                    ]);
-                  });
-                  
-                  const worksheet = XLSX.utils.aoa_to_sheet(csvData);
-                  const workbook = XLSX.utils.book_new();
-                  XLSX.utils.book_append_sheet(workbook, worksheet, 'Báo cáo điểm danh');
-                  XLSX.writeFile(workbook, 'bao_cao_diem_danh.xlsx');
-                }}
+                onClick={exportCurrentTab}
               >
                 <i className="fas fa-file-export"></i>
                 Xuất báo cáo
-                </Button>
+              </Button>
             </div>
               </div>
             </div>
@@ -1112,266 +2741,131 @@ const EnhancedAttendanceReports = () => {
             {/* Filters section */}
             {showFilters && (
           <div className="session-list-controls">
-            <div className="search-controls">
-              <div className="d-flex justify-content-between align-items-center mb-3">
-                    <h5 className="mb-0">Bộ lọc báo cáo</h5>
-                <Button 
-                  variant="outline-secondary" 
-                  size="sm"
-                  onClick={() => {
-                      setSelectedSession('');
-                      setSelectedGroup('');
-                      setSelectedClass('');
-                      setSelectedHospital('');
-                      setDateRange({ startDate: '', endDate: '' });
-                      setNameFilter('');
-                      setClassFilter('');
-                      setGenderFilter('');
-                      setAttendanceStatusFilter('');
-                      // Reset data with API calls
-                      setLoading(true);
-                      fetchAllAttendance();
-                      fetchAllMembers();
-                  }}
-                >
-                  <i className="fas fa-times me-1"></i>
-                      Xóa tất cả bộ lọc
-                    </Button>
-                  </div>
+            <div className="search-controls" style={{ width: '80%', display: 'block' }}>
               
-                  <Row>
-                    <Col md={3}>
-                  <div className="mb-3">
-                    <label className="form-label">
-                      <i className="fas fa-calendar-event me-2"></i>
-                          Buổi điểm danh
-                    </label>
-                    <select
-                      className="filter-select"
-                          value={selectedSession}
-                          onChange={(e) => {
-                            const sessionId = e.target.value;
-                            setSelectedSession(sessionId);
-                            setSelectedGroup('');
-                            setSelectedClass('');
-                            setSelectedHospital('');
-                            setDateRange({ startDate: '', endDate: '' });
-                          }}
-                        >
-                          <option value="">Tất cả buổi điểm danh</option>
-                          {sessions.map(session => (
-                            <option key={session._id} value={session._id}>
-                              {session.name} ({new Date(session.date).toLocaleDateString('vi-VN')})
-                            </option>
-                          ))}
-                    </select>
-                  </div>
-                    </Col>
-                    <Col md={3}>
-                  <div className="mb-3">
-                    <label className="form-label">
-                      <i className="fas fa-users me-2"></i>
-                      Nhóm
-                    </label>
-                    <select
-                      className="filter-select"
-                          value={selectedGroup}
-                          onChange={(e) => {
-                            const groupId = e.target.value;
-                            setSelectedGroup(groupId);
-                            setSelectedSession('');
-                            setSelectedClass('');
-                            setSelectedHospital('');
-                            setDateRange({ startDate: '', endDate: '' });
-                          }}
-                          disabled={!!selectedSession}
-                        >
-                          <option value="">Tất cả nhóm</option>
-                          {groups.map(group => (
-                            <option key={group._id} value={group._id}>{group.name}</option>
-                          ))}
-                    </select>
-                  </div>
-                    </Col>
-                    <Col md={3}>
-                  <div className="mb-3">
-                    <label className="form-label">
-                      <i className="fas fa-graduation-cap me-2"></i>
-                      Lớp
-                    </label>
-                    <select
-                      className="filter-select"
-                          value={selectedClass}
-                          onChange={(e) => {
-                            const classId = e.target.value;
-                            setSelectedClass(classId);
-                            setSelectedSession('');
-                            setSelectedGroup('');
-                            setSelectedHospital('');
-                            setDateRange({ startDate: '', endDate: '' });
-                          }}
-                          disabled={!!selectedSession || !!selectedGroup}
-                        >
-                          <option value="">Tất cả lớp</option>
-                          {classes.map(classItem => (
-                            <option key={classItem._id} value={classItem._id}>{classItem.name}</option>
-                          ))}
-                    </select>
-                  </div>
-                    </Col>
-                    <Col md={3}>
-                  <div className="mb-3">
-                    <label className="form-label">
-                      <i className="fas fa-hospital me-2"></i>
-                          Bệnh viện
-                    </label>
-                    <select
-                      className="filter-select"
-                          value={selectedHospital}
-                          onChange={(e) => {
-                            const hospitalId = e.target.value;
-                            setSelectedHospital(hospitalId);
-                            setSelectedSession('');
-                            setSelectedGroup('');
-                            setSelectedClass('');
-                            setDateRange({ startDate: '', endDate: '' });
-                          }}
-                          disabled={!!selectedSession || !!selectedGroup || !!selectedClass}
-                        >
-                          <option value="">Tất cả bệnh viện</option>
-                          {hospitals.map(hospital => (
-                            <option key={hospital._id} value={hospital._id}>{hospital.name}</option>
-                          ))}
-                    </select>
-                  </div>
-                    </Col>
-                  </Row>
-                  
-                  <Row>
-                    <Col md={6}>
-                  <div className="mb-3">
-                    <label className="form-label">
-                      <i className="fas fa-calendar-range me-2"></i>
-                          Khoảng thời gian
-                    </label>
-                    <div className="d-flex gap-2">
+              <Row className="g-3 align-items-center justify-content-between">
+                <Col md={3}>
+                  <select
+                    className="filter-select"
+                    value={selectedGroup}
+                    onChange={(e) => {
+                      const groupId = e.target.value;
+                      setSelectedGroup(groupId);
+                      setDateRange({ startDate: '', endDate: '' });
+                    }}
+                  >
+                    <option value="">Tất cả nhóm</option>
+                    {groups.map(group => (
+                      <option key={group.id || group._id} value={group.id || group._id}>
+                        {group.group_name || group.name} {group.semester ? `HK${group.semester}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </Col>
+
+                <Col md={3}>
+                  <select
+                    className="filter-select"
+                    value={classFilter}
+                    onChange={(e) => setClassFilter(e.target.value)}
+                  >
+                    <option value="">Tất cả lớp</option>
+                    {Array.from(new Set(attendanceData.map(record => record.class_name).filter(Boolean)))
+                      .sort()
+                      .map(className => (
+                        <option key={className} value={className}>
+                          {className}
+                        </option>
+                      ))}
+                  </select>
+                </Col>
+
+                <Col md={3}>
+                  <select
+                    className="filter-select"
+                    value={dateRange.startDate ? "custom" : "all"}
+                    onChange={(e) => {
+                      if (e.target.value === "all") {
+                        setDateRange({ startDate: '', endDate: '' });
+                      } else if (e.target.value === "today") {
+                        const today = new Date().toISOString().split('T')[0];
+                        setDateRange({ startDate: today, endDate: today });
+                        setSelectedGroup('');
+                      } else if (e.target.value === "thisWeek") {
+                        const today = new Date();
+                        const startOfWeek = new Date(today);
+                        startOfWeek.setDate(today.getDate() - today.getDay());
+                        const endOfWeek = new Date(today);
+                        endOfWeek.setDate(today.getDate() + (6 - today.getDay()));
+                        setDateRange({ 
+                          startDate: startOfWeek.toISOString().split('T')[0], 
+                          endDate: endOfWeek.toISOString().split('T')[0] 
+                        });
+                        setSelectedGroup('');
+                      } else if (e.target.value === "thisMonth") {
+                        const today = new Date();
+                        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+                        const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+                        setDateRange({ 
+                          startDate: startOfMonth.toISOString().split('T')[0], 
+                          endDate: endOfMonth.toISOString().split('T')[0] 
+                        });
+                        setSelectedGroup('');
+                      } else if (e.target.value === "custom") {
+                        const today = new Date().toISOString().split('T')[0];
+                        setDateRange({ startDate: today, endDate: today });
+                        setSelectedGroup('');
+                      }
+                    }}
+                    disabled={!!selectedGroup}
+                  >
+                    <option value="all">Tất cả thời gian</option>
+                    <option value="today">Hôm nay</option>
+                    <option value="thisWeek">Tuần này</option>
+                    <option value="thisMonth">Tháng này</option>
+                    <option value="custom">Tùy chọn</option>
+                  </select>
+                  {dateRange.startDate && (
+                    <div className="d-flex gap-2 mt-2">
                       <input
-                            type="date"
+                        type="date"
                         className="filter-select"
-                            value={dateRange.startDate}
-                            onChange={(e) => {
-                              setDateRange(prev => ({
-                                ...prev,
-                                startDate: e.target.value
-                              }));
-                              setSelectedSession('');
-                              setSelectedGroup('');
-                              setSelectedClass('');
-                              setSelectedHospital('');
-                            }}
-                            disabled={!!selectedSession || !!selectedGroup || !!selectedClass || !!selectedHospital}
-                          />
-                      <span className="align-self-center">đến</span>
+                        value={dateRange.startDate}
+                        onChange={(e) => {
+                          setDateRange(prev => ({
+                            ...prev,
+                            startDate: e.target.value
+                          }));
+                        }}
+                        disabled={!!selectedGroup}
+                      />
+                      <span className="align-self-center" style={{ fontSize: '14px', color: '#6c757d' }}>đến</span>
                       <input
-                            type="date"
+                        type="date"
                         className="filter-select"
-                            value={dateRange.endDate}
-                            onChange={(e) => {
-                              setDateRange(prev => ({
-                                ...prev,
-                                endDate: e.target.value
-                              }));
-                              setSelectedSession('');
-                              setSelectedGroup('');
-                              setSelectedClass('');
-                              setSelectedHospital('');
-                            }}
-                            disabled={!!selectedSession || !!selectedGroup || !!selectedClass || !!selectedHospital}
-                          />
+                        value={dateRange.endDate}
+                        onChange={(e) => {
+                          setDateRange(prev => ({
+                            ...prev,
+                            endDate: e.target.value
+                          }));
+                        }}
+                        disabled={!!selectedGroup}
+                      />
                     </div>
-                  </div>
-                    </Col>
-                    <Col md={6}>
-                  <div className="mb-3">
-                    <label className="form-label">
-                      <i className="fas fa-check-circle me-2"></i>
-                          Trạng thái điểm danh
-                    </label>
-                    <select
-                      className="filter-select"
-                          value={attendanceStatusFilter}
-                          onChange={(e) => setAttendanceStatusFilter(e.target.value)}
-                        >
-                          <option value="">Tất cả trạng thái</option>
-                          <option value="full">Có mặt đầy đủ</option>
-                          <option value="early">Có mặt trước</option>
-                          <option value="during">Có mặt trong</option>
-                          <option value="late">Có mặt sau</option>
-                          <option value="early_leave">Đi trước</option>
-                          <option value="late_arrival">Đi trễ</option>
-                          <option value="late_leave">Về trễ</option>
-                          <option value="absent">Vắng mặt</option>
-                          <option value="full_permission">Phép cả buổi</option>
-                          <option value="early_permission">Phép trước buổi</option>
-                          <option value="late_permission">Phép sau buổi</option>
-                    </select>
-                  </div>
-                    </Col>
-                  </Row>
-                  
-                  <Row>
-                    <Col md={4}>
-                  <div className="mb-3">
-                    <label className="form-label">
-                      <i className="fas fa-user me-2"></i>
-                          Họ và tên
-                    </label>
-                    <input
-                          type="text"
-                      className="search-input"
-                          placeholder="Tìm theo tên..."
-                          value={nameFilter}
-                          onChange={(e) => setNameFilter(e.target.value)}
-                        />
-                  </div>
-                    </Col>
-                    <Col md={4}>
-                  <div className="mb-3">
-                    <label className="form-label">
-                      <i className="fas fa-book me-2"></i>
-                      Lớp
-                    </label>
-                    <select
-                      className="filter-select"
-                          value={classFilter}
-                          onChange={(e) => setClassFilter(e.target.value)}
-                        >
-                      <option value="">Tất cả các lớp</option>
-                          {uniqueClasses.map((className, index) => (
-                            <option key={index} value={className}>{className}</option>
-                          ))}
-                    </select>
-                  </div>
-                    </Col>
-                    <Col md={4}>
-                  <div className="mb-3">
-                    <label className="form-label">
-                      <i className="fas fa-venus-mars me-2"></i>
-                          Giới tính
-                    </label>
-                    <select
-                      className="filter-select"
-                          value={genderFilter}
-                          onChange={(e) => setGenderFilter(e.target.value)}
-                        >
-                          <option value="">Tất cả</option>
-                          <option value="male">Nam</option>
-                          <option value="female">Nữ</option>
-                          <option value="other">Khác</option>
-                    </select>
-                        </div>
-                  </Col>
-                </Row>
+                  )}
+                </Col>
+
+                <Col md={3}>
+                  <input
+                    type="text"
+                    className="search-input"
+                    placeholder="Tìm kiếm..."
+                    value={nameFilter}
+                    onChange={(e) => setNameFilter(e.target.value)}
+                  />
+                </Col>
+              </Row>
                         </div>
                         </div>
         )}
@@ -1383,13 +2877,21 @@ const EnhancedAttendanceReports = () => {
           <div className="tab-navigation">
             <Tabs
               activeKey={activeTab}
-              onSelect={(k) => setActiveTab(k)}
+              onSelect={(k) => {
+                setActiveTab(k);
+                // Reset pagination when switching tabs
+                setDetailedListPage(1);
+                setClassReportPage(1);
+                setHospitalReportPage(1);
+                setDateReportPage(1);
+                setSessionReportPage(1);
+              }}
               className="custom-tabs"
             >
               <Tab eventKey="statusDistribution" title={
                 <span className="tab-title">
                   <i className="fas fa-chart-pie"></i>
-                  Phân bố trạng thái điểm danh
+                  Biểu đồ
                 </span>
               }>
                 <div className="session-table-container">
@@ -1399,7 +2901,7 @@ const EnhancedAttendanceReports = () => {
                         <div className="chart-header">
                           <h6 className="mb-0">
                             <i className="fas fa-chart-pie me-2"></i>
-                            Thống kê theo trạng thái điểm danh
+                            Biểu đồ tròn - Phân bố trạng thái
                           </h6>
                         </div>
                         <div className="chart-body">
@@ -1408,44 +2910,50 @@ const EnhancedAttendanceReports = () => {
                         data={{
                           labels: [
                             'Có mặt đầy đủ', 
-                            'Có mặt trước', 
-                            'Có mặt trong',
-                            'Có mặt sau',
-                            'Đi trước',
-                            'Đi trễ',
-                            'Về trễ',
-                            'Vắng mặt',
-                            'Phép cả buổi',
-                            'Phép trước buổi',
-                            'Phép sau buổi'
+                            getAttendanceTypeLabel('before'),
+                            getAttendanceTypeLabel('during'),
+                            getAttendanceTypeLabel('after'),
+                            getAttendanceTypeLabel('early'),
+                            getAttendanceTypeLabel('late'),
+                            getAttendanceTypeLabel('late_before'),
+                            getAttendanceTypeLabel('late_leave'),
+                            getAttendanceTypeLabel('absent'),
+                            getAttendanceTypeLabel('absent_perm'),
+                            getAttendanceTypeLabel('absent_before_perm'),
+                            getAttendanceTypeLabel('absent_during_perm'),
+                            getAttendanceTypeLabel('absent_after_perm')
                           ],
                           datasets: [
                             {
                               data: [
-                                      stats.fullAttendance || 30,
-                                      stats.earlyAttendance || 15,
-                                      stats.totalAttendees - stats.earlyAttendance - stats.lateAttendance - stats.absent || 40,
-                                      stats.lateAttendance || 10,
-                                      stats.earlyLeave || 5,
-                                      stats.lateAttendance || 10,
-                                      stats.lateLeave || 8,
-                                      stats.absent || 12,
-                                      stats.absentWithPermission || 7,
-                                      stats.earlyPermission || 3,
-                                      stats.latePermission || 2
+                                      stats.fullAttendance || 0,
+                                      stats.beforeAttendance || 0,
+                                      stats.duringAttendance || 0,
+                                      stats.afterAttendance || 0,
+                                      stats.earlyAttendance || 0,
+                                      stats.lateAttendance || 0,
+                                      stats.lateBeforeAttendance || 0,
+                                      stats.lateLeave || 0,
+                                      stats.absent || 0,
+                                      stats.absentWithPermission || 0,
+                                      stats.earlyPermission || 0,
+                                      stats.duringPermission || 0,
+                                      stats.latePermission || 0
                               ],
                               backgroundColor: [
-                                      'rgba(40, 167, 69, 0.8)',  // success - full attendance
-                                      'rgba(23, 162, 184, 0.8)', // info - early
-                                      'rgba(0, 123, 255, 0.8)',  // primary - during
-                                      'rgba(255, 193, 7, 0.8)',  // warning - late
-                                      'rgba(108, 117, 125, 0.8)', // secondary - early leave
-                                      'rgba(255, 193, 7, 0.8)',  // warning - late arrival
-                                      'rgba(253, 126, 20, 0.8)', // orange - late leave
-                                      'rgba(220, 53, 69, 0.8)',  // danger - absent
-                                      'rgba(111, 66, 193, 0.8)', // purple - full permission
-                                      'rgba(102, 16, 242, 0.8)', // indigo - early permission
-                                      'rgba(232, 62, 140, 0.8)'  // pink - late permission
+                                      'rgba(40, 167, 69, 0.9)',   // full - green
+                                      'rgba(52, 211, 153, 0.9)',  // before - emerald
+                                      'rgba(59, 130, 246, 0.9)',  // during - blue
+                                      'rgba(251, 191, 36, 0.9)',  // after - amber
+                                      'rgba(16, 185, 129, 0.9)',  // early - teal
+                                      'rgba(251, 146, 60, 0.9)',  // late - orange
+                                      'rgba(249, 115, 22, 0.9)',  // late_before - orange dark
+                                      'rgba(234, 88, 12, 0.9)',   // late_leave - orange darker
+                                      'rgba(239, 68, 68, 0.9)',   // absent - red
+                                      'rgba(156, 163, 175, 0.9)', // absent_perm - gray
+                                      'rgba(139, 92, 246, 0.9)',  // absent_before_perm - violet
+                                      'rgba(167, 139, 250, 0.9)', // absent_during_perm - purple
+                                      'rgba(236, 72, 153, 0.9)'   // absent_after_perm - pink
                                     ],
                                     borderWidth: 2,
                                     borderColor: '#fff'
@@ -1461,9 +2969,35 @@ const EnhancedAttendanceReports = () => {
                               position: 'right',
                               labels: {
                                 boxWidth: 12,
-                                padding: 15,
+                                padding: 10,
                                 font: {
-                                  size: 12
+                                  size: 11
+                                },
+                                generateLabels: (chart) => {
+                                  const data = chart.data;
+                                  if (data.labels.length && data.datasets.length) {
+                                    return data.labels.map((label, i) => {
+                                      const value = data.datasets[0].data[i];
+                                      return {
+                                        text: `${label}: ${value}`,
+                                        fillStyle: data.datasets[0].backgroundColor[i],
+                                        hidden: false,
+                                        index: i
+                                      };
+                                    });
+                                  }
+                                  return [];
+                                }
+                              }
+                            },
+                            tooltip: {
+                              callbacks: {
+                                label: (context) => {
+                                  const label = context.label || '';
+                                  const value = context.parsed || 0;
+                                  const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                  const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                  return `${label}: ${value} (${percentage}%)`;
                                 }
                               }
                             }
@@ -1487,70 +3021,209 @@ const EnhancedAttendanceReports = () => {
                       <div className="chart-card">
                         <div className="chart-header">
                           <h6 className="mb-0">
-                            <i className="fas fa-chart-line me-2"></i>
-                            Xu hướng điểm danh theo thời gian
+                            <i className="fas fa-chart-bar me-2"></i>
+                            Biểu đồ cột - So sánh số lượng
                           </h6>
                         </div>
                         <div className="chart-body">
-                          <Line 
-                            data={{
-                              labels: Array.from({ length: 7 }).map((_, i) => {
-                                const d = new Date();
-                                d.setDate(d.getDate() - 6 + i);
-                                return d.toLocaleDateString('vi-VN');
-                              }),
+                          {stats && (
+                            <Bar 
+                              data={{
+                                labels: [
+                                  'Đầy đủ', 
+                                  'Trước giờ',
+                                  'Trong giờ',
+                                  'Sau giờ',
+                                  'Sớm',
+                                  'Đi trễ',
+                                  'Về trễ',
+                                  'Vắng',
+                                  'Phép'
+                                ],
+                                datasets: [
+                                  {
+                                    label: 'Số lượng sinh viên',
+                                    data: [
+                                      stats.fullAttendance || 0,
+                                      stats.beforeAttendance || 0,
+                                      stats.duringAttendance || 0,
+                                      stats.afterAttendance || 0,
+                                      stats.earlyAttendance || 0,
+                                      stats.lateAttendance || 0,
+                                      stats.lateLeave || 0,
+                                      stats.absent || 0,
+                                      (stats.absentWithPermission || 0) + (stats.earlyPermission || 0) + (stats.duringPermission || 0) + (stats.latePermission || 0)
+                                    ],
+                                    backgroundColor: [
+                                      'rgba(40, 167, 69, 0.8)',   // full
+                                      'rgba(52, 211, 153, 0.8)',  // before
+                                      'rgba(59, 130, 246, 0.8)',  // during
+                                      'rgba(251, 191, 36, 0.8)',  // after
+                                      'rgba(16, 185, 129, 0.8)',  // early
+                                      'rgba(251, 146, 60, 0.8)',  // late
+                                      'rgba(234, 88, 12, 0.8)',   // late_leave
+                                      'rgba(239, 68, 68, 0.8)',   // absent
+                                      'rgba(156, 163, 175, 0.8)'  // permission
+                                    ],
+                                    borderColor: [
+                                      'rgb(40, 167, 69)',
+                                      'rgb(52, 211, 153)',
+                                      'rgb(59, 130, 246)',
+                                      'rgb(251, 191, 36)',
+                                      'rgb(16, 185, 129)',
+                                      'rgb(251, 146, 60)',
+                                      'rgb(234, 88, 12)',
+                                      'rgb(239, 68, 68)',
+                                      'rgb(156, 163, 175)'
+                                    ],
+                                    borderWidth: 2
+                                  }
+                                ]
+                              }}
+                              options={{
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                aspectRatio: 1.5,
+                                plugins: {
+                                  legend: {
+                                    display: false
+                                  },
+                                  tooltip: {
+                                    callbacks: {
+                                      label: (context) => {
+                                        const value = context.parsed.y || 0;
+                                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                        const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                        return `Số lượng: ${value} (${percentage}%)`;
+                                      }
+                                    }
+                                  }
+                                },
+                                scales: {
+                                  y: {
+                                    beginAtZero: true,
+                                    ticks: {
+                                      maxTicksLimit: 10,
+                                      precision: 0
+                                    },
+                                    grid: {
+                                      color: 'rgba(0, 0, 0, 0.1)'
+                                    }
+                                  },
+                                  x: {
+                                    grid: {
+                                      display: false
+                                    }
+                                  }
+                                },
+                                layout: {
+                                  padding: {
+                                    top: 10,
+                                    bottom: 10,
+                                    left: 10,
+                                    right: 10
+                                  }
+                                }
+                              }}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </Col>
+                  </Row>
+                  
+                  <Row>
+                    <Col md={6} className="mb-4">
+                      <div className="chart-card">
+                        <div className="chart-header">
+                          <h6 className="mb-0">
+                            <i className="fas fa-chart-area me-2"></i>
+                            Biểu đồ Polar Area - Tổng quan
+                          </h6>
+                        </div>
+                        <div className="chart-body">
+                          {stats && (
+                            <PolarArea 
+                              data={{
+                                labels: [
+                                  'Đầy đủ', 
+                                  'Trước giờ',
+                                  'Trong giờ',
+                                  'Sau giờ',
+                                  'Đi trễ',
+                                  'Về trễ',
+                                  'Vắng',
+                                  'Phép'
+                                ],
                               datasets: [
                                 {
-                                  label: 'Có mặt đầy đủ',
-                                  data: [65, 72, 68, 75, 80, 85, 78],
-                                  borderColor: 'rgb(40, 167, 69)',
-                                  backgroundColor: 'rgba(40, 167, 69, 0.1)',
-                                  tension: 0.4,
-                                  fill: true
-                                },
-                                {
-                                  label: 'Đi trễ/Về sớm',
-                                  data: [15, 12, 18, 14, 10, 8, 12],
-                                  borderColor: 'rgb(255, 193, 7)',
-                                  backgroundColor: 'rgba(255, 193, 7, 0.1)',
-                                  tension: 0.4,
-                                  fill: true
-                                },
-                                {
-                                  label: 'Vắng mặt',
-                                  data: [8, 6, 9, 5, 7, 4, 6],
-                                  borderColor: 'rgb(220, 53, 69)',
-                                  backgroundColor: 'rgba(220, 53, 69, 0.1)',
-                                  tension: 0.4,
-                                  fill: true
+                                  label: 'Số lượng',
+                                  data: [
+                                    stats.fullAttendance || 0,
+                                    stats.beforeAttendance || 0,
+                                    stats.duringAttendance || 0,
+                                    stats.afterAttendance || 0,
+                                    stats.lateAttendance || 0,
+                                    stats.lateLeave || 0,
+                                    stats.absent || 0,
+                                    (stats.absentWithPermission || 0) + (stats.earlyPermission || 0) + (stats.duringPermission || 0) + (stats.latePermission || 0)
+                                  ],
+                                  backgroundColor: [
+                                    'rgba(40, 167, 69, 0.7)',   // full
+                                    'rgba(52, 211, 153, 0.7)',  // before
+                                    'rgba(59, 130, 246, 0.7)',  // during
+                                    'rgba(251, 191, 36, 0.7)',  // after
+                                    'rgba(251, 146, 60, 0.7)',  // late
+                                    'rgba(234, 88, 12, 0.7)',   // late_leave
+                                    'rgba(239, 68, 68, 0.7)',   // absent
+                                    'rgba(156, 163, 175, 0.7)'  // permission
+                                  ],
+                                  borderColor: [
+                                    'rgb(40, 167, 69)',
+                                    'rgb(52, 211, 153)',
+                                    'rgb(59, 130, 246)',
+                                    'rgb(251, 191, 36)',
+                                    'rgb(251, 146, 60)',
+                                    'rgb(234, 88, 12)',
+                                    'rgb(239, 68, 68)',
+                                    'rgb(156, 163, 175)'
+                                  ],
+                                  borderWidth: 2
                                 }
                               ]
                             }}
                             options={{
                               responsive: true,
                               maintainAspectRatio: false,
-                              aspectRatio: 1.5,
+                              aspectRatio: 1,
                               plugins: {
                                 legend: {
-                                  position: 'top',
+                                  position: 'right',
                                   labels: {
-                                    padding: 15,
+                                    boxWidth: 12,
+                                    padding: 10,
                                     font: {
-                                      size: 12
+                                      size: 11
+                                    }
+                                  }
+                                },
+                                tooltip: {
+                                  callbacks: {
+                                    label: (context) => {
+                                      const value = context.parsed.r || 0;
+                                      const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                      const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                      return `${context.label}: ${value} (${percentage}%)`;
                                     }
                                   }
                                 }
                               },
                               scales: {
-                                y: {
+                                r: {
                                   beginAtZero: true,
-                                  grid: {
-                                    color: 'rgba(0, 0, 0, 0.1)'
-                                  }
-                                },
-                                x: {
-                                  grid: {
-                                    color: 'rgba(0, 0, 0, 0.1)'
+                                  ticks: {
+                                    maxTicksLimit: 8,
+                                    precision: 0
                                   }
                                 }
                               },
@@ -1564,78 +3237,6 @@ const EnhancedAttendanceReports = () => {
                               }
                             }}
                           />
-                        </div>
-                      </div>
-                    </Col>
-                  </Row>
-                  
-                  <Row>
-                    <Col md={6} className="mb-4">
-                      <div className="chart-card">
-                        <div className="chart-header">
-                          <h6 className="mb-0">
-                            <i className="fas fa-graduation-cap me-2"></i>
-                            Thống kê theo lớp
-                          </h6>
-                        </div>
-                        <div className="chart-body">
-                          {classes && classes.length > 0 && (
-                            <Bar 
-                              data={{
-                                labels: classes.slice(0, 5).map(c => c.name || `Lớp ${c._id}`),
-                              datasets: [
-                                {
-                                  label: 'Có mặt đầy đủ',
-                                  data: [65, 72, 68, 75, 80],
-                                  backgroundColor: 'rgba(40, 167, 69, 0.8)',
-                                  borderColor: 'rgba(40, 167, 69, 1)',
-                                  borderWidth: 1
-                                },
-                                {
-                                  label: 'Đi trễ/Về sớm',
-                                  data: [15, 12, 18, 14, 10],
-                                  backgroundColor: 'rgba(255, 193, 7, 0.8)',
-                                  borderColor: 'rgba(255, 193, 7, 1)',
-                                  borderWidth: 1
-                                },
-                                {
-                                  label: 'Vắng mặt',
-                                  data: [8, 6, 9, 5, 7],
-                                  backgroundColor: 'rgba(220, 53, 69, 0.8)',
-                                  borderColor: 'rgba(220, 53, 69, 1)',
-                                  borderWidth: 1
-                                }
-                              ]
-                            }}
-                            options={{
-                              responsive: true,
-                              maintainAspectRatio: false,
-                              plugins: {
-                                legend: {
-                                  position: 'top',
-                                  labels: {
-                                    padding: 15,
-                                    font: {
-                                      size: 12
-                                    }
-                                  }
-                                }
-                              },
-                              scales: {
-                                y: {
-                                  beginAtZero: true,
-                                  grid: {
-                                    color: 'rgba(0, 0, 0, 0.1)'
-                                  }
-                                },
-                                x: {
-                                  grid: {
-                                    color: 'rgba(0, 0, 0, 0.1)'
-                                  }
-                                }
-                              }
-                            }}
-                          />
                           )}
                         </div>
                       </div>
@@ -1645,42 +3246,72 @@ const EnhancedAttendanceReports = () => {
                       <div className="chart-card">
                         <div className="chart-header">
                           <h6 className="mb-0">
-                            <i className="fas fa-hospital me-2"></i>
-                            Thống kê theo bệnh viện
+                            <i className="fas fa-broadcast-tower me-2"></i>
+                            Biểu đồ Radar - Phân tích đa chiều
                           </h6>
                         </div>
                         <div className="chart-body">
-                          {hospitals && hospitals.length > 0 && (
-                            <Bar 
+                          {stats && (
+                            <Radar 
                             data={{
-                              labels: hospitals.slice(0, 5).map(h => h.name || `BV ${h._id}`),
+                              labels: [
+                                'Đầy đủ', 
+                                'Trước',
+                                'Trong',
+                                'Sau',
+                                'Sớm',
+                                'Trễ',
+                                'Về trễ',
+                                'Vắng'
+                              ],
                               datasets: [
                                 {
-                                  label: 'Có mặt đầy đủ',
-                                  data: [85, 78, 88, 92, 82],
-                                  backgroundColor: 'rgba(40, 167, 69, 0.8)',
-                                  borderColor: 'rgba(40, 167, 69, 1)',
-                                  borderWidth: 1
+                                  label: 'Điểm danh hiện tại',
+                                  data: [
+                                    stats.fullAttendance || 0,
+                                    stats.beforeAttendance || 0,
+                                    stats.duringAttendance || 0,
+                                    stats.afterAttendance || 0,
+                                    stats.earlyAttendance || 0,
+                                    stats.lateAttendance || 0,
+                                    stats.lateLeave || 0,
+                                    stats.absent || 0
+                                  ],
+                                  backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                                  borderColor: 'rgb(59, 130, 246)',
+                                  borderWidth: 2,
+                                  pointBackgroundColor: 'rgb(59, 130, 246)',
+                                  pointBorderColor: '#fff',
+                                  pointHoverBackgroundColor: '#fff',
+                                  pointHoverBorderColor: 'rgb(59, 130, 246)'
                                 },
                                 {
-                                  label: 'Đi trễ/Về sớm',
-                                  data: [10, 15, 8, 5, 12],
-                                  backgroundColor: 'rgba(255, 193, 7, 0.8)',
-                                  borderColor: 'rgba(255, 193, 7, 1)',
-                                  borderWidth: 1
-                                },
-                                {
-                                  label: 'Vắng mặt',
-                                  data: [5, 7, 4, 3, 6],
-                                  backgroundColor: 'rgba(220, 53, 69, 0.8)',
-                                  borderColor: 'rgba(220, 53, 69, 1)',
-                                  borderWidth: 1
+                                  label: 'Mục tiêu (Lý tưởng)',
+                                  data: [
+                                    Math.max(stats.fullAttendance || 0, 50),
+                                    Math.max(stats.beforeAttendance || 0, 30),
+                                    Math.max(stats.duringAttendance || 0, 40),
+                                    Math.max(stats.afterAttendance || 0, 30),
+                                    Math.max(stats.earlyAttendance || 0, 20),
+                                    5, // target late
+                                    5, // target late_leave
+                                    5  // target absent
+                                  ],
+                                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                  borderColor: 'rgb(16, 185, 129)',
+                                  borderWidth: 2,
+                                  borderDash: [5, 5],
+                                  pointBackgroundColor: 'rgb(16, 185, 129)',
+                                  pointBorderColor: '#fff',
+                                  pointHoverBackgroundColor: '#fff',
+                                  pointHoverBorderColor: 'rgb(16, 185, 129)'
                                 }
                               ]
                             }}
                             options={{
                               responsive: true,
                               maintainAspectRatio: false,
+                              aspectRatio: 1,
                               plugins: {
                                 legend: {
                                   position: 'top',
@@ -1690,19 +3321,41 @@ const EnhancedAttendanceReports = () => {
                                       size: 12
                                     }
                                   }
+                                },
+                                tooltip: {
+                                  callbacks: {
+                                    label: (context) => {
+                                      return `${context.dataset.label}: ${context.parsed.r}`;
+                                    }
+                                  }
                                 }
                               },
                               scales: {
-                                y: {
+                                r: {
                                   beginAtZero: true,
+                                  angleLines: {
+                                    color: 'rgba(0, 0, 0, 0.1)'
+                                  },
                                   grid: {
                                     color: 'rgba(0, 0, 0, 0.1)'
+                                  },
+                                  pointLabels: {
+                                    font: {
+                                      size: 11
+                                    }
+                                  },
+                                  ticks: {
+                                    maxTicksLimit: 8,
+                                    precision: 0
                                   }
-                                },
-                                x: {
-                                  grid: {
-                                    color: 'rgba(0, 0, 0, 0.1)'
-                                  }
+                                }
+                              },
+                              layout: {
+                                padding: {
+                                  top: 10,
+                                  bottom: 10,
+                                  left: 10,
+                                  right: 10
                                 }
                               }
                             }}
@@ -1719,7 +3372,7 @@ const EnhancedAttendanceReports = () => {
               <Tab eventKey="detailedList" title={
                 <span className="tab-title">
                   <i className="fas fa-list-check"></i>
-                  Danh sách chi tiết
+                  Chi tiết
                 </span>
               }>
                 <div className="session-table-container">
@@ -1736,6 +3389,7 @@ const EnhancedAttendanceReports = () => {
                       <p className="text-muted">Không có sinh viên nào trong hệ thống.</p>
                         </div>
                       ) : (
+                    <>
                     <div className="table-responsive">
                       <table className="session-table">
                         <thead>
@@ -1750,9 +3404,15 @@ const EnhancedAttendanceReports = () => {
                                 </tr>
                               </thead>
                               <tbody>
-                                {detailedMembers.map((member, index) => (
-                                  <tr key={index}>
-                              <td>{index + 1}</td>
+                                {(() => {
+                                  const filteredMembers = applyFilters(detailedMembers);
+                                  const startIndex = (detailedListPage - 1) * itemsPerPage;
+                                  const endIndex = startIndex + itemsPerPage;
+                                  const paginatedMembers = filteredMembers.slice(startIndex, endIndex);
+                                  return paginatedMembers.map((member, index) => {
+                                    return (
+                                  <tr key={startIndex + index}>
+                              <td>{startIndex + index + 1}</td>
                               <td>
                                 <div className="d-flex align-items-center">
                                   <div className="member-avatar">
@@ -2025,284 +3685,33 @@ const EnhancedAttendanceReports = () => {
                               <td>
                                     </td>
                                   </tr>
-                                ))}
+                                    );
+                                  });
+                                })()}
                               </tbody>
                       </table>
                           </div>
+                          {(() => {
+                            const filteredMembers = applyFilters(detailedMembers);
+                            return filteredMembers.length > itemsPerPage && (
+                              <div className="mt-3">
+                                <Pagination
+                                  currentPage={detailedListPage}
+                                  totalPages={Math.ceil(filteredMembers.length / itemsPerPage)}
+                                  onPageChange={setDetailedListPage}
+                                />
+                              </div>
+                            );
+                          })()}
+                    </>
                       )}
-                </div>
-                </Tab>
-                
-              <Tab eventKey="statusReport" title={
-                <span className="tab-title">
-                  <i className="fas fa-check-circle"></i>
-                  Báo cáo trạng thái
-                </span>
-              }>
-                <div className="session-table-container">
-                  
-                  <div className="table-responsive">
-                    <table className="session-table">
-                      <thead>
-                              <tr>
-                                <th>Trạng thái</th>
-                                <th>Số lượng</th>
-                                <th>Tỷ lệ</th>
-                          <th>Mô tả</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {/* Đầy đủ */}
-                              <tr>
-                          <td>
-                            <div className="d-flex align-items-center">
-                              <div className="status-indicator bg-success"></div>
-                              <Badge bg="success">Đầy đủ</Badge>
-                            </div>
-                                </td>
-                          <td><strong>{stats.fullAttendance || 0}</strong></td>
-                          <td>
-                            <div className="progress" style={{height: '20px'}}>
-                              <div 
-                                className="progress-bar bg-success" 
-                                style={{width: `${stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.min((stats.fullAttendance / stats.totalAttendanceOccurrences) * 100, 100) : 0}%`}}
-                              >
-                                {stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.round(Math.min((stats.fullAttendance / stats.totalAttendanceOccurrences) * 100, 100)) : 0}%
-                              </div>
-                            </div>
-                                </td>
-                          <td><small className="text-muted">Tổng số lần có mặt đầy đủ thời gian</small></td>
-                              </tr>
-
-                              {/* Có mặt trước */}
-                              <tr>
-                          <td>
-                            <div className="d-flex align-items-center">
-                              <div className="status-indicator bg-success"></div>
-                              <Badge bg="success">Có mặt trước</Badge>
-                            </div>
-                                </td>
-                          <td><strong>{stats.beforeAttendance || 0}</strong></td>
-                          <td>
-                            <div className="progress" style={{height: '20px'}}>
-                              <div 
-                                className="progress-bar bg-success" 
-                                style={{width: `${stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.min((stats.beforeAttendance / stats.totalAttendanceOccurrences) * 100, 100) : 0}%`}}
-                              >
-                                {stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.round(Math.min((stats.beforeAttendance / stats.totalAttendanceOccurrences) * 100, 100)) : 0}%
-                              </div>
-                            </div>
-                                </td>
-                          <td><small className="text-muted">Tổng số lần điểm danh trước buổi học</small></td>
-                              </tr>
-
-                              {/* Có mặt trong */}
-                              <tr>
-                          <td>
-                            <div className="d-flex align-items-center">
-                              <div className="status-indicator bg-success"></div>
-                              <Badge bg="success">Có mặt trong</Badge>
-                            </div>
-                                </td>
-                          <td><strong>{stats.duringAttendance || 0}</strong></td>
-                          <td>
-                            <div className="progress" style={{height: '20px'}}>
-                              <div 
-                                className="progress-bar bg-success" 
-                                style={{width: `${stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.min((stats.duringAttendance / stats.totalAttendanceOccurrences) * 100, 100) : 0}%`}}
-                              >
-                                {stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.round(Math.min((stats.duringAttendance / stats.totalAttendanceOccurrences) * 100, 100)) : 0}%
-                              </div>
-                            </div>
-                          </td>
-                          <td><small className="text-muted">Tổng số lần điểm danh trong buổi học</small></td>
-                              </tr>
-
-                              {/* Có mặt sau */}
-                              <tr>
-                          <td>
-                            <div className="d-flex align-items-center">
-                              <div className="status-indicator bg-success"></div>
-                              <Badge bg="success">Có mặt sau</Badge>
-                            </div>
-                          </td>
-                          <td><strong>{stats.afterAttendance || 0}</strong></td>
-                          <td>
-                            <div className="progress" style={{height: '20px'}}>
-                              <div 
-                                className="progress-bar bg-success" 
-                                style={{width: `${stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.min((stats.afterAttendance / stats.totalAttendanceOccurrences) * 100, 100) : 0}%`}}
-                              >
-                                {stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.round(Math.min((stats.afterAttendance / stats.totalAttendanceOccurrences) * 100, 100)) : 0}%
-                              </div>
-                            </div>
-                          </td>
-                          <td><small className="text-muted">Tổng số lần điểm danh sau buổi học</small></td>
-                              </tr>
-
-                              {/* Có mặt */}
-                              <tr>
-                          <td>
-                            <div className="d-flex align-items-center">
-                              <div className="status-indicator bg-success"></div>
-                              <Badge bg="success">Có mặt</Badge>
-                            </div>
-                          </td>
-                          <td><strong>{stats.presentAttendance || 0}</strong></td>
-                          <td>
-                            <div className="progress" style={{height: '20px'}}>
-                              <div 
-                                className="progress-bar bg-success" 
-                                style={{width: `${stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.min((stats.presentAttendance / stats.totalAttendanceOccurrences) * 100, 100) : 0}%`}}
-                              >
-                                {stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.round(Math.min((stats.presentAttendance / stats.totalAttendanceOccurrences) * 100, 100)) : 0}%
-                              </div>
-                            </div>
-                          </td>
-                          <td><small className="text-muted">Tổng số lần điểm danh (không xác định thời điểm)</small></td>
-                              </tr>
-
-                              {/* Đi trễ */}
-                              <tr>
-                          <td>
-                            <div className="d-flex align-items-center">
-                              <div className="status-indicator bg-warning"></div>
-                              <Badge bg="warning">Đi trễ</Badge>
-                            </div>
-                          </td>
-                          <td><strong>{stats.lateAttendance || 0}</strong></td>
-                          <td>
-                            <div className="progress" style={{height: '20px'}}>
-                              <div 
-                                className="progress-bar bg-warning" 
-                                style={{width: `${stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.min((stats.lateAttendance / stats.totalAttendanceOccurrences) * 100, 100) : 0}%`}}
-                              >
-                                {stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.round(Math.min((stats.lateAttendance / stats.totalAttendanceOccurrences) * 100, 100)) : 0}%
-                              </div>
-                            </div>
-                          </td>
-                          <td><small className="text-muted">Tổng số lần điểm danh đi trễ so với giờ bắt đầu</small></td>
-                              </tr>
-
-                              {/* Vắng mặt */}
-                              <tr>
-                          <td>
-                            <div className="d-flex align-items-center">
-                              <div className="status-indicator bg-danger"></div>
-                              <Badge bg="danger">Vắng mặt</Badge>
-                            </div>
-                          </td>
-                          <td><strong>{stats.absent || 0}</strong></td>
-                          <td>
-                            <div className="progress" style={{height: '20px'}}>
-                              <div 
-                                className="progress-bar bg-danger" 
-                                style={{width: `${stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.min((stats.absent / stats.totalAttendanceOccurrences) * 100, 100) : 0}%`}}
-                              >
-                                {stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.round(Math.min((stats.absent / stats.totalAttendanceOccurrences) * 100, 100)) : 0}%
-                              </div>
-                            </div>
-                          </td>
-                          <td><small className="text-muted">Tổng số lần vắng mặt</small></td>
-                              </tr>
-
-                              {/* Phép cả buổi */}
-                              <tr>
-                          <td>
-                            <div className="d-flex align-items-center">
-                              <div className="status-indicator bg-danger"></div>
-                              <Badge bg="danger">Phép cả buổi</Badge>
-                            </div>
-                          </td>
-                          <td><strong>{stats.fullSessionApproved || 0}</strong></td>
-                          <td>
-                            <div className="progress" style={{height: '20px'}}>
-                              <div 
-                                className="progress-bar bg-danger" 
-                                style={{width: `${stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.min((stats.fullSessionApproved / stats.totalAttendanceOccurrences) * 100, 100) : 0}%`}}
-                              >
-                                {stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.round(Math.min((stats.fullSessionApproved / stats.totalAttendanceOccurrences) * 100, 100)) : 0}%
-                              </div>
-                            </div>
-                          </td>
-                          <td><small className="text-muted">Tổng số lần phép vắng cả buổi đã duyệt</small></td>
-                              </tr>
-
-                              {/* Phép trước buổi */}
-                              <tr>
-                          <td>
-                            <div className="d-flex align-items-center">
-                              <div className="status-indicator bg-info"></div>
-                              <Badge bg="info">Phép trước buổi</Badge>
-                            </div>
-                          </td>
-                          <td><strong>{stats.beforeSessionApproved || 0}</strong></td>
-                          <td>
-                            <div className="progress" style={{height: '20px'}}>
-                              <div 
-                                className="progress-bar bg-info" 
-                                style={{width: `${stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.min((stats.beforeSessionApproved / stats.totalAttendanceOccurrences) * 100, 100) : 0}%`}}
-                              >
-                                {stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.round(Math.min((stats.beforeSessionApproved / stats.totalAttendanceOccurrences) * 100, 100)) : 0}%
-                              </div>
-                            </div>
-                          </td>
-                          <td><small className="text-muted">Tổng số lần phép vắng trước buổi đã duyệt</small></td>
-                              </tr>
-
-                              {/* Phép trong buổi */}
-                              <tr>
-                          <td>
-                            <div className="d-flex align-items-center">
-                              <div className="status-indicator bg-warning"></div>
-                              <Badge bg="warning">Phép trong buổi</Badge>
-                            </div>
-                          </td>
-                          <td><strong>{stats.duringSessionApproved || 0}</strong></td>
-                          <td>
-                            <div className="progress" style={{height: '20px'}}>
-                              <div 
-                                className="progress-bar bg-warning" 
-                                style={{width: `${stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.min((stats.duringSessionApproved / stats.totalAttendanceOccurrences) * 100, 100) : 0}%`}}
-                              >
-                                {stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.round(Math.min((stats.duringSessionApproved / stats.totalAttendanceOccurrences) * 100, 100)) : 0}%
-                              </div>
-                            </div>
-                          </td>
-                          <td><small className="text-muted">Tổng số lần phép vắng trong buổi đã duyệt</small></td>
-                              </tr>
-
-                              {/* Phép sau buổi */}
-                              <tr>
-                          <td>
-                            <div className="d-flex align-items-center">
-                              <div className="status-indicator bg-secondary"></div>
-                              <Badge bg="secondary">Phép sau buổi</Badge>
-                            </div>
-                          </td>
-                          <td><strong>{stats.afterSessionApproved || 0}</strong></td>
-                          <td>
-                            <div className="progress" style={{height: '20px'}}>
-                              <div 
-                                className="progress-bar bg-secondary" 
-                                style={{width: `${stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.min((stats.afterSessionApproved / stats.totalAttendanceOccurrences) * 100, 100) : 0}%`}}
-                              >
-                                {stats.totalAttendanceOccurrences && stats.totalAttendanceOccurrences > 0 ? Math.round(Math.min((stats.afterSessionApproved / stats.totalAttendanceOccurrences) * 100, 100)) : 0}%
-                              </div>
-                            </div>
-                          </td>
-                          <td><small className="text-muted">Tổng số lần phép vắng sau buổi đã duyệt</small></td>
-                              </tr>
-                            </tbody>
-                    </table>
-                  </div>
                 </div>
                 </Tab>
                 
               <Tab eventKey="classReport" title={
                 <span className="tab-title">
                   <i className="fas fa-graduation-cap"></i>
-                  Báo cáo theo lớp
+                  Lớp
                 </span>
               }>
                 <div className="session-table-container">
@@ -2333,17 +3742,21 @@ const EnhancedAttendanceReports = () => {
                           const classSummaries = {};
                           
                           // Use detailedMembers data if attendanceData is empty
-                          let dataToProcess = attendanceData;
+                          // Apply filters to attendance data
+                          let dataToProcess = applyFilters(attendanceData);
                           
                           // Get absence request stats by class
                           const absenceStatsByClass = {};
                           if (stats.fullSessionApproved !== undefined) {
-                            // For now, we'll distribute absence stats evenly across classes
-                            // In a real implementation, you might want to fetch this data from API
-                            const totalClasses = uniqueClasses.length || 1;
-                            const classNames = uniqueClasses.map(cls => cls.name || cls);
+                            // Extract unique classes from attendance data
+                            const uniqueClassesFromData = [...new Set(
+                              dataToProcess.map(item => 
+                                item.member?.class || item.class_name || item.class || ''
+                              ).filter(Boolean)
+                            )];
+                            const totalClasses = uniqueClassesFromData.length || 1;
                             
-                            classNames.forEach(className => {
+                            uniqueClassesFromData.forEach(className => {
                               absenceStatsByClass[className] = {
                                 fullSessionApproved: Math.floor(stats.fullSessionApproved / totalClasses),
                                 beforeSessionApproved: Math.floor(stats.beforeSessionApproved / totalClasses),
@@ -2588,7 +4001,7 @@ const EnhancedAttendanceReports = () => {
                               // Calculate absent students for this class
                               // Use the same logic as tab "Báo cáo trạng thái" - distribute from stats.absent
                               if (stats.absent !== undefined) {
-                                const totalClasses = uniqueClasses.length || 1;
+                                const totalClasses = Object.keys(classSummaries).length || 1;
                                 classSummary.absentCount = Math.floor(stats.absent / totalClasses);
                               } else {
                                 // Fallback: calculate based on available data
@@ -2598,9 +4011,9 @@ const EnhancedAttendanceReports = () => {
                               }
                               
                               // Calculate late attendance for this class using same logic as tab "Báo cáo trạng thái"
-                              // Count actual late attendance occurrences in this class from attendanceData (processedData)
+                              // Count actual late attendance occurrences in this class from dataToProcess (filtered)
                               let lateCount = 0;
-                              attendanceData.forEach(record => {
+                              dataToProcess.forEach(record => {
                                 const recordClassName = record.member?.class || record.class_name || record.class;
                                 const attendanceType = record.status || record.attendance_type;
                                 
@@ -2611,9 +4024,9 @@ const EnhancedAttendanceReports = () => {
                               classSummary.lateCount = lateCount;
                               
                               // Calculate before attendance for this class using same logic as tab "Báo cáo trạng thái"
-                              // Count actual before attendance occurrences in this class from attendanceData (processedData)
+                              // Count actual before attendance occurrences in this class from dataToProcess (filtered)
                               let beforeCount = 0;
-                              attendanceData.forEach(record => {
+                              dataToProcess.forEach(record => {
                                 const recordClassName = record.member?.class || record.class_name || record.class;
                                 const attendanceType = record.status || record.attendance_type;
                                 
@@ -2624,9 +4037,9 @@ const EnhancedAttendanceReports = () => {
                               classSummary.beforeCount = beforeCount;
                               
                               // Calculate present attendance for this class using same logic as tab "Báo cáo trạng thái"
-                              // Count actual present attendance occurrences in this class from attendanceData (processedData)
+                              // Count actual present attendance occurrences in this class from dataToProcess (filtered)
                               let presentCount = 0;
-                              attendanceData.forEach(record => {
+                              dataToProcess.forEach(record => {
                                 const recordClassName = record.member?.class || record.class_name || record.class;
                                 const attendanceType = record.status || record.attendance_type;
                                 
@@ -2637,9 +4050,9 @@ const EnhancedAttendanceReports = () => {
                               classSummary.presentCount = presentCount;
                               
                               // Calculate during attendance for this class using same logic as tab "Báo cáo trạng thái"
-                              // Count actual during attendance occurrences in this class from attendanceData (processedData)
+                              // Count actual during attendance occurrences in this class from dataToProcess (filtered)
                               let duringCount = 0;
-                              attendanceData.forEach(record => {
+                              dataToProcess.forEach(record => {
                                 const recordClassName = record.member?.class || record.class_name || record.class;
                                 const attendanceType = record.status || record.attendance_type;
                                 
@@ -2650,9 +4063,9 @@ const EnhancedAttendanceReports = () => {
                               classSummary.duringCount = duringCount;
                               
                               // Calculate after attendance for this class using same logic as tab "Báo cáo trạng thái"
-                              // Count actual after attendance occurrences in this class from attendanceData (processedData)
+                              // Count actual after attendance occurrences in this class from dataToProcess (filtered)
                               let afterCount = 0;
-                              attendanceData.forEach(record => {
+                              dataToProcess.forEach(record => {
                                 const recordClassName = record.member?.class || record.class_name || record.class;
                                 const attendanceType = record.status || record.attendance_type;
                                 
@@ -2663,9 +4076,9 @@ const EnhancedAttendanceReports = () => {
                               classSummary.afterCount = afterCount;
                               
                               // Calculate full attendance for this class using same logic as tab "Báo cáo trạng thái"
-                              // Group attendance by student-session for this class from attendanceData (processedData)
+                              // Group attendance by student-session for this class from dataToProcess (filtered)
                               const studentSessionAttendance = {};
-                              attendanceData.forEach(record => {
+                              dataToProcess.forEach(record => {
                                 const recordClassName = record.member?.class || record.class_name || record.class;
                                 const attendanceType = record.status || record.attendance_type;
                                 const studentId = record.student_id || record.studentId;
@@ -2717,9 +4130,15 @@ const EnhancedAttendanceReports = () => {
                             a.name.localeCompare(b.name)
                           );
                           
+                          // Pagination for class report
+                          const startIndex = (classReportPage - 1) * itemsPerPage;
+                          const endIndex = startIndex + itemsPerPage;
+                          const paginatedClassArray = classArray.slice(startIndex, endIndex);
                           
                           // Return the class rows
-                          return classArray.map((classData, index) => {
+                          return (
+                            <>
+                              {paginatedClassArray.map((classData, index) => {
                             const totalStudents = classData.students.size;
                           
                           return (
@@ -2938,7 +4357,20 @@ const EnhancedAttendanceReports = () => {
                               </td>
                             </tr>
                           );
-                          });
+                          })}
+                              {classArray.length > itemsPerPage && (
+                                <tr>
+                                  <td colSpan="13" className="text-center py-3">
+                                    <Pagination
+                                      currentPage={classReportPage}
+                                      totalPages={Math.ceil(classArray.length / itemsPerPage)}
+                                      onPageChange={setClassReportPage}
+                                    />
+                                  </td>
+                                </tr>
+                              )}
+                            </>
+                          );
                         })()}
                         </tbody>
                     </table>
@@ -2949,7 +4381,7 @@ const EnhancedAttendanceReports = () => {
               <Tab eventKey="hospitalReport" title={
                 <span className="tab-title">
                   <i className="fas fa-hospital"></i>
-                  Báo cáo theo bệnh viện
+                  Bệnh viện
                 </span>
               }>
                 <div className="session-table-container">
@@ -2978,10 +4410,13 @@ const EnhancedAttendanceReports = () => {
                           // Calculate hospital statistics from real data
                           const hospitalStats = {};
                           
+                          // Apply filters to attendance data
+                          const filteredAttendanceForHospital = applyFilters(attendanceData);
+                          
                           // Initialize hospital stats from actual data
                           const uniqueLocations = new Set();
-                          if (attendanceData && attendanceData.length > 0) {
-                            attendanceData.forEach(record => {
+                          if (filteredAttendanceForHospital && filteredAttendanceForHospital.length > 0) {
+                            filteredAttendanceForHospital.forEach(record => {
                               const location = record.session_location || record.location || record.hospital?.name || record.hospital_name || record.hospital;
                               if (location && location !== "-- Chọn vị trí có sẵn --") {
                                 uniqueLocations.add(location);
@@ -2990,7 +4425,7 @@ const EnhancedAttendanceReports = () => {
                           }
                           
                           // Also include hospitals from the predefined list
-                          hospitals.forEach(hospital => {
+                          predefinedLocations.forEach(hospital => {
                             if (hospital.name !== "-- Chọn vị trí có sẵn --") {
                               uniqueLocations.add(hospital.name);
                             }
@@ -3016,18 +4451,12 @@ const EnhancedAttendanceReports = () => {
                           });
                           
                           // Process attendance data for each hospital
-                          if (attendanceData && attendanceData.length > 0) {
-                            console.log('Hospital report - Processing attendance data:', {
-                              totalRecords: attendanceData.length,
-                              sampleRecord: attendanceData[0],
-                              uniqueLocations: Array.from(uniqueLocations),
-                              hospitalStatsKeys: Object.keys(hospitalStats)
-                            });
+                          if (filteredAttendanceForHospital && filteredAttendanceForHospital.length > 0) {
                             
                             // Group attendance by student-session for each hospital
                             const hospitalStudentSessions = {};
                             
-                            attendanceData.forEach(record => {
+                            filteredAttendanceForHospital.forEach(record => {
                               const hospitalName = record.session_location || record.location || record.hospital?.name || record.hospital_name || record.hospital;
                               const studentId = record.student_id || record.studentId;
                               const sessionId = record.session_id || record.sessionId;
@@ -3051,21 +4480,7 @@ const EnhancedAttendanceReports = () => {
                                 if (attendanceType === 'late') hospitalStats[hospitalName].lateCount++;
                                 if (attendanceType === 'absent') hospitalStats[hospitalName].absentCount++;
                                 
-                                console.log('Hospital processing:', {
-                                  hospitalName,
-                                  studentId,
-                                  sessionId,
-                                  attendanceType,
-                                  beforeCount: hospitalStats[hospitalName].beforeCount,
-                                  duringCount: hospitalStats[hospitalName].duringCount,
-                                  afterCount: hospitalStats[hospitalName].afterCount
-                                });
                               } else {
-                                console.log('Hospital not found or invalid:', {
-                                  hospitalName,
-                                  availableHospitals: Object.keys(hospitalStats),
-                                  record: record
-                                });
                               }
                             });
                             
@@ -3148,24 +4563,19 @@ const EnhancedAttendanceReports = () => {
                                 hospital.afterPermCount = Math.floor(stats.afterSessionApproved / hospitalNames.length);
                               }
                               
-                              console.log('Hospital absence stats calculation:', {
-                                hospitalName,
-                                hospitalAttendanceOccurrences,
-                                totalAttendanceOccurrences,
-                                proportion: totalAttendanceOccurrences > 0 ? hospitalAttendanceOccurrences / totalAttendanceOccurrences : 0,
-                                fullPermCount: hospital.fullPermCount,
-                                beforePermCount: hospital.beforePermCount,
-                                duringPermCount: hospital.duringPermCount,
-                                afterPermCount: hospital.afterPermCount,
-                                statsFull: stats.fullSessionApproved,
-                                statsBefore: stats.beforeSessionApproved,
-                                statsDuring: stats.duringSessionApproved,
-                                statsAfter: stats.afterSessionApproved
-                              });
+
                             });
                           }
                           
-                          return Object.values(hospitalStats).map((hospitalData, index) => {
+                          const hospitalArray = Object.values(hospitalStats);
+                          // Pagination for hospital report
+                          const startIndex = (hospitalReportPage - 1) * itemsPerPage;
+                          const endIndex = startIndex + itemsPerPage;
+                          const paginatedHospitalArray = hospitalArray.slice(startIndex, endIndex);
+                          
+                          return (
+                            <>
+                              {paginatedHospitalArray.map((hospitalData, index) => {
                           return (
                             <tr key={index}>
                               <td>
@@ -3390,7 +4800,20 @@ const EnhancedAttendanceReports = () => {
                               </td>
                             </tr>
                           );
-                          });
+                          })}
+                              {hospitalArray.length > itemsPerPage && (
+                                <tr>
+                                  <td colSpan="13" className="text-center py-3">
+                                    <Pagination
+                                      currentPage={hospitalReportPage}
+                                      totalPages={Math.ceil(hospitalArray.length / itemsPerPage)}
+                                      onPageChange={setHospitalReportPage}
+                                    />
+                                  </td>
+                                </tr>
+                              )}
+                            </>
+                          );
                         })()}
                         </tbody>
                     </table>
@@ -3401,7 +4824,7 @@ const EnhancedAttendanceReports = () => {
               <Tab eventKey="dateReport" title={
                 <span className="tab-title">
                   <i className="fas fa-calendar-day"></i>
-                  Báo cáo theo ngày
+                  Ngày
                 </span>
               }>
                 <div className="session-table-container">
@@ -3432,10 +4855,13 @@ const EnhancedAttendanceReports = () => {
                           // Calculate date statistics from real data
                           const dateStats = {};
                           
+                          // Apply filters to attendance data
+                          const filteredAttendanceForDate = applyFilters(attendanceData);
+                          
                           // Initialize date stats from actual data
                           const uniqueDates = new Set();
-                          if (attendanceData && attendanceData.length > 0) {
-                            attendanceData.forEach(record => {
+                          if (filteredAttendanceForDate && filteredAttendanceForDate.length > 0) {
+                            filteredAttendanceForDate.forEach(record => {
                               const sessionDate = record.session_date || record.date;
                               if (sessionDate) {
                                 const dateStr = new Date(sessionDate).toLocaleDateString('vi-VN');
@@ -3474,18 +4900,12 @@ const EnhancedAttendanceReports = () => {
                           });
                           
                           // Process attendance data for each date
-                          if (attendanceData && attendanceData.length > 0) {
-                            console.log('Date report - Processing attendance data:', {
-                              totalRecords: attendanceData.length,
-                              sampleRecord: attendanceData[0],
-                              uniqueDates: Array.from(uniqueDates),
-                              dateStatsKeys: Object.keys(dateStats)
-                            });
+                          if (filteredAttendanceForDate && filteredAttendanceForDate.length > 0) {
                             
                             // Group attendance by student-session for each date
                             const dateStudentSessions = {};
                             
-                            attendanceData.forEach(record => {
+                            filteredAttendanceForDate.forEach(record => {
                               const sessionDate = record.session_date || record.date;
                               const studentId = record.student_id || record.studentId;
                               const sessionId = record.session_id || record.sessionId;
@@ -3512,15 +4932,6 @@ const EnhancedAttendanceReports = () => {
                                   if (attendanceType === 'late') dateStats[dateStr].lateCount++;
                                   // Note: 'absent' is usually not in attendance records, will calculate separately
                                   
-                                  console.log('Date processing:', {
-                                    dateStr,
-                                    studentId,
-                                    sessionId,
-                                    attendanceType,
-                                    beforeCount: dateStats[dateStr].beforeCount,
-                                    duringCount: dateStats[dateStr].duringCount,
-                                    afterCount: dateStats[dateStr].afterCount
-                                  });
                                 }
                               }
                             });
@@ -3612,15 +5023,6 @@ const EnhancedAttendanceReports = () => {
                                 // Convert both dates to YYYY-MM-DD format for comparison
                                 const itemDate = new Date(item.session_date).toISOString().split('T')[0];
                                 const targetDate = new Date(dateStr.split('/').reverse().join('-')).toISOString().split('T')[0];
-                                
-                                console.log('Date comparison:', {
-                                  dateStr,
-                                  itemSessionDate: item.session_date,
-                                  itemDate,
-                                  targetDate,
-                                  match: itemDate === targetDate
-                                });
-                                
                                 return itemDate === targetDate;
                               });
                               
@@ -3630,13 +5032,6 @@ const EnhancedAttendanceReports = () => {
                                 date.duringPermCount = absenceData.during_session_requests || 0;
                                 date.afterPermCount = absenceData.after_session_requests || 0;
                                 
-                                console.log('Applied real absence data for date:', {
-                                  dateStr,
-                                  fullPermCount: date.fullPermCount,
-                                  beforePermCount: date.beforePermCount,
-                                  duringPermCount: date.duringPermCount,
-                                  afterPermCount: date.afterPermCount
-                                });
                               } else {
                                 // If no data for this date, use proportional distribution as fallback
                                 const dateAttendanceOccurrences = date.beforeCount + date.duringCount + 
@@ -3666,18 +5061,19 @@ const EnhancedAttendanceReports = () => {
                                   date.afterPermCount = Math.floor((stats.afterSessionApproved || 0) / dateNames.length);
                                 }
                                 
-                                console.log('Applied proportional absence data for date:', {
-                                  dateStr,
-                                  fullPermCount: date.fullPermCount,
-                                  beforePermCount: date.beforePermCount,
-                                  duringPermCount: date.duringPermCount,
-                                  afterPermCount: date.afterPermCount
-                                });
                               }
                             });
                           }
                           
-                          return Object.values(dateStats).map((dateData, index) => {
+                          const dateArray = Object.values(dateStats);
+                          // Pagination for date report
+                          const startIndex = (dateReportPage - 1) * itemsPerPage;
+                          const endIndex = startIndex + itemsPerPage;
+                          const paginatedDateArray = dateArray.slice(startIndex, endIndex);
+                          
+                          return (
+                            <>
+                              {paginatedDateArray.map((dateData, index) => {
                           
                             return (
                               <tr key={index}>
@@ -3900,25 +5296,1846 @@ const EnhancedAttendanceReports = () => {
                                 </td>
                               </tr>
                             );
-                          });
+                          })}
+                              {dateArray.length > itemsPerPage && (
+                                <tr>
+                                  <td colSpan="14" className="text-center py-3">
+                                    <Pagination
+                                      currentPage={dateReportPage}
+                                      totalPages={Math.ceil(dateArray.length / itemsPerPage)}
+                                      onPageChange={setDateReportPage}
+                                    />
+                                  </td>
+                                </tr>
+                              )}
+                            </>
+                          );
                         })()}
                         </tbody>
                     </table>
                       </div>
                 </div>
                 </Tab>
+                
+              <Tab eventKey="sessionReport" title={
+                <span className="tab-title">
+                  <i className="fas fa-book"></i>
+                  Tên buổi học
+                </span>
+              }>
+                <div className="session-table-container">
+                  
+                  
+                  <div className="table-responsive">
+                    <table className="session-table">
+                      <thead>
+                          <tr>
+                            <th>Tên Buổi học</th>
+                            <th>Lớp</th>
+                            <th>Khoa</th>
+                            <th>Địa điểm</th>
+                            <th>Sinh viên</th>
+                            <th>Thời gian</th>
+                            <th>Đầy đủ</th>
+                            <th>Trước</th>
+                            <th>Trong</th>
+                            <th>Sau</th>
+                            <th>Có mặt</th>
+                            <th>Đi trễ</th>
+                            <th>Vắng</th>
+                            <th>Phép cả buổi</th>
+                            <th>Phép trước</th>
+                            <th>Phép trong</th>
+                            <th>Phép sau</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                        {(() => {
+                          // Group attendance data by session title
+                          const sessionSummaries = {};
+                          
+                          // Apply filters to attendance data
+                          let dataToProcess = applyFilters(attendanceData);
+                          
+                          // Get absence request stats by session
+                          const absenceStatsBySession = {};
+                          if (stats.fullSessionApproved !== undefined) {
+                            // Extract unique sessions from attendance data
+                            const uniqueSessionsFromData = [...new Set(
+                              dataToProcess.map(item => 
+                                item.session_title || item.session?.title || ''
+                              ).filter(Boolean)
+                            )];
+                            const totalSessions = uniqueSessionsFromData.length || 1;
+                            
+                            uniqueSessionsFromData.forEach(sessionTitle => {
+                              absenceStatsBySession[sessionTitle] = {
+                                fullSessionApproved: Math.floor(stats.fullSessionApproved / totalSessions),
+                                beforeSessionApproved: Math.floor(stats.beforeSessionApproved / totalSessions),
+                                duringSessionApproved: Math.floor(stats.duringSessionApproved / totalSessions),
+                                afterSessionApproved: Math.floor(stats.afterSessionApproved / totalSessions)
+                              };
+                            });
+                          }
+                          
+                          if ((!attendanceData || !Array.isArray(attendanceData) || attendanceData.length === 0) && 
+                              detailedMembers && Array.isArray(detailedMembers) && detailedMembers.length > 0) {
+                            dataToProcess = detailedMembers.map(member => ({
+                              member: {
+                                _id: member.id,
+                                class: member.class,
+                                fullName: member.fullName,
+                                gender: member.gender,
+                                email: member.email,
+                                faculty_name: member.faculty_name
+                              },
+                              status: member.attendanceStatus,
+                              attendance_type: member.attendanceStatus,
+                              timestamp: member.attendanceTimestamp,
+                              faculty_name: member.faculty_name,
+                              session_title: member.sessionInfo?.title || 'N/A'
+                            }));
+                          }
+
+                          // Process all attendance data to group by session title
+                          if (!dataToProcess || !Array.isArray(dataToProcess) || dataToProcess.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan="17" className="text-center py-4">
+                                  <div className="text-muted">
+                                    <i className="fas fa-info-circle me-2"></i>
+                                    Không có dữ liệu điểm danh để hiển thị báo cáo theo tên buổi học
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          }
+                          
+                          dataToProcess.forEach(record => {
+                            const sessionTitle = record.session_title || record.session?.title || 'N/A';
+                            const studentId = record.member?._id || record.student_id || record.member_id;
+                            const attendanceType = record.status || record.attendance_type || record.type;
+                            const className = record.member?.class || record.class_name || record.class || '-';
+                            const facultyName = record.member?.faculty_name || record.faculty_name || '-';
+                            const location = record.session_location || record.location || record.session?.location || '-';
+                            const sessionDate = record.session_date || record.date;
+                            const startTime = record.start_time || record.session?.start_time;
+                            const endTime = record.end_time || record.session?.end_time;
+                            
+                            if (!sessionTitle || sessionTitle === 'N/A' || !studentId || !attendanceType) {
+                              return;
+                            }
+                            
+                            if (!sessionSummaries[sessionTitle]) {
+                              sessionSummaries[sessionTitle] = {
+                                title: sessionTitle,
+                                classes: new Set(),
+                                faculties: new Set(),
+                                facultyCounts: {}, // Track faculty counts for most common
+                                location: location,
+                                students: new Set(),
+                                studentAttendance: {},
+                                sessionDate: sessionDate,
+                                startTime: startTime,
+                                endTime: endTime,
+                                fullCount: 0,
+                                beforeCount: 0,
+                                duringCount: 0,
+                                afterCount: 0,
+                                presentCount: 0,
+                                earlyCount: 0,
+                                lateCount: 0,
+                                lateLeaveCount: 0,
+                                absentCount: 0,
+                                absentPermCount: 0,
+                                earlyPermCount: 0,
+                                duringPermCount: 0,
+                                latePermCount: 0,
+                                // Absence request stats (approved)
+                                fullSessionApproved: 0,
+                                beforeSessionApproved: 0,
+                                duringSessionApproved: 0,
+                                afterSessionApproved: 0
+                              };
+                            }
+                            
+                            // Add class and faculty
+                            if (className && className !== '-') {
+                              sessionSummaries[sessionTitle].classes.add(className);
+                            }
+                            if (facultyName && facultyName !== '-') {
+                              sessionSummaries[sessionTitle].faculties.add(facultyName);
+                              // Count faculty occurrences
+                              sessionSummaries[sessionTitle].facultyCounts[facultyName] = 
+                                (sessionSummaries[sessionTitle].facultyCounts[facultyName] || 0) + 1;
+                            }
+                            
+                            // Add student to the session
+                            sessionSummaries[sessionTitle].students.add(studentId);
+                            
+                            // Initialize student attendance record if not exists
+                            if (!sessionSummaries[sessionTitle].studentAttendance[studentId]) {
+                              sessionSummaries[sessionTitle].studentAttendance[studentId] = new Set();
+                            }
+                            
+                            // Add attendance type to student record
+                            sessionSummaries[sessionTitle].studentAttendance[studentId].add(attendanceType);
+                          });
+                          
+                          // Assign absence request stats to each session
+                          Object.values(sessionSummaries).forEach(sessionSummary => {
+                            const sessionTitle = sessionSummary.title;
+                            if (absenceStatsBySession[sessionTitle]) {
+                              sessionSummary.fullSessionApproved = absenceStatsBySession[sessionTitle].fullSessionApproved;
+                              sessionSummary.beforeSessionApproved = absenceStatsBySession[sessionTitle].beforeSessionApproved;
+                              sessionSummary.duringSessionApproved = absenceStatsBySession[sessionTitle].duringSessionApproved;
+                              sessionSummary.afterSessionApproved = absenceStatsBySession[sessionTitle].afterSessionApproved;
+                            }
+                          });
+                          
+                          // Calculate attendance statistics for each session
+                          Object.values(sessionSummaries).forEach(sessionSummary => {
+                            // First, count absent students directly from data for this session
+                            const sessionTitle = sessionSummary.title;
+                            let absentCountFromData = 0;
+                            dataToProcess.forEach(record => {
+                              const recordSessionTitle = record.session_title || record.session?.title || 'N/A';
+                              const attendanceType = record.status || record.attendance_type || record.type;
+                              
+                              if (recordSessionTitle === sessionTitle && attendanceType === 'absent') {
+                                // Check if it's not an absence with permission
+                                const studentId = record.member?._id || record.student_id || record.member_id;
+                                if (studentId) {
+                                  const studentStatusSet = sessionSummary.studentAttendance[studentId];
+                                  if (studentStatusSet) {
+                                    const hasAbsentPerm = studentStatusSet.has('absent_perm');
+                                    const hasAbsentBeforePerm = studentStatusSet.has('absent_before_perm');
+                                    const hasAbsentDuringPerm = studentStatusSet.has('absent_during_perm');
+                                    const hasAbsentAfterPerm = studentStatusSet.has('absent_after_perm');
+                                    
+                                    if (!hasAbsentPerm && !hasAbsentBeforePerm && 
+                                        !hasAbsentDuringPerm && !hasAbsentAfterPerm) {
+                                      absentCountFromData++;
+                                    }
+                                  } else {
+                                    absentCountFromData++;
+                                  }
+                                }
+                              }
+                            });
+                            
+                            // Use the count from data if available, otherwise use fallback
+                            if (absentCountFromData > 0) {
+                              sessionSummary.absentCount = absentCountFromData;
+                            } else {
+                              // Fallback: calculate based on students with attendance vs total
+                              // Since we don't have total students in session, use 0 or distribute from stats
+                              if (stats.absent !== undefined) {
+                                const totalSessions = Object.keys(sessionSummaries).length || 1;
+                                sessionSummary.absentCount = Math.floor(stats.absent / totalSessions);
+                              }
+                            }
+                            
+                            // Calculate attendance types for each student
+                            Object.keys(sessionSummary.studentAttendance).forEach(studentId => {
+                              const statusSet = sessionSummary.studentAttendance[studentId];
+                              
+                              const hasBeforeAttendance = statusSet.has('before');
+                              const hasDuringAttendance = statusSet.has('during');
+                              const hasAfterAttendance = statusSet.has('after');
+                              const hasLateAttendance = statusSet.has('late');
+                              const hasEarlyAttendance = statusSet.has('early');
+                              const hasLateLeaveAttendance = statusSet.has('late_leave');
+                              
+                              // Check for absence with permission types
+                              const hasAbsentPerm = statusSet.has('absent_perm');
+                              const hasAbsentBeforePerm = statusSet.has('absent_before_perm');
+                              const hasAbsentDuringPerm = statusSet.has('absent_during_perm');
+                              const hasAbsentAfterPerm = statusSet.has('absent_after_perm');
+                              
+                              // Determine final status based on the same logic as other tabs
+                              // Trường hợp 1: Có mặt trước + Có mặt trong + Có mặt sau (hoặc Về trễ) → Đầy đủ
+                              if ((hasBeforeAttendance && hasDuringAttendance && (hasAfterAttendance || hasLateLeaveAttendance)) ||
+                                  (hasEarlyAttendance && hasDuringAttendance && (hasAfterAttendance || hasLateLeaveAttendance))) {
+                                sessionSummary.fullCount++;
+                              }
+                              // Trường hợp 2: Đi trễ + Có mặt trong + Có mặt sau → Đầy đủ và Đi trễ
+                              else if (hasLateAttendance && hasDuringAttendance && hasAfterAttendance) {
+                                sessionSummary.fullCount++;
+                                sessionSummary.lateCount++;
+                              }
+                              // Trường hợp 3: Đi trễ + Có mặt trong + Về trễ → Đầy đủ và Đi trễ
+                              else if (hasLateAttendance && hasDuringAttendance && hasLateLeaveAttendance) {
+                                sessionSummary.fullCount++;
+                                sessionSummary.lateCount++;
+                              }
+                              // Trường hợp 4: Đi trước (hoặc Có mặt trước) + Có mặt trong + Có mặt sau → Đầy đủ
+                              else if ((hasEarlyAttendance || hasBeforeAttendance) && hasDuringAttendance && hasAfterAttendance) {
+                                sessionSummary.fullCount++;
+                              }
+                              // Individual types
+                              else {
+                                if (hasBeforeAttendance && !hasDuringAttendance && !hasAfterAttendance) {
+                                  sessionSummary.beforeCount++;
+                                }
+                                if (hasDuringAttendance && !hasBeforeAttendance && !hasAfterAttendance) {
+                                  sessionSummary.duringCount++;
+                                }
+                                if (hasAfterAttendance && !hasBeforeAttendance && !hasDuringAttendance) {
+                                  sessionSummary.afterCount++;
+                                }
+                                if (hasEarlyAttendance && !hasDuringAttendance && !hasAfterAttendance) {
+                                  sessionSummary.earlyCount++;
+                                }
+                                if (hasLateAttendance) {
+                                  sessionSummary.lateCount++;
+                                }
+                                if (hasLateLeaveAttendance && !hasBeforeAttendance && !hasDuringAttendance) {
+                                  sessionSummary.lateLeaveCount++;
+                                }
+                                if (statusSet.has('present') && !hasBeforeAttendance && !hasDuringAttendance && 
+                                    !hasAfterAttendance && !hasEarlyAttendance && !hasLateAttendance && !hasLateLeaveAttendance) {
+                                  sessionSummary.presentCount++;
+                                }
+                              }
+                              
+                              // Count permission types
+                              if (hasAbsentPerm) {
+                                sessionSummary.absentPermCount++;
+                              }
+                              if (hasAbsentBeforePerm) {
+                                sessionSummary.earlyPermCount++;
+                              }
+                              if (hasAbsentDuringPerm) {
+                                sessionSummary.duringPermCount++;
+                              }
+                              if (hasAbsentAfterPerm) {
+                                sessionSummary.latePermCount++;
+                              }
+                            });
+                            
+                            // Add absence request approved counts
+                            sessionSummary.absentPermCount += sessionSummary.fullSessionApproved;
+                            sessionSummary.earlyPermCount += sessionSummary.beforeSessionApproved;
+                            sessionSummary.duringPermCount += sessionSummary.duringSessionApproved;
+                            sessionSummary.latePermCount += sessionSummary.afterSessionApproved;
+                          });
+                          
+                          // Convert to array and sort by session title
+                          const sessionArray = Object.values(sessionSummaries).sort((a, b) => {
+                            if (a.title < b.title) return -1;
+                            if (a.title > b.title) return 1;
+                            return 0;
+                          });
+                          
+                          // Pagination
+                          const startIndex = (sessionReportPage - 1) * itemsPerPage;
+                          const endIndex = startIndex + itemsPerPage;
+                          const paginatedSessions = sessionArray.slice(startIndex, endIndex);
+                          
+                          return (
+                            <>
+                          {paginatedSessions.map((sessionData, index) => {
+                            // Format time - similar to SessionList.js format
+                            // SessionList.js shows time as "HH:mm - HH:mm" and date separately
+                            // Here we combine date and time: "DD/MM/YYYY HH:mm - HH:mm"
+                            let timeDisplay = '-';
+                            try {
+                              // Format date using the formatDate function (similar to SessionList.js)
+                              let dateStr = '';
+                              if (sessionData.sessionDate) {
+                                let dateToFormat = sessionData.sessionDate;
+                                
+                                // Handle string - extract date part if it's a datetime string (contains 'T')
+                                if (typeof dateToFormat === 'string') {
+                                  // If it's a datetime string like "2025-11-25T17:00:00.000Z", extract only date part
+                                  if (dateToFormat.includes('T')) {
+                                    dateToFormat = dateToFormat.split('T')[0]; // Get "2025-11-25"
+                                  }
+                                  dateStr = formatDate(dateToFormat);
+                                } else if (dateToFormat instanceof Date) {
+                                  // Handle Date object
+                                  const year = dateToFormat.getFullYear();
+                                  const month = String(dateToFormat.getMonth() + 1).padStart(2, '0');
+                                  const day = String(dateToFormat.getDate()).padStart(2, '0');
+                                  dateStr = formatDate(`${year}-${month}-${day}`);
+                                } else {
+                                  // Try to convert to string and extract date part
+                                  const dateString = String(dateToFormat);
+                                  if (dateString.includes('T')) {
+                                    dateToFormat = dateString.split('T')[0];
+                                  }
+                                  dateStr = formatDate(dateToFormat);
+                                }
+                              }
+                              
+                              // Format time - exactly like SessionList.js: "HH:mm - HH:mm"
+                              // SessionList.js line 1911-1913: `${session.start_time} - ${session.end_time}`
+                              if (sessionData.startTime && sessionData.endTime) {
+                                let startTimeStr = String(sessionData.startTime);
+                                let endTimeStr = String(sessionData.endTime);
+                                
+                                // Extract time part if it's a datetime string (contains 'T')
+                                if (startTimeStr.includes('T')) {
+                                  startTimeStr = startTimeStr.split('T')[1]?.split('.')[0] || startTimeStr;
+                                }
+                                if (endTimeStr.includes('T')) {
+                                  endTimeStr = endTimeStr.split('T')[1]?.split('.')[0] || endTimeStr;
+                                }
+                                
+                                // Get only HH:MM part (first 5 characters) - same as SessionList.js
+                                if (startTimeStr.length > 5) {
+                                  startTimeStr = startTimeStr.substring(0, 5);
+                                }
+                                if (endTimeStr.length > 5) {
+                                  endTimeStr = endTimeStr.substring(0, 5);
+                                }
+                                
+                                // Format: "DD/MM/YYYY HH:mm - HH:mm" (date + time like SessionList.js format)
+                                if (dateStr) {
+                                  timeDisplay = `${dateStr} ${startTimeStr} - ${endTimeStr}`;
+                                } else {
+                                  timeDisplay = `${startTimeStr} - ${endTimeStr}`;
+                                }
+                              } else if (dateStr) {
+                                // Only date available
+                                timeDisplay = dateStr;
+                              }
+                            } catch (error) {
+                              console.error('Error formatting time:', error, sessionData);
+                              timeDisplay = '-';
+                            }
+                            
+                            // Format classes (show first 2, then count if more)
+                            const classesArray = Array.from(sessionData.classes);
+                            let classesDisplay = classesArray.length > 0 
+                              ? classesArray.slice(0, 2).join(', ')
+                              : '-';
+                            if (classesArray.length > 2) {
+                              classesDisplay += ` (+${classesArray.length - 2})`;
+                            }
+                            
+                            // Format faculties - similar to UserManagement.js which shows faculty_name directly
+                            // Show first 2 faculties, then count if more (similar to classes display)
+                            const facultiesArray = Array.from(sessionData.faculties).filter(f => f && f !== '-');
+                            let facultiesDisplay = '-';
+                            if (facultiesArray.length > 0) {
+                              // Show first 2 faculties, then count if more (like classes)
+                              facultiesDisplay = facultiesArray.slice(0, 2).join(', ');
+                              if (facultiesArray.length > 2) {
+                                facultiesDisplay += ` (+${facultiesArray.length - 2})`;
+                              }
+                            }
+                            
+                            return (
+                              <tr key={`session-${index}`}>
+                                <td>
+                                  <strong>{sessionData.title}</strong>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-info"></div>
+                                    <span>{classesDisplay}</span>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-primary"></div>
+                                    <span>{facultiesDisplay}</span>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <i className="fas fa-map-marker-alt me-2 text-danger"></i>
+                                    <span>{sessionData.location}</span>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-success"></div>
+                                    <OverlayTrigger
+                                      placement="top"
+                                      overlay={
+                                        <Tooltip id={`tooltip-students-${index}`}>
+                                          <div style={{ maxWidth: '300px' }}>
+                                            <strong>Tổng số sinh viên:</strong><br/>
+                                            {sessionData.students.size} sinh viên
+                                          </div>
+                                        </Tooltip>
+                                      }
+                                    >
+                                      <strong style={{ cursor: 'pointer' }}>{sessionData.students.size}</strong>
+                                    </OverlayTrigger>
+                                  </div>
+                                </td>
+                                <td>
+                                  <small className="text-muted">{timeDisplay}</small>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-success"></div>
+                                    <OverlayTrigger
+                                      placement="top"
+                                      overlay={
+                                        <Tooltip id={`tooltip-full-${index}`}>
+                                          <div style={{ maxWidth: '300px' }}>
+                                            <strong>Đầy đủ:</strong><br/>
+                                            {sessionData.fullCount} sinh viên có mặt đầy đủ
+                                          </div>
+                                        </Tooltip>
+                                      }
+                                    >
+                                      <strong style={{ cursor: 'pointer' }}>{sessionData.fullCount}</strong>
+                                    </OverlayTrigger>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-info"></div>
+                                    <OverlayTrigger
+                                      placement="top"
+                                      overlay={
+                                        <Tooltip id={`tooltip-before-${index}`}>
+                                          <div style={{ maxWidth: '300px' }}>
+                                            <strong>Có mặt trước:</strong><br/>
+                                            {sessionData.beforeCount} lần có mặt trước
+                                          </div>
+                                        </Tooltip>
+                                      }
+                                    >
+                                      <strong style={{ cursor: 'pointer' }}>{sessionData.beforeCount}</strong>
+                                    </OverlayTrigger>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-primary"></div>
+                                    <OverlayTrigger
+                                      placement="top"
+                                      overlay={
+                                        <Tooltip id={`tooltip-during-${index}`}>
+                                          <div style={{ maxWidth: '300px' }}>
+                                            <strong>Có mặt trong:</strong><br/>
+                                            {sessionData.duringCount} lần có mặt trong
+                                          </div>
+                                        </Tooltip>
+                                      }
+                                    >
+                                      <strong style={{ cursor: 'pointer' }}>{sessionData.duringCount}</strong>
+                                    </OverlayTrigger>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-secondary"></div>
+                                    <OverlayTrigger
+                                      placement="top"
+                                      overlay={
+                                        <Tooltip id={`tooltip-after-${index}`}>
+                                          <div style={{ maxWidth: '300px' }}>
+                                            <strong>Có mặt sau:</strong><br/>
+                                            {sessionData.afterCount} lần có mặt sau
+                                          </div>
+                                        </Tooltip>
+                                      }
+                                    >
+                                      <strong style={{ cursor: 'pointer' }}>{sessionData.afterCount}</strong>
+                                    </OverlayTrigger>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-success"></div>
+                                    <OverlayTrigger
+                                      placement="top"
+                                      overlay={
+                                        <Tooltip id={`tooltip-present-${index}`}>
+                                          <div style={{ maxWidth: '300px' }}>
+                                            <strong>Có mặt:</strong><br/>
+                                            {sessionData.presentCount} lần có mặt
+                                          </div>
+                                        </Tooltip>
+                                      }
+                                    >
+                                      <strong style={{ cursor: 'pointer' }}>{sessionData.presentCount}</strong>
+                                    </OverlayTrigger>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-warning"></div>
+                                    <OverlayTrigger
+                                      placement="top"
+                                      overlay={
+                                        <Tooltip id={`tooltip-late-${index}`}>
+                                          <div style={{ maxWidth: '300px' }}>
+                                            <strong>Đi trễ:</strong><br/>
+                                            {sessionData.lateCount} lần đi trễ
+                                          </div>
+                                        </Tooltip>
+                                      }
+                                    >
+                                      <strong style={{ cursor: 'pointer' }}>{sessionData.lateCount}</strong>
+                                    </OverlayTrigger>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-danger"></div>
+                                    <OverlayTrigger
+                                      placement="top"
+                                      overlay={
+                                        <Tooltip id={`tooltip-absent-${index}`}>
+                                          <div style={{ maxWidth: '300px' }}>
+                                            <strong>Vắng mặt:</strong><br/>
+                                            {sessionData.absentCount} lần vắng mặt
+                                          </div>
+                                        </Tooltip>
+                                      }
+                                    >
+                                      <strong style={{ cursor: 'pointer' }}>{sessionData.absentCount}</strong>
+                                    </OverlayTrigger>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-secondary"></div>
+                                    <OverlayTrigger
+                                      placement="top"
+                                      overlay={
+                                        <Tooltip id={`tooltip-full-perm-${index}`}>
+                                          <div style={{ maxWidth: '300px' }}>
+                                            <strong>Phép cả buổi:</strong><br/>
+                                            {sessionData.absentPermCount} lần xin phép cả buổi (đã duyệt)
+                                          </div>
+                                        </Tooltip>
+                                      }
+                                    >
+                                      <strong style={{ cursor: 'pointer' }}>{sessionData.absentPermCount}</strong>
+                                    </OverlayTrigger>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-info"></div>
+                                    <OverlayTrigger
+                                      placement="top"
+                                      overlay={
+                                        <Tooltip id={`tooltip-before-perm-${index}`}>
+                                          <div style={{ maxWidth: '300px' }}>
+                                            <strong>Phép trước buổi:</strong><br/>
+                                            {sessionData.earlyPermCount} lần xin phép trước buổi (đã duyệt)
+                                          </div>
+                                        </Tooltip>
+                                      }
+                                    >
+                                      <strong style={{ cursor: 'pointer' }}>{sessionData.earlyPermCount}</strong>
+                                    </OverlayTrigger>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-primary"></div>
+                                    <OverlayTrigger
+                                      placement="top"
+                                      overlay={
+                                        <Tooltip id={`tooltip-during-perm-${index}`}>
+                                          <div style={{ maxWidth: '300px' }}>
+                                            <strong>Phép trong buổi:</strong><br/>
+                                            {sessionData.duringPermCount} lần xin phép trong buổi (đã duyệt)
+                                          </div>
+                                        </Tooltip>
+                                      }
+                                    >
+                                      <strong style={{ cursor: 'pointer' }}>{sessionData.duringPermCount}</strong>
+                                    </OverlayTrigger>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center">
+                                    <div className="status-indicator bg-secondary"></div>
+                                    <OverlayTrigger
+                                      placement="top"
+                                      overlay={
+                                        <Tooltip id={`tooltip-after-perm-${index}`}>
+                                          <div style={{ maxWidth: '300px' }}>
+                                            <strong>Phép sau buổi:</strong><br/>
+                                            {sessionData.latePermCount} lần xin phép sau buổi (đã duyệt)
+                                          </div>
+                                        </Tooltip>
+                                      }
+                                    >
+                                      <strong style={{ cursor: 'pointer' }}>{sessionData.latePermCount}</strong>
+                                    </OverlayTrigger>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                              {sessionArray.length > itemsPerPage && (
+                                <tr>
+                                  <td colSpan="17" className="text-center py-3">
+                                    <Pagination
+                                      currentPage={sessionReportPage}
+                                      totalPages={Math.ceil(sessionArray.length / itemsPerPage)}
+                                      onPageChange={setSessionReportPage}
+                                    />
+                                  </td>
+                                </tr>
+                              )}
+                            </>
+                          );
+                        })()}
+                        </tbody>
+                    </table>
+                  </div>
+                </div>
+                </Tab>
+
+                {/* Custom Report Tab */}
+                <Tab eventKey="customReport" title={
+                  <span className="tab-title">
+                    <i className="fas fa-sliders-h"></i>
+                    Tùy chọn báo cáo
+                  </span>
+                }>
+                  <div className="custom-report-container mt-4">
+                    {/* Control Panel */}
+                    <div className="custom-report-card mb-4">
+                      <div 
+                        className="custom-report-card-header" 
+                        style={{ 
+                          cursor: 'pointer',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}
+                        onClick={() => setIsFilterSectionOpen(!isFilterSectionOpen)}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <div className="custom-report-card-header-icon">
+                            <i className="fas fa-cog"></i>
+                          </div>
+                          <h6 className="mb-0">Tùy chọn hiển thị và lọc dữ liệu</h6>
+                        </div>
+                        <div style={{ 
+                          fontSize: '18px', 
+                          color: 'var(--cr-text-secondary)',
+                          transition: 'transform 0.3s ease'
+                        }}>
+                          <i className={`fas fa-chevron-${isFilterSectionOpen ? 'up' : 'down'}`}></i>
+                        </div>
+                      </div>
+                      <div 
+                        className="custom-report-card-body" 
+                        style={{
+                          maxHeight: isFilterSectionOpen ? '5000px' : '0',
+                          overflow: 'hidden',
+                          transition: 'all 0.4s ease-in-out',
+                          opacity: isFilterSectionOpen ? 1 : 0
+                        }}
+                      >
+                        {/* Display Type Selection */}
+                        <Row className="mb-4">
+                          <Col md={12}>
+                            <Form.Label className="custom-report-section-label">
+                              <i className="fas fa-chart-bar"></i>
+                              Loại hiển thị
+                            </Form.Label>
+                            <div className="d-flex gap-2 flex-wrap">
+                              <button
+                                onClick={() => setCustomReportDisplay('table')}
+                                className={`custom-report-btn ${customReportDisplay === 'table' ? 'custom-report-btn-active' : 'custom-report-btn-outline'}`}
+                              >
+                                <i className="fas fa-table"></i>
+                                Bảng
+                              </button>
+                              <button
+                                onClick={() => setCustomReportDisplay('bar')}
+                                className={`custom-report-btn ${customReportDisplay === 'bar' ? 'custom-report-btn-active' : 'custom-report-btn-outline'}`}
+                              >
+                                <i className="fas fa-chart-bar"></i>
+                                Biểu đồ Bar
+                              </button>
+                              <button
+                                onClick={() => setCustomReportDisplay('line')}
+                                className={`custom-report-btn ${customReportDisplay === 'line' ? 'custom-report-btn-active' : 'custom-report-btn-outline'}`}
+                              >
+                                <i className="fas fa-chart-line"></i>
+                                Biểu đồ Line
+                              </button>
+                              <button
+                                onClick={() => setCustomReportDisplay('doughnut')}
+                                className={`custom-report-btn ${customReportDisplay === 'doughnut' ? 'custom-report-btn-active' : 'custom-report-btn-outline'}`}
+                              >
+                                <i className="fas fa-chart-pie"></i>
+                                Biểu đồ Doughnut
+                              </button>
+                              <button
+                                onClick={() => setCustomReportDisplay('weekly_stats')}
+                                className={`custom-report-btn ${customReportDisplay === 'weekly_stats' ? 'custom-report-btn-success' : 'custom-report-btn-outline'}`}
+                              >
+                                <i className="fas fa-calendar-week"></i>
+                                Thống kê theo tuần
+                              </button>
+                            </div>
+                          </Col>
+                        </Row>
+
+                        {/* Weekly Statistics Options - Only for weekly_stats view */}
+                        {customReportDisplay === 'weekly_stats' && (
+                          <Row className="mb-4">
+                            <Col md={6}>
+                              <Form.Label className="custom-report-section-label">
+                                <i className="fas fa-layer-group"></i>
+                                Nhóm thống kê theo
+                              </Form.Label>
+                              <div className="d-flex gap-2 flex-wrap">
+                                <button
+                                  onClick={() => {
+                                    setWeeklyStatsGroupBy('faculty');
+                                    const facultyValue = customReportFilters.facultyName || weeklyStatsFilters.facultyName || '';
+                                    if (facultyValue) {
+                                      setWeeklyStatsSelectedFilter(facultyValue);
+                                    }
+                                  }}
+                                  className={`custom-report-btn ${weeklyStatsGroupBy === 'faculty' ? 'custom-report-btn-active' : 'custom-report-btn-outline'}`}
+                                  style={{ fontSize: '13px', padding: '8px 16px' }}
+                                >
+                                  <i className="fas fa-university"></i>
+                                  Khoa
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setWeeklyStatsGroupBy('location');
+                                    const locationValue = customReportFilters.location || weeklyStatsFilters.location || '';
+                                    if (locationValue) {
+                                      setWeeklyStatsSelectedFilter(locationValue);
+                                    }
+                                  }}
+                                  className={`custom-report-btn ${weeklyStatsGroupBy === 'location' ? 'custom-report-btn-active' : 'custom-report-btn-outline'}`}
+                                  style={{ fontSize: '13px', padding: '8px 16px' }}
+                                >
+                                  <i className="fas fa-hospital"></i>
+                                  Bệnh viện
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setWeeklyStatsGroupBy('class');
+                                    const classValue = customReportFilters.className || weeklyStatsFilters.className || '';
+                                    if (classValue) {
+                                      setWeeklyStatsSelectedFilter(classValue);
+                                    }
+                                  }}
+                                  className={`custom-report-btn ${weeklyStatsGroupBy === 'class' ? 'custom-report-btn-active' : 'custom-report-btn-outline'}`}
+                                  style={{ fontSize: '13px', padding: '8px 16px' }}
+                                >
+                                  <i className="fas fa-graduation-cap"></i>
+                                  Lớp
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setWeeklyStatsGroupBy('group');
+                                    const groupValue = customReportFilters.groupId || weeklyStatsFilters.groupId || '';
+                                    if (groupValue) {
+                                      setWeeklyStatsSelectedFilter(groupValue);
+                                    }
+                                  }}
+                                  className={`custom-report-btn ${weeklyStatsGroupBy === 'group' ? 'custom-report-btn-active' : 'custom-report-btn-outline'}`}
+                                  style={{ fontSize: '13px', padding: '8px 16px' }}
+                                >
+                                  <i className="fas fa-users"></i>
+                                  Nhóm
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setWeeklyStatsGroupBy('session_title');
+                                    setWeeklyStatsSelectedFilter('');
+                                  }}
+                                  className={`custom-report-btn ${weeklyStatsGroupBy === 'session_title' ? 'custom-report-btn-active' : 'custom-report-btn-outline'}`}
+                                  style={{ fontSize: '13px', padding: '8px 16px' }}
+                                >
+                                  <i className="fas fa-book"></i>
+                                  Tên buổi học
+                                </button>
+                              </div>
+                            </Col>
+                            <Col md={6}>
+                              <Form.Group>
+                                <Form.Label className="custom-report-form-label">
+                                  <i className="fas fa-filter"></i>
+                                  {weeklyStatsGroupBy === 'faculty' && 'Chọn Khoa'}
+                                  {weeklyStatsGroupBy === 'location' && 'Chọn Bệnh viện'}
+                                  {weeklyStatsGroupBy === 'class' && 'Chọn Lớp'}
+                                  {weeklyStatsGroupBy === 'group' && 'Chọn Nhóm'}
+                                  {weeklyStatsGroupBy === 'session_title' && 'Chọn Tên buổi học'}
+                                </Form.Label>
+                                <Form.Select
+                                  className="custom-report-form-control"
+                                  value={weeklyStatsSelectedFilter}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setWeeklyStatsSelectedFilter(value);
+                                    
+                                    // Đồng bộ với bộ lọc chung
+                                    switch (weeklyStatsGroupBy) {
+                                      case 'faculty':
+                                        handleCustomReportFilterChange('facultyName', value);
+                                        setWeeklyStatsFilters(prev => ({ ...prev, facultyName: value }));
+                                        break;
+                                      case 'location':
+                                        handleCustomReportFilterChange('location', value);
+                                        setWeeklyStatsFilters(prev => ({ ...prev, location: value }));
+                                        break;
+                                      case 'class':
+                                        handleCustomReportFilterChange('className', value);
+                                        setWeeklyStatsFilters(prev => ({ ...prev, className: value }));
+                                        break;
+                                      case 'group':
+                                        handleCustomReportFilterChange('groupId', value);
+                                        setWeeklyStatsFilters(prev => ({ ...prev, groupId: value }));
+                                        break;
+                                      case 'session_title':
+                                        // Không cần đồng bộ với bộ lọc chung vì session_title không có trong customReportFilters
+                                        break;
+                                    }
+                                  }}
+                                >
+                                  <option value="">Tất cả</option>
+                                  {weeklyStatsFilterOptions.map((option, idx) => (
+                                    <option key={idx} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </Form.Select>
+                              </Form.Group>
+                            </Col>
+                          </Row>
+                        )}
+
+                        {/* Column Selection - Only for table view */}
+                        {customReportDisplay === 'table' && (
+                          <Row className="mb-4">
+                            <Col md={12}>
+                              <Form.Label className="custom-report-section-label">
+                                <i className="fas fa-columns"></i>
+                                Cột hiển thị
+                              </Form.Label>
+                              <div className="d-flex gap-2 align-items-center mb-3">
+                                <button
+                                  onClick={() => setShowColumnSelector(!showColumnSelector)}
+                                  className="custom-report-btn custom-report-btn-secondary"
+                                >
+                                  <i className={`fas fa-${showColumnSelector ? 'eye-slash' : 'eye'}`}></i>
+                                  {showColumnSelector ? 'Ẩn' : 'Hiện'} tùy chọn cột
+                                </button>
+                                <span className="custom-report-badge custom-report-badge-info">
+                                  {customReportColumns.length} cột được chọn
+                                </span>
+                              </div>
+                              {showColumnSelector && (
+                                <div className="custom-report-column-selector">
+                                  <Row>
+                                    {availableColumns.map(col => (
+                                      <Col md={3} sm={6} key={col.key} className="mb-2">
+                                        <div className="custom-report-checkbox">
+                                          <input
+                                            type="checkbox"
+                                            id={`col-${col.key}`}
+                                            checked={customReportColumns.includes(col.key)}
+                                            onChange={() => toggleColumn(col.key)}
+                                          />
+                                          <label htmlFor={`col-${col.key}`}>{col.label}</label>
+                                        </div>
+                                      </Col>
+                                    ))}
+                                  </Row>
+                                </div>
+                              )}
+                            </Col>
+                          </Row>
+                        )}
+
+                        {/* Divider */}
+                        <div style={{
+                          height: '1px',
+                          background: 'linear-gradient(90deg, transparent, var(--cr-gray-300) 20%, var(--cr-gray-300) 80%, transparent)',
+                          margin: '2rem 0',
+                          position: 'relative'
+                        }}>
+                          <div style={{
+                            position: 'absolute',
+                            left: '50%',
+                            top: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            background: 'var(--cr-gray-50)',
+                            padding: '0 1rem',
+                            color: 'var(--cr-gray-400)',
+                            fontSize: '12px',
+                            fontWeight: '600',
+                            letterSpacing: '0.05em',
+                            textTransform: 'uppercase'
+                          }}>
+                            <i className="fas fa-filter" style={{ marginRight: '6px' }}></i>
+                            Bộ lọc
+                          </div>
+                        </div>
+
+                        {/* Filters */}
+                        <Row className="mb-4">
+                          <Col md={3}>
+                            <Form.Group>
+                              <Form.Label className="custom-report-form-label">
+                                <i className="fas fa-calendar"></i>
+                                Từ ngày
+                              </Form.Label>
+                              <Form.Control
+                                type="date"
+                                value={customReportDisplay === 'weekly_stats' ? (weeklyStatsFilters.startDate || customReportFilters.startDate) : customReportFilters.startDate}
+                                onChange={(e) => {
+                                  handleCustomReportFilterChange('startDate', e.target.value);
+                                  if (customReportDisplay === 'weekly_stats') {
+                                    setWeeklyStatsFilters(prev => ({ ...prev, startDate: e.target.value }));
+                                  }
+                                }}
+                                className="custom-report-form-control"
+                              />
+                            </Form.Group>
+                          </Col>
+                          <Col md={3}>
+                            <Form.Group>
+                              <Form.Label className="custom-report-form-label">
+                                <i className="fas fa-calendar"></i>
+                                Đến ngày
+                              </Form.Label>
+                              <Form.Control
+                                type="date"
+                                value={customReportDisplay === 'weekly_stats' ? (weeklyStatsFilters.endDate || customReportFilters.endDate) : customReportFilters.endDate}
+                                onChange={(e) => {
+                                  handleCustomReportFilterChange('endDate', e.target.value);
+                                  if (customReportDisplay === 'weekly_stats') {
+                                    setWeeklyStatsFilters(prev => ({ ...prev, endDate: e.target.value }));
+                                  }
+                                }}
+                                className="custom-report-form-control"
+                              />
+                            </Form.Group>
+                          </Col>
+                          <Col md={3}>
+                            <Form.Group>
+                              <Form.Label className="custom-report-form-label">
+                                <i className="fas fa-users"></i>
+                                Nhóm
+                              </Form.Label>
+                              <Form.Select
+                                value={customReportDisplay === 'weekly_stats' ? (weeklyStatsFilters.groupId || customReportFilters.groupId) : customReportFilters.groupId}
+                                onChange={(e) => {
+                                  handleCustomReportFilterChange('groupId', e.target.value);
+                                  if (customReportDisplay === 'weekly_stats') {
+                                    setWeeklyStatsFilters(prev => ({ ...prev, groupId: e.target.value }));
+                                    if (weeklyStatsGroupBy === 'group') {
+                                      setWeeklyStatsSelectedFilter(e.target.value);
+                                    }
+                                  }
+                                }}
+                                className="custom-report-form-control"
+                              >
+                                <option value="">Tất cả nhóm</option>
+                                {groups.map(group => (
+                                  <option key={group.id} value={group.id}>
+                                    {group.group_name || group.name}
+                                  </option>
+                                ))}
+                              </Form.Select>
+                            </Form.Group>
+                          </Col>
+                          <Col md={3}>
+                            <Form.Group>
+                              <Form.Label className="custom-report-form-label">
+                                <i className="fas fa-graduation-cap"></i>
+                                Lớp
+                              </Form.Label>
+                              <Form.Select
+                                value={customReportDisplay === 'weekly_stats' ? (weeklyStatsFilters.className || customReportFilters.className) : customReportFilters.className}
+                                onChange={(e) => {
+                                  handleCustomReportFilterChange('className', e.target.value);
+                                  if (customReportDisplay === 'weekly_stats') {
+                                    setWeeklyStatsFilters(prev => ({ ...prev, className: e.target.value }));
+                                    if (weeklyStatsGroupBy === 'class') {
+                                      setWeeklyStatsSelectedFilter(e.target.value);
+                                    }
+                                  }
+                                }}
+                                className="custom-report-form-control"
+                              >
+                                <option value="">Tất cả lớp</option>
+                                {availableClasses.map((className, index) => (
+                                  <option key={index} value={className}>
+                                    {className}
+                                  </option>
+                                ))}
+                              </Form.Select>
+                            </Form.Group>
+                          </Col>
+                        </Row>
+
+                        <Row className="mb-4">
+                          <Col md={3}>
+                            <Form.Group style={{ position: 'relative' }} className="student-search-container">
+                              <Form.Label className="custom-report-form-label">
+                                <i className="fas fa-user"></i>
+                                Tên sinh viên
+                              </Form.Label>
+                              <div style={{ position: 'relative' }}>
+                                <Form.Control
+                                  ref={studentSearchInputRef}
+                                  type="text"
+                                  placeholder="Tìm kiếm tên sinh viên..."
+                                  value={studentSearchTerm}
+                                  onChange={(e) => {
+                                    setStudentSearchTerm(e.target.value);
+                                    if (!e.target.value) {
+                                      setSelectedStudent(null);
+                                      handleCustomReportFilterChange('studentName', '');
+                                      if (customReportDisplay === 'weekly_stats') {
+                                        setWeeklyStatsFilters(prev => ({ ...prev, studentName: '' }));
+                                      }
+                                    }
+                                  }}
+                                  onFocus={() => {
+                                    if (studentSearchResults.length > 0) {
+                                      setShowStudentSearchResults(true);
+                                    }
+                                  }}
+                                  className="custom-report-form-control"
+                                />
+                                {showStudentSearchResults && studentSearchResults.length > 0 && (
+                                  <div 
+                                    ref={studentSearchDropdownRef}
+                                    className="custom-report-student-dropdown"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                  >
+                                    {studentSearchResults.map((student) => (
+                                      <div
+                                        key={student.id}
+                                        onClick={() => {
+                                          setSelectedStudent(student);
+                                          setStudentSearchTerm(student.full_name || student.name);
+                                          handleCustomReportFilterChange('studentName', student.full_name || student.name);
+                                          if (customReportDisplay === 'weekly_stats') {
+                                            setWeeklyStatsFilters(prev => ({ ...prev, studentName: student.full_name || student.name }));
+                                          }
+                                          setShowStudentSearchResults(false);
+                                        }}
+                                        className="custom-report-student-item"
+                                      >
+                                        <div style={{ fontWeight: '500' }}>{student.full_name || student.name}</div>
+                                        <small className="text-muted">
+                                          {student.student_id && `Mã: ${student.student_id}`}
+                                          {student.class_name && ` | Lớp: ${student.class_name}`}
+                                        </small>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              {selectedStudent && (
+                                <small className="text-muted d-block mt-1">
+                                  Đã chọn: <strong>{selectedStudent.full_name || selectedStudent.name}</strong>
+                                  <Button
+                                    variant="link"
+                                    size="sm"
+                                    className="p-0 ms-2"
+                                    onClick={() => {
+                                      setSelectedStudent(null);
+                                      setStudentSearchTerm('');
+                                      handleCustomReportFilterChange('studentName', '');
+                                      if (customReportDisplay === 'weekly_stats') {
+                                        setWeeklyStatsFilters(prev => ({ ...prev, studentName: '' }));
+                                      }
+                                    }}
+                                    style={{ fontSize: '0.75rem', padding: '0', textDecoration: 'none' }}
+                                  >
+                                    <i className="fas fa-times"></i>
+                                  </Button>
+                                </small>
+                              )}
+                            </Form.Group>
+                          </Col>
+                          <Col md={3}>
+                            <Form.Group>
+                              <Form.Label className="custom-report-form-label">
+                                <i className="fas fa-check-circle"></i>
+                                Loại điểm danh
+                              </Form.Label>
+                              <Form.Select
+                                value={customReportDisplay === 'weekly_stats' ? (weeklyStatsFilters.attendanceType || customReportFilters.attendanceType) : customReportFilters.attendanceType}
+                                onChange={(e) => {
+                                  handleCustomReportFilterChange('attendanceType', e.target.value);
+                                  if (customReportDisplay === 'weekly_stats') {
+                                    setWeeklyStatsFilters(prev => ({ ...prev, attendanceType: e.target.value }));
+                                  }
+                                }}
+                                className="custom-report-form-control"
+                              >
+                                <option value="">Tất cả</option>
+                                <option value="before">Trước giờ</option>
+                                <option value="during">Trong giờ</option>
+                                <option value="after">Sau giờ</option>
+                                <option value="early">Sớm</option>
+                                <option value="late">Đi trễ</option>
+                                <option value="late_before">Đi trễ (Trước)</option>
+                                <option value="late_leave">Về trễ</option>
+                                <option value="absent">Vắng</option>
+                                <option value="absent_perm">Phép cả buổi</option>
+                                <option value="absent_before_perm">Phép trước giờ</option>
+                                <option value="absent_during_perm">Phép trong giờ</option>
+                                <option value="absent_after_perm">Phép sau giờ</option>
+                              </Form.Select>
+                            </Form.Group>
+                          </Col>
+                          <Col md={3}>
+                            <Form.Group>
+                              <Form.Label className="custom-report-form-label">
+                                <i className="fas fa-map-marker-alt"></i>
+                                Địa điểm
+                              </Form.Label>
+                              <Form.Select
+                                value={customReportDisplay === 'weekly_stats' ? (weeklyStatsFilters.location || customReportFilters.location) : customReportFilters.location}
+                                onChange={(e) => {
+                                  handleCustomReportFilterChange('location', e.target.value);
+                                  if (customReportDisplay === 'weekly_stats') {
+                                    setWeeklyStatsFilters(prev => ({ ...prev, location: e.target.value }));
+                                    if (weeklyStatsGroupBy === 'location') {
+                                      setWeeklyStatsSelectedFilter(e.target.value);
+                                    }
+                                  }
+                                }}
+                                className="custom-report-form-control"
+                              >
+                                <option value="">Tất cả địa điểm</option>
+                                {predefinedLocations.map((location, index) => (
+                                  <option key={index} value={location.name}>
+                                    {location.name}
+                                  </option>
+                                ))}
+                              </Form.Select>
+                            </Form.Group>
+                          </Col>
+                          <Col md={3}>
+                            <Form.Group>
+                              <Form.Label className="custom-report-form-label">
+                                <i className="fas fa-university"></i>
+                                Khoa
+                              </Form.Label>
+                              <Form.Select
+                                value={customReportDisplay === 'weekly_stats' ? (weeklyStatsFilters.facultyName || customReportFilters.facultyName) : customReportFilters.facultyName}
+                                onChange={(e) => {
+                                  handleCustomReportFilterChange('facultyName', e.target.value);
+                                  if (customReportDisplay === 'weekly_stats') {
+                                    setWeeklyStatsFilters(prev => ({ ...prev, facultyName: e.target.value }));
+                                    if (weeklyStatsGroupBy === 'faculty') {
+                                      setWeeklyStatsSelectedFilter(e.target.value);
+                                    }
+                                  }
+                                }}
+                                className="custom-report-form-control"
+                              >
+                                <option value="">Tất cả khoa</option>
+                                {availableFaculties.map((faculty, index) => (
+                                  <option key={index} value={faculty}>
+                                    {faculty}
+                                  </option>
+                                ))}
+                              </Form.Select>
+                            </Form.Group>
+                          </Col>
+                        </Row>
+
+                        <Row>
+                          <Col md={12}>
+                            <div className="custom-report-actions">
+                              <button
+                                onClick={() => {
+                                  if (customReportDisplay === 'weekly_stats') {
+                                    fetchWeeklyStatistics();
+                                  } else {
+                                    fetchCustomReport(customReportFilters, 1);
+                                  }
+                                }}
+                                disabled={customReportLoading || weeklyStatsLoading}
+                                className="custom-report-btn custom-report-btn-primary"
+                              >
+                                {(customReportLoading || weeklyStatsLoading) ? (
+                                  <>
+                                    <div className="custom-report-loading-spinner" style={{ width: '16px', height: '16px', borderWidth: '2px', marginRight: '8px' }}></div>
+                                    Đang tải...
+                                  </>
+                                ) : (
+                                  <>
+                                    <i className="fas fa-search"></i>
+                                    Áp dụng bộ lọc
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setCustomReportFilters({
+                                    startDate: '',
+                                    endDate: '',
+                                    groupId: '',
+                                    className: '',
+                                    studentName: '',
+                                    attendanceType: '',
+                                    location: '',
+                                    facultyName: '',
+                                    sortField: 'session_date',
+                                    sortOrder: 'desc'
+                                  });
+                                  setWeeklyStatsFilters({
+                                    startDate: '',
+                                    endDate: '',
+                                    facultyName: '',
+                                    location: '',
+                                    className: '',
+                                    groupId: ''
+                                  });
+                                  setWeeklyStatsSelectedFilter('');
+                                  setCustomReportPagination(prev => ({ ...prev, page: 1 }));
+                                }}
+                                className="custom-report-btn custom-report-btn-secondary"
+                              >
+                                <i className="fas fa-redo"></i>
+                                Đặt lại
+                              </button>
+                              {(customReportDisplay === 'table' || customReportDisplay === 'bar' || customReportDisplay === 'line' || customReportDisplay === 'doughnut') && (
+                                <button
+                                  onClick={customReportDisplay === 'table' ? exportCustomReportToExcel : exportChartToExcel}
+                                  disabled={customReportLoading || customReportData.length === 0}
+                                  className="custom-report-btn custom-report-btn-success"
+                                >
+                                  <i className="fas fa-file-excel"></i>
+                                  Xuất Excel
+                                </button>
+                              )}
+                              {customReportDisplay === 'weekly_stats' && (
+                                <button
+                                  onClick={exportWeeklyStatsToExcel}
+                                  disabled={weeklyStatsLoading || weeklyStatsData.length === 0}
+                                  className="custom-report-btn custom-report-btn-success"
+                                >
+                                  <i className="fas fa-file-excel"></i>
+                                  Xuất Excel
+                                </button>
+                              )}
+                            </div>
+                          </Col>
+                        </Row>
+                      </div>
+                    </div>
+
+                    {/* Results Section */}
+                    {customReportLoading ? (
+                      <div className="custom-report-card">
+                        <div className="custom-report-loading">
+                          <div className="custom-report-loading-spinner"></div>
+                          <p style={{ marginTop: '16px', color: 'var(--cr-gray-500)', fontSize: '14px' }}>Đang tải dữ liệu...</p>
+                        </div>
+                      </div>
+                    ) : customReportDisplay === 'table' ? (
+                      <>
+                        {/* Table View */}
+                        <div className="custom-report-card" ref={customReportSectionRef}>
+                          <div className="custom-report-card-header">
+                            <div className="custom-report-card-header-icon">
+                              <i className="fas fa-table"></i>
+                            </div>
+                            <h6 className="mb-0">Kết quả tìm kiếm</h6>
+                            <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                              <span className="custom-report-badge custom-report-badge-success">
+                                {customReportData.length} dòng
+                              </span>
+                              <span className="custom-report-badge custom-report-badge-primary">
+                                Tổng: {customReportPagination.totalItems}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="custom-report-card-body">
+                            <div className="table-responsive">
+                              <DndContext
+                                sensors={sensors}
+                                collisionDetection={closestCenter}
+                                onDragEnd={handleDragEnd}
+                              >
+                              <Table className="custom-report-table" striped bordered hover>
+                                  <thead className="table-light">
+                                    <tr>
+                                      <th style={{ width: '50px' }}>#</th>
+                                      <SortableContext
+                                        items={customReportColumns}
+                                        strategy={horizontalListSortingStrategy}
+                                      >
+                                        {customReportColumns.map((columnKey) => {
+                                          const label = columnLabels[columnKey] || columnKey;
+                                          return (
+                                            <SortableHeader
+                                              key={columnKey}
+                                              id={columnKey}
+                                              onSort={() => handleCustomReportSort(columnKey)}
+                                              sortField={customReportFilters.sortField}
+                                              sortOrder={customReportFilters.sortOrder}
+                                            >
+                                              {label}
+                                            </SortableHeader>
+                                          );
+                                        })}
+                                      </SortableContext>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                  {customReportData.length > 0 ? (
+                                    customReportData.map((record, index) => (
+                                      <tr key={`${record.id}-${record.session_id}-${record.student_id}-${index}`}>
+                                        <td>{(customReportPagination.page - 1) * customReportPagination.limit + index + 1}</td>
+                                        {customReportColumns.map((columnKey) => {
+                                          switch (columnKey) {
+                                            case 'student_name':
+                                              return <td key={columnKey}>{record.student_name}</td>;
+                                            case 'student_code':
+                                              return <td key={columnKey}>{record.student_code}</td>;
+                                            case 'student_email':
+                                              return <td key={columnKey}>{record.student_email}</td>;
+                                            case 'class_name':
+                                              return <td key={columnKey}>{record.class_name}</td>;
+                                            case 'faculty_name':
+                                              return <td key={columnKey}>{record.faculty_name}</td>;
+                                            case 'gender':
+                                              return (
+                                                <td key={columnKey}>
+                                                  {(() => {
+                                                    const gender = record.gender;
+                                                    if (gender === null || gender === undefined || gender === '') {
+                                                      return 'Chưa có';
+                                                    } else if (gender === 'female' || gender === 'Female' || gender === 'Nữ') {
+                                                      return 'Nam';
+                                                    } else if (gender === 'male' || gender === 'Male' || gender === 'Nam') {
+                                                      return 'Nữ';
+                                                    } else if (gender === 'other' || gender === 'Khác') {
+                                                      return 'Khác';
+                                                    } else {
+                                                      return gender || 'Chưa có';
+                                                    }
+                                                  })()}
+                                                </td>
+                                              );
+                                            case 'session_title':
+                                              return <td key={columnKey}>{record.session_title}</td>;
+                                            case 'session_date':
+                                              return <td key={columnKey}>{record.session_date ? formatDate(record.session_date) : ''}</td>;
+                                            case 'session_location':
+                                              return <td key={columnKey}>{record.session_location}</td>;
+                                            case 'group_name':
+                                              return <td key={columnKey}>{formatGroupName(record.group_name)}</td>;
+                                            case 'attendance_type':
+                                              return (
+                                                <td key={columnKey}>
+                                                  <Badge bg={getAttendanceTypeBadgeColor(record.attendance_type)}>
+                                                    {getAttendanceTypeLabel(record.attendance_type)}
+                                                  </Badge>
+                                                </td>
+                                              );
+                                            case 'timestamp':
+                                              return <td key={columnKey}>{record.timestamp ? new Date(record.timestamp).toLocaleString('vi-VN') : ''}</td>;
+                                            case 'minutes_early':
+                                              return <td key={columnKey}>{record.minutes_early || '-'}</td>;
+                                            case 'minutes_late':
+                                              return <td key={columnKey}>{record.minutes_late || '-'}</td>;
+                                            case 'device_mac':
+                                              return <td key={columnKey}><small>{record.device_mac || '-'}</small></td>;
+                                            case 'ip_address':
+                                              return <td key={columnKey}><small>{record.ip_address || '-'}</small></td>;
+                                            default:
+                                              return <td key={columnKey}>-</td>;
+                                          }
+                                        })}
+                                      </tr>
+                                    ))
+                                  ) : (
+                                    <tr>
+                                      <td colSpan={customReportColumns.length + 1} className="text-center py-5">
+                                        <div className="custom-report-empty">
+                                          <div className="custom-report-empty-icon">
+                                            <i className="fas fa-inbox"></i>
+                                          </div>
+                                          <p className="custom-report-empty-text">Không có dữ liệu phù hợp với bộ lọc</p>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </Table>
+                            </DndContext>
+                            </div>
+
+                            {/* Pagination Controls */}
+                            <div className="mt-3">
+                              {customReportData.length > 0 ? (
+                                <Pagination
+                                  currentPage={customReportPagination.page}
+                                  totalPages={customReportPagination.totalPages || 1}
+                                  onPageChange={(page) => {
+                                    console.log(`📄 Changing to page ${page} (Total pages: ${customReportPagination.totalPages}, Total items: ${customReportPagination.totalItems})`);
+                                    setCustomReportPagination(prev => ({ ...prev, page }));
+                                    // Scroll to the custom report section instead of top of page
+                                    if (customReportSectionRef.current) {
+                                      customReportSectionRef.current.scrollIntoView({ 
+                                        behavior: 'smooth', 
+                                        block: 'start' 
+                                      });
+                                    }
+                                  }}
+                                />
+                              ) : (
+                                <div className="text-center text-muted py-2">
+                                  <small>Chưa có dữ liệu. Vui lòng áp dụng bộ lọc để xem kết quả.</small>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    ) : customReportDisplay === 'weekly_stats' ? (
+                      <>
+                        {/* Weekly Statistics View */}
+                        <div className="custom-report-card" ref={weeklyStatsSectionRef}>
+                          <div className="custom-report-card-header">
+                            <div className="custom-report-card-header-icon">
+                              <i className="fas fa-calendar-week"></i>
+                            </div>
+                            <h6 className="mb-0">
+                              Thống kê theo tuần - {
+                                weeklyStatsGroupBy === 'faculty' ? 'Theo Khoa' :
+                                weeklyStatsGroupBy === 'location' ? 'Theo Bệnh viện' :
+                                weeklyStatsGroupBy === 'class' ? 'Theo Lớp' :
+                                weeklyStatsGroupBy === 'group' ? 'Theo Nhóm' :
+                                'Theo Tên buổi học'
+                              }
+                            </h6>
+                            <span className="custom-report-badge custom-report-badge-primary" style={{ marginLeft: 'auto' }}>
+                              {weeklyStatsData.length} kết quả
+                            </span>
+                          </div>
+                          <div className="custom-report-card-body">
+                            <div className="table-responsive">
+                              <DndContext
+                                sensors={sensors}
+                                collisionDetection={closestCenter}
+                                onDragEnd={handleWeeklyStatsDragEnd}
+                              >
+                              <Table className="custom-report-table" striped bordered hover>
+                                  <thead className="table-light">
+                                    <tr>
+                                      <th style={{ width: '50px' }}>#</th>
+                                      <SortableContext
+                                        items={weeklyStatsColumns}
+                                        strategy={horizontalListSortingStrategy}
+                                      >
+                                        {weeklyStatsColumns.map((columnKey) => {
+                                          const label = getWeeklyStatsColumnLabel(columnKey, weeklyStatsGroupBy);
+                                          return (
+                                            <SortableHeader
+                                              key={columnKey}
+                                              id={columnKey}
+                                              onSort={() => handleWeeklyStatsSort(columnKey)}
+                                              sortField={weeklyStatsSortField}
+                                              sortOrder={weeklyStatsSortOrder}
+                                            >
+                                              {label}
+                                            </SortableHeader>
+                                          );
+                                        })}
+                                      </SortableContext>
+                                    </tr>
+                                  </thead>
+                                <tbody>
+                                  {paginatedWeeklyStatsData.length > 0 ? (
+                                    paginatedWeeklyStatsData.map((stat, index) => (
+                                      <tr 
+                                        key={index}
+                                        style={{ cursor: 'pointer' }}
+                                        onClick={() => fetchWeeklyStatisticsDetail(stat)}
+                                        title="Click để xem chi tiết"
+                                      >
+                                        <td>{(weeklyStatsPage - 1) * weeklyStatsItemsPerPage + index + 1}</td>
+                                        {weeklyStatsColumns.map((columnKey) => {
+                                          switch (columnKey) {
+                                            case 'group_key':
+                                              return <td key={columnKey}><strong>{stat.group_key || '-'}</strong></td>;
+                                            case 'sub_group':
+                                              return <td key={columnKey}>{stat.sub_group || '-'}</td>;
+                                            case 'week':
+                                              return (
+                                                <td key={columnKey}>
+                                                  <small>
+                                                    {new Date(stat.week_start).toLocaleDateString('vi-VN')} 
+                                                    {' - '}
+                                                    {new Date(stat.week_end).toLocaleDateString('vi-VN')}
+                                                  </small>
+                                                </td>
+                                              );
+                                            case 'student_count':
+                                              return (
+                                                <td key={columnKey} style={{ textAlign: 'center' }}>
+                                                  <Badge 
+                                                    bg="success" 
+                                                    style={{ cursor: 'pointer', fontSize: '1rem' }}
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      fetchWeeklyStatisticsDetail(stat);
+                                                    }}
+                                                  >
+                                                    {stat.student_count}
+                                                  </Badge>
+                                                </td>
+                                              );
+                                            case 'classes':
+                                              return (
+                                                <td key={columnKey} style={{ textAlign: 'center' }}>
+                                                  <OverlayTrigger
+                                                    placement="top"
+                                                    overlay={
+                                                      <Tooltip>
+                                                        {stat.classes && stat.classes.length > 0 
+                                                          ? stat.classes.join(', ') 
+                                                          : 'Chưa có thông tin'}
+                                                      </Tooltip>
+                                                    }
+                                                  >
+                                                    <Badge bg="info" style={{ cursor: 'help' }}>
+                                                      {stat.classes ? stat.classes.length : 0}
+                                                    </Badge>
+                                                  </OverlayTrigger>
+                                                </td>
+                                              );
+                                            case 'session_count':
+                                              return (
+                                                <td key={columnKey} style={{ textAlign: 'center' }}>
+                                                  <Badge bg="primary">{stat.session_count}</Badge>
+                                                </td>
+                                              );
+                                            case 'attendance_count':
+                                              return (
+                                                <td key={columnKey} style={{ textAlign: 'center' }}>
+                                                  <Badge bg="secondary">{stat.attendance_count}</Badge>
+                                                </td>
+                                              );
+                                            default:
+                                              return <td key={columnKey}>-</td>;
+                                          }
+                                        })}
+                                      </tr>
+                                    ))
+                                  ) : (
+                                    <tr>
+                                      <td colSpan={weeklyStatsColumns.length + 1} className="text-center py-5">
+                                        <div className="custom-report-empty">
+                                          <div className="custom-report-empty-icon">
+                                            <i className="fas fa-inbox"></i>
+                                          </div>
+                                          <p className="custom-report-empty-text">Không có dữ liệu thống kê</p>
+                                          <p className="custom-report-empty-subtext">Vui lòng chọn khoảng thời gian và áp dụng bộ lọc</p>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </Table>
+                            </DndContext>
+                            </div>
+
+                            {/* Pagination Controls for Weekly Statistics */}
+                            {sortedWeeklyStatsData.length > 0 && (
+                              <div className="mt-3">
+                                <Pagination
+                                  currentPage={weeklyStatsPage}
+                                  totalPages={weeklyStatsTotalPages}
+                                  onPageChange={(page) => {
+                                    setWeeklyStatsPage(page);
+                                    // Scroll to the weekly stats section instead of top of page
+                                    if (weeklyStatsSectionRef.current) {
+                                      weeklyStatsSectionRef.current.scrollIntoView({ 
+                                        behavior: 'smooth', 
+                                        block: 'start' 
+                                      });
+                                    }
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      /* Chart View */
+                      <div className="custom-report-card">
+                        <div className="custom-report-card-header">
+                          <div className="custom-report-card-header-icon">
+                            <i className="fas fa-chart-bar"></i>
+                          </div>
+                          <h6 className="mb-0">Biểu đồ phân tích</h6>
+                        </div>
+                        <div className="custom-report-card-body">
+                          {renderCustomReportChart()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </Tab>
+
               </Tabs>
+
+              {/* Weekly Statistics Detail Modal */}
+              <Modal 
+                show={showWeeklyStatsDetailModal} 
+                onHide={() => setShowWeeklyStatsDetailModal(false)} 
+                size="xl"
+                className="student-detail-modal"
+              >
+                <Modal.Header closeButton className="student-detail-header">
+                  <Modal.Title className="student-detail-title">
+                    <div className="student-avatar">
+                      <i className="fas fa-list-alt"></i>
+                    </div>
+                    <div>
+                      <h4 className="mb-0">Chi tiết thống kê</h4>
+                      <p className="mb-0 student-subtitle">
+                        {selectedWeeklyStat?.group_key} - {selectedWeeklyStat?.sub_group}
+                        {' | '}
+                        Tuần: {selectedWeeklyStat && new Date(selectedWeeklyStat.week_start).toLocaleDateString('vi-VN')}
+                        {' - '}
+                        {selectedWeeklyStat && new Date(selectedWeeklyStat.week_end).toLocaleDateString('vi-VN')}
+                      </p>
+                    </div>
+                  </Modal.Title>
+                </Modal.Header>
+                <Modal.Body className="student-detail-body">
+                  {weeklyStatsDetailLoading ? (
+                    <div className="text-center py-5">
+                      <Spinner animation="border" variant="primary" />
+                      <p className="mt-3">Đang tải chi tiết...</p>
+                    </div>
+                  ) : (
+                    <div className="student-detail-container">
+                      <div className="session-card">
+                        <div className="card-header-modern">
+                          <div className="header-icon">
+                            <i className="fas fa-users"></i>
+                          </div>
+                          <h6 className="mb-0">Danh sách sinh viên ({weeklyStatsDetailData.length})</h6>
+                          <Button
+                            variant="success"
+                            size="sm"
+                            onClick={exportWeeklyStatsDetailToExcel}
+                            disabled={weeklyStatsDetailData.length === 0}
+                          >
+                            <i className="fas fa-file-excel me-1"></i>
+                            Xuất Excel
+                          </Button>
+                        </div>
+                        <div className="card-body-modern">
+                          <div className="table-responsive" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                            <Table striped bordered hover size="sm">
+                              <thead className="table-light sticky-top">
+                                <tr>
+                                  <th>#</th>
+                                  <th>Mã SV</th>
+                                  <th>Họ và tên</th>
+                                  <th>Lớp</th>
+                                  <th>Khoa</th>
+                                  <th>Giới tính</th>
+                                  <th>Tên buổi học</th>
+                                  <th>Ngày học</th>
+                                  <th>Địa điểm</th>
+                                  <th>Loại điểm danh</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {weeklyStatsDetailData.map((record, index) => (
+                                  <tr key={index}>
+                                    <td>{index + 1}</td>
+                                    <td><Badge bg="secondary">{record.student_code}</Badge></td>
+                                    <td>{record.student_name}</td>
+                                    <td><Badge bg="info">{record.class_name}</Badge></td>
+                                    <td>{record.faculty_name}</td>
+                                    <td>
+                                      {record.gender === null || record.gender === undefined || record.gender === '' ? 'Chưa có' :
+                                       record.gender === 'female' || record.gender === 'Female' || record.gender === 'Nữ' ? 'Nam' :
+                                       record.gender === 'male' || record.gender === 'Male' || record.gender === 'Nam' ? 'Nữ' :
+                                       record.gender === 'other' || record.gender === 'Khác' ? 'Khác' : 'Chưa có'}
+                                    </td>
+                                    <td><small>{record.session_title}</small></td>
+                                    <td><small>{formatDate(record.session_date)}</small></td>
+                                    <td><small>{record.session_location}</small></td>
+                                    <td>
+                                      <Badge bg={getAttendanceTypeBadgeColor(record.attendance_type)}>
+                                        {getAttendanceTypeLabel(record.attendance_type)}
+                                      </Badge>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </Table>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </Modal.Body>
+                <Modal.Footer className="student-detail-footer">
+                  <Button 
+                    variant="outline-secondary" 
+                    onClick={() => setShowWeeklyStatsDetailModal(false)}
+                    className="btn-cancel"
+                  >
+                    <i className="fas fa-times me-2"></i>
+                    Đóng
+                  </Button>
+                </Modal.Footer>
+              </Modal>
           </div>
             )}
             
-            {/* Loading state */}
+            {/* Loading state with progress */}
             {loading && (
               <div className="text-center py-5">
-                <Spinner animation="border" variant="primary" />
-                <p className="mt-3">Đang tải dữ liệu điểm danh...</p>
+                <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+                  <Spinner animation="border" variant="primary" style={{ width: '3rem', height: '3rem' }} />
+                  <h5 className="mt-4 mb-3" style={{ color: '#2c3e50', fontWeight: '600' }}>
+                    {loadingMessage}
+                  </h5>
+                  
+                  {/* Progress Bar */}
+                  <div style={{ position: 'relative', marginTop: '2rem' }}>
+                    <ProgressBar 
+                      now={loadingProgress} 
+                      animated 
+                      striped
+                      variant={loadingProgress < 30 ? 'info' : loadingProgress < 70 ? 'primary' : 'success'}
+                      style={{ height: '25px', borderRadius: '12px' }}
+                      label={`${Math.round(loadingProgress)}%`}
+                    />
+                  </div>
+                  
+
+                  
+                  <p className="mt-3 text-muted" style={{ fontSize: '0.85rem' }}>
+                    <i className="fas fa-clock me-1"></i>
+                    Vui lòng chờ trong giây lát...
+                  </p>
+                </div>
               </div>
             )}
-      </div>
+      </Container>
     </>
   );
 };

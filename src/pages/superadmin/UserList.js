@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Badge, Form, Modal, Alert, Spinner } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthContext';
-import '../../styles/calendar.css';
+import usePageTitle from '../../hooks/usePageTitle';
+import '../../styles/user.css';
 
 const UserList = () => {
+  usePageTitle('Danh sách người dùng');
   const { currentUser } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);

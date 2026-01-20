@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Form, Button, Container, Row, Col, Alert, InputGroup, ProgressBar } from 'react-bootstrap';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import usePageTitle from '../../hooks/usePageTitle';
 import '../../styles/auth.css';
 
 const ResetPassword = () => {
+  usePageTitle('Đặt lại mật khẩu');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -32,6 +34,8 @@ const ResetPassword = () => {
 
   useEffect(() => {
     setMounted(true);
+    // Add auth-page class to body
+    document.body.classList.add('auth-page');
     
     // Get token from URL query parameters
     const params = new URLSearchParams(location.search);
@@ -51,7 +55,11 @@ const ResetPassword = () => {
       setTokenExpired(true);
     }
     
-    return () => setMounted(false);
+    return () => {
+      setMounted(false);
+      // Remove auth-page class from body
+      document.body.classList.remove('auth-page');
+    };
   }, [location]);
   
   // Thêm hàm kiểm tra độ mạnh mật khẩu
@@ -171,10 +179,17 @@ const ResetPassword = () => {
           <div className={`auth-form-container ${mounted ? 'fade-in' : ''}`}>
             <div className="auth-form">
               <div className="auth-logo">
-                <h2>PCTU Clinical</h2>
+                <h2>PCTU IMS</h2>
+                <div className="university-badge">
+                  <i className="fas fa-graduation-cap medical-icon"></i>
+                  Trường Đại học Phan Châu Trinh
+                </div>
               </div>
               
-              <h4 className="auth-heading">Đặt lại mật khẩu</h4>
+              <h4 className="auth-heading">
+                <i className="fas fa-lock medical-icon"></i>
+                Đặt lại mật khẩu
+              </h4>
               
               {error && <Alert variant="danger">{error}</Alert>}
               {success && <Alert variant="success">{success}</Alert>}
@@ -189,7 +204,10 @@ const ResetPassword = () => {
                   </p>
                   
                   <Form.Group className="mb-3" controlId="formPassword">
-                    <Form.Label>Mật khẩu mới</Form.Label>
+                    <Form.Label>
+                      <i className="fas fa-lock medical-icon"></i>
+                      Mật khẩu mới
+                    </Form.Label>
                     <InputGroup>
                       <InputGroup.Text>
                         <i className="fas fa-lock"></i>
@@ -243,7 +261,10 @@ const ResetPassword = () => {
                   </Form.Group>
                   
                   <Form.Group className="mb-3" controlId="formConfirmPassword">
-                    <Form.Label>Xác nhận mật khẩu</Form.Label>
+                    <Form.Label>
+                      <i className="fas fa-lock medical-icon"></i>
+                      Xác nhận mật khẩu
+                    </Form.Label>
                     <InputGroup>
                       <InputGroup.Text>
                         <i className="fas fa-lock"></i>
@@ -274,8 +295,21 @@ const ResetPassword = () => {
                   <Button 
                     variant="primary" 
                     type="submit" 
-                    className="w-100 mt-3" 
+                    className="w-100 mt-4" 
                     disabled={loading || success || !isFormValid()}
+                    style={{
+                      borderRadius: '25px',
+                      padding: '14px 32px',
+                      fontWeight: '500',
+                      fontSize: '16px',
+                      letterSpacing: '-0.01em',
+                      border: 'none',
+                      background: (loading || success || !isFormValid()) ? '#314691' : '#314691',
+                      color: (loading || success || !isFormValid()) ? '#8E8E93' : '#ffffff',
+                      boxShadow: (loading || success || !isFormValid()) ? 'none' : '0 2px 8px rgba(0, 122, 255, 0.2)',
+                      transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                      cursor: (loading || success || !isFormValid()) ? 'not-allowed' : 'pointer'
+                    }}
                   >
                     {loading ? (
                       <>
@@ -295,13 +329,31 @@ const ResetPassword = () => {
                   <div className="step-icon mb-3">
                     <i className="fas fa-exclamation-triangle"></i>
                   </div>
-                  <p className="mb-4">Token đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.</p>
-                  <p className="mb-4">Vui lòng yêu cầu đặt lại mật khẩu mới.</p>
+                  <p className="mb-4" style={{color: '#dc2626', fontWeight: '600'}}>
+                    Token đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.
+                  </p>
+                  <p className="mb-4" style={{color: '#64748b'}}>
+                    Vui lòng yêu cầu đặt lại mật khẩu mới.
+                  </p>
                   <Button 
                     as={Link} 
                     to="/forgot-password" 
                     variant="primary"
                     className="w-100"
+                    style={{
+                      borderRadius: '25px',
+                      padding: '14px 32px',
+                      fontWeight: '500',
+                      fontSize: '16px',
+                      letterSpacing: '-0.01em',
+                      border: 'none',
+                      background: '#314691',
+                      color: '#ffffff',
+                      boxShadow: '0 2px 8px rgba(0, 122, 255, 0.2)',
+                      transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                      textDecoration: 'none',
+                      display: 'block'
+                    }}
                   >
                     <i className="fas fa-arrow-repeat me-2"></i>
                     Yêu cầu đặt lại mật khẩu
@@ -310,7 +362,10 @@ const ResetPassword = () => {
               )}
               
               <div className="auth-footer mt-4">
-                <Link to="/login">Quay lại đăng nhập</Link>
+                <Link to="/login">
+                  <i className="fas fa-arrow-left me-1"></i>
+                  Quay lại đăng nhập
+                </Link>
               </div>
             </div>
           </div>

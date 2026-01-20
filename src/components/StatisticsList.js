@@ -22,21 +22,20 @@ const StatisticsList = ({
     late: (item) => (
       <div key={`late-${item.id}-${item.session_id}`} className="modern-list-item">
         <div className="d-flex align-items-center">
-          <div className="modern-list-avatar bg-warning">
-            <i className="fas fa-user-clock"></i>
-          </div>
           <div className="modern-list-content">
-            <h6 className="modern-list-title">{item.full_name}</h6>
+            <div className="d-flex align-items-center justify-content-start">
+              <h6 className="modern-list-title">{item.full_name}</h6>
+              {item.minutes_late && (
+                <span className="modern-badge modern-badge-warning ms-2">
+                  Trễ {Math.round(item.minutes_late)} phút
+                </span>
+              )}
+            </div>
             <div className="modern-list-meta">
               <span className="modern-list-meta-item">
                 <i className="fas fa-calendar-day me-1"></i>
                 {item.session_title || 'Buổi học'}
               </span>
-              {item.minutes_late && (
-                <span className="modern-badge modern-badge-warning">
-                  Trễ {Math.round(item.minutes_late)} phút
-                </span>
-              )}
             </div>
           </div>
         </div>
@@ -46,23 +45,16 @@ const StatisticsList = ({
     absent: (item) => (
       <div key={`absent-${item.id}-${item.session_id}`} className="modern-list-item">
         <div className="d-flex align-items-center">
-          <div className="modern-list-avatar bg-danger">
-            <i className="fas fa-user-slash"></i>
-          </div>
           <div className="modern-list-content">
-            <h6 className="modern-list-title">{item.full_name}</h6>
+            <div className="d-flex align-items-center justify-content-start">
+              <h6 className="modern-list-title">{item.full_name}</h6>
+              <span className="modern-badge modern-badge-danger ms-2">Vắng mặt</span>
+            </div>
             <div className="modern-list-meta">
               <span className="modern-list-meta-item">
                 <i className="fas fa-calendar-day me-1"></i>
                 {item.session_title || 'Buổi học'}
               </span>
-              {item.session_date && (
-                <span className="modern-list-meta-item">
-                  <i className="fas fa-clock me-1"></i>
-                  {formatDate(item.session_date)}
-                </span>
-              )}
-              <span className="modern-badge modern-badge-danger">Vắng mặt</span>
             </div>
           </div>
         </div>
@@ -72,18 +64,17 @@ const StatisticsList = ({
     missingTimeSlot: (item) => (
       <div key={`missing-${item.id}-${item.session_id}`} className="modern-list-item">
         <div className="d-flex align-items-center">
-          <div className="modern-list-avatar bg-warning">
-            <i className="fas fa-exclamation-triangle"></i>
-          </div>
           <div className="modern-list-content">
-            <h6 className="modern-list-title">{item.full_name}</h6>
+            <div className="d-flex align-items-center justify-content-start">
+              <h6 className="modern-list-title">{item.full_name}</h6>
+              <span className="modern-badge modern-badge-warning ms-2">
+                {item.missing_type || 'Thiếu khung giờ điểm danh'}
+              </span>
+            </div>
             <div className="modern-list-meta">
               <span className="modern-list-meta-item">
                 <i className="fas fa-calendar-day me-1"></i>
                 {item.session_title || 'Buổi học'}
-              </span>
-              <span className="modern-badge modern-badge-warning">
-                {item.missing_type || 'Thiếu khung giờ điểm danh'}
               </span>
             </div>
           </div>
@@ -94,13 +85,10 @@ const StatisticsList = ({
     multipleLate: (item) => (
       <div key={`multiple-late-${item.id}`} className="modern-list-item">
         <div className="d-flex align-items-center">
-          <div className="modern-list-avatar bg-danger">
-            <i className="fas fa-user-clock"></i>
-          </div>
           <div className="modern-list-content">
-            <h6 className="modern-list-title">{item.full_name}</h6>
-            <div className="modern-list-meta">
-              <span className="modern-badge modern-badge-danger">
+            <div className="d-flex align-items-center justify-content-start">
+              <h6 className="modern-list-title">{item.full_name}</h6>
+              <span className="modern-badge modern-badge-danger ms-2">
                 Đi trễ {item.late_count} lần
               </span>
             </div>
@@ -112,11 +100,11 @@ const StatisticsList = ({
     incompleteBadge: (item) => (
       <div key={`absence-${item.id}-${item.request_id}`} className="modern-list-item">
         <div className="d-flex align-items-center">
-          <div className="modern-list-avatar bg-info">
-            <i className="fas fa-id-badge"></i>
-          </div>
           <div className="modern-list-content">
-            <h6 className="modern-list-title">{item.full_name}</h6>
+            <div className="d-flex align-items-center justify-content-start">
+              <h6 className="modern-list-title">{item.full_name}</h6>
+              <span className="modern-badge modern-badge-info ms-2">Chờ duyệt</span>
+            </div>
             <div className="modern-list-meta">
               <span className="modern-list-meta-item">
                 <i className="fas fa-calendar-day me-1"></i>
@@ -128,7 +116,6 @@ const StatisticsList = ({
                   {formatDate(item.session_date)}
                 </span>
               )}
-              <span className="modern-badge modern-badge-info">Chờ duyệt</span>
             </div>
           </div>
         </div>

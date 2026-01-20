@@ -1,235 +1,558 @@
-/* Auth Form Styles */
+/* Hide navigation on auth pages */
+body.auth-page {
+  overflow-x: hidden;
+}
+
+body.auth-page .vertical-navbar {
+  display: none !important;
+}
+
+body.auth-page .mobile-toggle {
+  display: none !important;
+}
+
+body.auth-page .mobile-bottom-nav {
+  display: none !important;
+}
+
+body.auth-page .top-header {
+  display: none !important;
+}
+
+body.auth-page .main-content {
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+}
+
+body.auth-page .main-content-with-header {
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Auth Form Styles - Medical Theme */
 .auth-form-container {
   max-width: 500px;
   margin: 2rem auto;
   opacity: 0;
   transition: opacity 0.5s ease-in-out;
+  position: relative;
 }
 
 .fade-in {
   opacity: 1;
 }
 
-.auth-form {
-  background-color: #ffffff;
-  border-radius: 10px;
-  padding: 2rem;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-  position: relative;
+/* Background images for different devices */
+.auth-form-container::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url('./image/CAMPUS-06.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  z-index: -1;
+  opacity: 0.8;
 }
+
+/* Mobile background */
+@media (max-width: 768px) {
+  .auth-form-container::before {
+    background-image: url('./image/IMG_1713.jpg');
+    opacity: 0.9;
+    background-attachment: scroll;
+  }
+}
+
+.auth-form {
+  background: rgba(255, 255, 255, 0.151);
+  border-radius: 20px;
+  padding: 2.5rem;
+  box-shadow: 0 20px 60px rgba(36, 53, 113, 0.15);
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+
 
 .auth-logo {
   text-align: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
+  position: relative;
 }
 
 .auth-logo h2 {
-  color: #d40000;
-  font-weight: 700;
+  color: #243571;
+  font-weight: 800;
+  font-size: 2.2rem;
+  margin-bottom: 0.5rem;
+  text-shadow: 0 2px 8px rgba(255, 255, 255, 0.8), 0 4px 16px rgba(36, 53, 113, 0.3);
+}
+
+.auth-logo .subtitle {
+  color: #6b7280;
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin: 0;
 }
 
 .auth-heading {
   text-align: center;
-  color: #343a40;
+  color: #243571;
   margin-bottom: 1.5rem;
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 1.5rem;
+  text-shadow: 0 2px 4px rgba(255, 255, 255, 0.6);
 }
 
 .auth-footer {
-  margin-top: 1.5rem;
+  margin-top: 2rem;
   text-align: center;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(36, 53, 113, 0.1);
 }
 
 .auth-footer a {
-  color: #d40000;
+  color: #243571;
   text-decoration: none;
+  font-weight: 600;
+  transition: all 0.3s ease;
 }
 
 .auth-footer a:hover {
+  color: #4a6fa5;
   text-decoration: underline;
 }
 
-/* Step Progress */
+/* Step Progress - Medical Theme */
 .step-progress {
   margin-bottom: 2rem;
 }
 
 .progress {
-  height: 6px;
-  border-radius: 3px;
+  height: 8px;
+  border-radius: 10px;
+  background-color: rgba(0, 55, 253, 0.1);
+  overflow: hidden;
 }
 
 .progress-bar {
-  background: linear-gradient(90deg, #d40000, #ff4d4d);
+  background: linear-gradient(90deg, #243571, #4a6fa5, #6b9bd2);
   transition: width 0.5s ease;
+  border-radius: 10px;
 }
 
 .step-indicators {
   display: flex;
   justify-content: space-between;
-  margin-top: 0.5rem;
+  margin-top: 1rem;
 }
 
 .step-indicator {
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
-  background-color: #e9ecef;
+  background: linear-gradient(135deg, #f1f5f9, #e2e8f0);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 600;
-  color: #6c757d;
+  font-weight: 700;
+  color: #64748b;
   transition: all 0.3s ease;
+  border: 2px solid transparent;
+  position: relative;
 }
 
 .step-indicator.active {
-  background-color: #d40000;
+  background: linear-gradient(135deg, #243571, #4a6fa5);
   color: #ffffff;
-  box-shadow: 0 0 0 3px rgba(212, 0, 0, 0.2);
+  box-shadow: 0 4px 15px rgba(36, 53, 113, 0.3);
+  transform: scale(1.1);
+}
+
+.step-indicator.completed {
+  background: linear-gradient(135deg, #10b981, #34d399);
+  color: #ffffff;
+}
+
+.step-indicator.completed::after {
+  content: '✓';
+  font-size: 1.2rem;
 }
 
 .step-labels {
   display: flex;
   justify-content: space-between;
-  font-size: 0.8rem;
-  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  margin-top: 0.75rem;
 }
 
 .step-label {
   width: 33.333%;
   text-align: center;
-  color: #6c757d;
+  color: #64748b;
   transition: all 0.3s ease;
+  font-weight: 500;
 }
 
 .step-label.active {
-  color: #d40000;
-  font-weight: 600;
+  color: #243571;
+  font-weight: 700;
 }
 
-/* Step Form */
+/* Step Form - Medical Theme */
 .step-icon {
-  width: 60px;
-  height: 60px;
+  width: 80px;
+  height: 80px;
   border-radius: 50%;
-  background-color: #f8f9fa;
+  background: linear-gradient(135deg, #f0f4ff, #e0e7ff);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.5rem;
-  color: #d40000;
-  margin: 0 auto 1rem;
-  border: 2px solid rgba(212, 0, 0, 0.2);
+  font-size: 2rem;
+  color: #243571;
+  margin: 0 auto 1.5rem;
+  border: 3px solid rgba(36, 53, 113, 0.1);
+  box-shadow: 0 8px 25px rgba(36, 53, 113, 0.1);
+  transition: all 0.3s ease;
+}
+
+.step-icon:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 35px rgba(36, 53, 113, 0.2);
 }
 
 .step-description {
   text-align: center;
-  margin-bottom: 1.5rem;
-  color: #6c757d;
+  margin-bottom: 2rem;
+  color: #64748b;
+  font-size: 1rem;
+  line-height: 1.6;
+  font-weight: 500;
 }
 
-/* Verification Code Input */
+/* Verification Code Input - Medical Theme */
 .verification-code {
-  letter-spacing: 2px;
-  font-size: 1.2rem;
+  letter-spacing: 3px;
+  font-size: 1.4rem;
   text-align: center;
+  font-weight: 600;
+  color: #243571;
 }
 
-/* Profile Page */
+/* Profile Page - Medical Theme */
 .profile-card {
-  background-color: #ffffff;
-  border-radius: 10px;
-  padding: 2rem;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  padding: 2.5rem;
+  box-shadow: 0 20px 60px rgba(36, 53, 113, 0.15);
   opacity: 0;
   transition: opacity 0.5s ease-in-out;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .profile-card.fade-in {
   opacity: 1;
 }
 
-/* Password Strength */
+/* Password Strength - Medical Theme */
 .password-strength-bar {
-  margin-top: 0.75rem;
+  margin-top: 1rem;
+  height: 17px;
+  border-radius: 10px;
+  overflow: hidden;
+  background-color: rgba(3, 58, 255, 0.1);
 }
 
 .password-requirements {
-  margin-top: 0.75rem;
-  padding-left: 0.5rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  background: linear-gradient(135deg, #f8f9ff, #f0f4ff);
+  border-radius: 12px;
+  border: 1px solid rgba(36, 53, 113, 0.1);
 }
 
 .password-requirements small {
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.5rem;
+  display: block;
+  font-weight: 500;
+  transition: all 0.3s ease;
 }
 
-/* Bootstrap Overrides */
+/* Apple-style Button Design - Clean, Rounded, Professional */
 .btn-primary {
-  background: linear-gradient(90deg, #d40000, #ff4d4d);
-  border-color: #d40000;
+  background: #007AFF;
+  border: none;
+  border-radius: 25px;
+  padding: 14px 32px;
+  font-weight: 500;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.2);
+  color: #ffffff;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s;
+}
+
+.btn-primary:hover::before {
+  left: 100%;
 }
 
 .btn-primary:hover {
-  background: linear-gradient(90deg, #b30000, #ff3333);
-  border-color: #b30000;
+  background: #0051D5;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(0, 122, 255, 0.25);
 }
 
 .btn-primary:disabled {
-  background: #cccccc;
-  border-color: #bbbbbb;
+  background: #E5E5EA;
+  color: #8E8E93;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-primary:disabled::before {
+  display: none;
+}
+
+.btn-outline-primary {
+  color: #007AFF;
+  border: 1.5px solid #007AFF;
+  background: transparent;
+  border-radius: 25px;
+  padding: 14px 32px;
+  font-weight: 500;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.btn-outline-primary:hover {
+  background: #007AFF;
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.2);
+}
+
+.btn-outline-primary:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(0, 122, 255, 0.15);
+}
+
+.btn-outline-primary:disabled {
+  color: #8E8E93;
+  border-color: #E5E5EA;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .input-group-text {
-  background-color: #f8f9fa;
-  color: #6c757d;
+  background: linear-gradient(135deg, #f8f9ff, #f0f4ff);
+  color: #243571;
+  border: 1px solid rgba(36, 53, 113, 0.1);
+  border-radius: 12px 0 0 12px;
+  font-weight: 600;
+}
+
+.form-control {
+  border: 1px solid rgba(36, 53, 113, 0.2);
+  border-radius: 12px;
+  padding: 0.875rem 1rem;
+  font-size: 1rem;
+  transition: all 0.3s ease;
+  background: #ffffff;
 }
 
 .form-control:focus {
-  border-color: #d40000;
-  box-shadow: 0 0 0 0.25rem rgba(212, 0, 0, 0.25);
+  border-color: #243571;
+  box-shadow: 0 0 0 0.25rem rgba(36, 53, 113, 0.15);
+  background: #ffffff;
+}
+
+.form-label {
+  color: #243571;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+}
+
+/* Medical Icons and Elements */
+.medical-icon {
+  color: #243571;
+  font-size: 1.2rem;
+  margin-right: 0.5rem;
+}
+
+.medical-badge {
+  background: linear-gradient(135deg, #243571, #4a6fa5);
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: inline-block;
+  margin: 0.25rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.university-badge {
+  background: linear-gradient(135deg, #f0f4ff, #e0e7ff);
+  color: #243571;
+  padding: 0.25rem 0.5rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid rgba(36, 53, 113, 0.2);
+  display: inline-block;
+  margin: 0.2rem;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.6);
+}
+
+/* Enhanced text readability on glass background */
+.auth-logo .subtitle,
+.step-description,
+.auth-footer a,
+.university-badge,
+.medical-badge {
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.6);
+}
+
+/* Glass morphism enhancements */
+.auth-form,
+.auth-card,
+.profile-card {
+  box-shadow: 
+    0 8px 32px rgba(36, 53, 113, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 /* Responsive Adjustments */
 @media (max-width: 767.98px) {
   .auth-form {
     padding: 1.5rem;
+    margin: 1rem;
   }
   
   .step-label {
-    font-size: 0.7rem;
+    font-size: 0.75rem;
+  }
+  
+  .step-icon {
+    width: 60px;
+    height: 60px;
+    font-size: 1.5rem;
+  }
+  
+  .auth-logo h2 {
+    font-size: 1.8rem;
   }
 }
 
-/* QR Login Styles */
+/* QR Login Styles - Medical Theme */
 .auth-container {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #ffffff 0%, #ffffff 100%);
+  background: linear-gradient(135deg, #f8f9ff 0%, #e0e7ff 50%, #f0f4ff 100%);
   padding: 20px;
+  position: relative;
+}
+
+.auth-container::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url('./image/CAMPUS-06.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  z-index: -1;
+  opacity: 0.8;
+}
+
+/* Mobile background for QR Login */
+@media (max-width: 768px) {
+  .auth-container::before {
+    background-image: url('./image/IMG_1713.jpg');
+    opacity: 0.9;
+    background-attachment: scroll;
+  }
 }
 
 .auth-card {
-  background-color: #ffffff;
-  border-radius: 15px;
-  padding: 2rem;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 25px;
+  padding: 3rem;
+  box-shadow: 0 25px 80px rgba(36, 53, 113, 0.15);
   max-width: 500px;
   width: 100%;
   text-align: center;
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.auth-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 5px;
+  background: linear-gradient(90deg, #243571, #4a6fa5, #6b9bd2, #243571);
+  border-radius: 25px 25px 0 0;
 }
 
 .auth-header h2 {
-  color: #333;
-  margin-bottom: 0.5rem;
-  font-weight: 600;
+  color: #243571;
+  margin-bottom: 0.75rem;
+  font-weight: 800;
+  font-size: 2rem;
+  text-shadow: 0 2px 8px rgba(255, 255, 255, 0.8), 0 4px 16px rgba(36, 53, 113, 0.3);
 }
 
 .auth-header p {
-  color: #666;
+  color: #64748b;
   margin-bottom: 0;
+  font-weight: 500;
+  font-size: 1.1rem;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.5);
 }
 
 .loading-container {
@@ -237,13 +560,13 @@
 }
 
 .spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #d40000;
+  width: 50px;
+  height: 50px;
+  border: 4px solid rgba(36, 53, 113, 0.1);
+  border-top: 4px solid #243571;
   border-radius: 50%;
   animation: spin 1s linear infinite;
-  margin: 0 auto 1rem;
+  margin: 0 auto 1.5rem;
 }
 
 @keyframes spin {
@@ -252,18 +575,23 @@
 }
 
 .error-container {
-  padding: 1rem 0;
+  padding: 2rem 0;
+  background: linear-gradient(135deg, #fef2f2, #fee2e2);
+  border-radius: 15px;
+  border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
 .error-icon {
-  font-size: 3rem;
-  margin-bottom: 1rem;
+  font-size: 4rem;
+  margin-bottom: 1.5rem;
+  color: #ef4444;
 }
 
 .error-message {
-  color: #dc3545;
-  font-weight: 500;
-  margin-bottom: 1.5rem;
+  color: #dc2626;
+  font-weight: 600;
+  margin-bottom: 2rem;
+  font-size: 1.1rem;
 }
 
 .error-actions {
@@ -275,70 +603,87 @@
 
 .success-message {
   padding: 2rem 0;
+  background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+  border-radius: 15px;
+  border: 1px solid rgba(34, 197, 94, 0.2);
 }
 
 .success-icon {
-  font-size: 4rem;
-  margin-bottom: 1rem;
+  font-size: 5rem;
+  margin-bottom: 1.5rem;
+  color: #22c55e;
 }
 
 .success-message p {
-  color: #28a745;
-  font-weight: 500;
-  margin-bottom: 0.5rem;
+  color: #16a34a;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  font-size: 1.1rem;
 }
 
 .info-container {
   padding: 2rem 0;
+  background: linear-gradient(135deg, #f0f4ff, #e0e7ff);
+  border-radius: 15px;
+  border: 1px solid rgba(36, 53, 113, 0.2);
 }
 
 .info-icon {
-  font-size: 3rem;
-  margin-bottom: 1rem;
+  font-size: 4rem;
+  margin-bottom: 1.5rem;
+  color: #243571;
 }
 
 .btn {
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
-  font-weight: 500;
+  padding: 0.875rem 2rem;
+  border-radius: 12px;
+  font-weight: 600;
   text-decoration: none;
   display: inline-block;
   border: none;
   cursor: pointer;
   transition: all 0.3s ease;
+  font-size: 1rem;
 }
 
 .btn-primary {
-  background: linear-gradient(90deg, #d40000, #ff4d4d);
+  background: linear-gradient(135deg, #243571, #4a6fa5);
   color: white;
+  box-shadow: 0 4px 15px rgba(36, 53, 113, 0.2);
 }
 
 .btn-primary:hover {
-  background: linear-gradient(90deg, #b30000, #ff3333);
+  background: linear-gradient(135deg, #1e2a5e, #3d5a8f);
   transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(36, 53, 113, 0.3);
 }
 
 .btn-secondary {
-  background-color: #6c757d;
+  background: linear-gradient(135deg, #64748b, #475569);
   color: white;
+  box-shadow: 0 4px 15px rgba(100, 116, 139, 0.2);
 }
 
 .btn-secondary:hover {
-  background-color: #5a6268;
+  background: linear-gradient(135deg, #475569, #334155);
   transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(100, 116, 139, 0.3);
 }
 
 .auth-footer {
   margin-top: 2rem;
-  padding-top: 1rem;
-  border-top: 1px solid #eee;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(36, 53, 113, 0.1);
 }
 
 .auth-footer a {
-  color: #d40000;
+  color: #243571;
   text-decoration: none;
+  font-weight: 600;
+  transition: all 0.3s ease;
 }
 
 .auth-footer a:hover {
+  color: #4a6fa5;
   text-decoration: underline;
 }

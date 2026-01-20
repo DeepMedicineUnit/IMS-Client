@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Form, Button, Container, Row, Col, Alert, ProgressBar } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import usePageTitle from '../../hooks/usePageTitle';
 import '../../styles/auth.css';
 
 const Register = () => {
+  usePageTitle('Đăng ký');
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -20,6 +22,7 @@ const Register = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [focusedField, setFocusedField] = useState(null);
   
   // Thêm state cho việc kiểm tra mật khẩu
   const [passwordStrength, setPasswordStrength] = useState({
@@ -36,7 +39,14 @@ const Register = () => {
 
   useEffect(() => {
     setMounted(true);
-    return () => setMounted(false);
+    // Add auth-page class to body
+    document.body.classList.add('auth-page');
+    
+    return () => {
+      setMounted(false);
+      // Remove auth-page class from body
+      document.body.classList.remove('auth-page');
+    };
   }, []);
 
   const handleChange = (e) => {
@@ -166,87 +176,272 @@ const Register = () => {
           <div className={`auth-form-container ${mounted ? 'fade-in' : ''}`}>
             <div className="auth-form">
               <div className="auth-logo">
-                <h2>PCTU Clinical</h2>
+                <h2>PCTU IMS</h2>
+                <div className="university-badge">
+                  <i className="fas fa-graduation-cap medical-icon"></i>
+                  Trường Đại học Phan Châu Trinh
+                </div>
               </div>
               
-              <h4 className="auth-heading">Đăng ký tài khoản</h4>
+              <h4 className="auth-heading">
+                <i className="fas fa-user-plus medical-icon"></i>
+                Đăng ký tài khoản
+              </h4>
               
               {error && <Alert variant="danger">{error}</Alert>}
               {success && <Alert variant="success">{success}</Alert>}
               
               <Form onSubmit={handleSubmit}>
-                <Form.Group className="mb-3" controlId="formUsername">
-                  <Form.Label>Tên đăng nhập</Form.Label>
-                  <div className="input-group">
-                    <span className="input-group-text">
-                      <i className="fas fa-user"></i>
-                    </span>
+                <Form.Group className="mb-4" controlId="formUsername">
+                  <div className="floating-label-group" style={{ position: 'relative', marginBottom: '8px' }}>
                     <Form.Control
                       type="text"
                       name="username"
                       value={formData.username}
                       onChange={handleChange}
+                      onFocus={() => setFocusedField('username')}
+                      onBlur={() => setFocusedField(null)}
                       required
-                      placeholder="Nhập tên đăng nhập"
+                      className="floating-input"
+                      style={{
+                        paddingTop: formData.username || focusedField === 'username' ? '24px' : '16px',
+                        paddingBottom: formData.username || focusedField === 'username' ? '8px' : '16px',
+                        paddingLeft: '16px',
+                        paddingRight: '16px',
+                        fontSize: '16px',
+                        height: 'auto',
+                        minHeight: '56px',
+                        border: formData.username || focusedField === 'username' ? '2px solid #6c757d' : '1.5px solid #dee2e6',
+                        borderRadius: '10px',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        backgroundColor: focusedField === 'username' ? '#f8f9fa' : '#fff',
+                        boxShadow: focusedField === 'username' ? '0 0 0 3px rgba(108, 117, 125, 0.1)' : 'none'
+                      }}
                     />
+                    <label
+                      className="floating-label"
+                      htmlFor="formUsername"
+                      style={{
+                        position: 'absolute',
+                        left: '16px',
+                        top: formData.username || focusedField === 'username' ? '6px' : '50%',
+                        transform: formData.username || focusedField === 'username' ? 'translateY(0) scale(0.85)' : 'translateY(-50%) scale(1)',
+                        fontSize: formData.username || focusedField === 'username' ? '12px' : '16px',
+                        color: formData.username || focusedField === 'username' ? '#495057' : '#6c757d',
+                        pointerEvents: 'none',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        paddingLeft: formData.username || focusedField === 'username' ? '4px' : '0',
+                        paddingRight: formData.username || focusedField === 'username' ? '4px' : '0',
+                        fontWeight: formData.username || focusedField === 'username' ? '600' : '400',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        lineHeight: '1',
+                        whiteSpace: 'nowrap',
+                        transformOrigin: 'left center'
+                      }}
+                    >
+                      <i className="fas fa-user" style={{ fontSize: formData.username || focusedField === 'username' ? '12px' : '14px', transition: 'font-size 0.3s ease' }}></i>
+                      <span>Tên đăng nhập</span>
+                    </label>
                   </div>
                 </Form.Group>
                 
-                <Form.Group className="mb-3" controlId="formEmail">
-                  <Form.Label>Email</Form.Label>
-                  <div className="input-group">
-                    <span className="input-group-text">
-                      <i className="fas fa-envelope"></i>
-                    </span>
+                <Form.Group className="mb-4" controlId="formEmail">
+                  <div className="floating-label-group" style={{ position: 'relative', marginBottom: '8px' }}>
                     <Form.Control
                       type="email"
                       name="email"
                       value={formData.email}
                       onChange={handleChange}
+                      onFocus={() => setFocusedField('email')}
+                      onBlur={() => setFocusedField(null)}
                       required
-                      placeholder="Nhập email"
+                      className="floating-input"
+                      style={{
+                        paddingTop: formData.email || focusedField === 'email' ? '24px' : '16px',
+                        paddingBottom: formData.email || focusedField === 'email' ? '8px' : '16px',
+                        paddingLeft: '16px',
+                        paddingRight: '16px',
+                        fontSize: '16px',
+                        height: 'auto',
+                        minHeight: '56px',
+                        border: formData.email || focusedField === 'email' ? '2px solid #6c757d' : '1.5px solid #dee2e6',
+                        borderRadius: '10px',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        backgroundColor: focusedField === 'email' ? '#f8f9fa' : '#fff',
+                        boxShadow: focusedField === 'email' ? '0 0 0 3px rgba(108, 117, 125, 0.1)' : 'none'
+                      }}
                     />
+                    <label
+                      className="floating-label"
+                      htmlFor="formEmail"
+                      style={{
+                        position: 'absolute',
+                        left: '16px',
+                        top: formData.email || focusedField === 'email' ? '6px' : '50%',
+                        transform: formData.email || focusedField === 'email' ? 'translateY(0) scale(0.85)' : 'translateY(-50%) scale(1)',
+                        fontSize: formData.email || focusedField === 'email' ? '12px' : '16px',
+                        color: formData.email || focusedField === 'email' ? '#495057' : '#6c757d',
+                        pointerEvents: 'none',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        paddingLeft: formData.email || focusedField === 'email' ? '4px' : '0',
+                        paddingRight: formData.email || focusedField === 'email' ? '4px' : '0',
+                        fontWeight: formData.email || focusedField === 'email' ? '600' : '400',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        lineHeight: '1',
+                        whiteSpace: 'nowrap',
+                        transformOrigin: 'left center'
+                      }}
+                    >
+                      <i className="fas fa-envelope" style={{ fontSize: formData.email || focusedField === 'email' ? '12px' : '14px', transition: 'font-size 0.3s ease' }}></i>
+                      <span>Email</span>
+                    </label>
                   </div>
                 </Form.Group>
                 
-                <Form.Group className="mb-3" controlId="formFullName">
-                  <Form.Label>Họ và tên</Form.Label>
-                  <div className="input-group">
-                    <span className="input-group-text">
-                      <i className="fas fa-id-card"></i>
-                    </span>
+                <Form.Group className="mb-4" controlId="formFullName">
+                  <div className="floating-label-group" style={{ position: 'relative', marginBottom: '8px' }}>
                     <Form.Control
                       type="text"
                       name="fullName"
                       value={formData.fullName}
                       onChange={handleChange}
+                      onFocus={() => setFocusedField('fullName')}
+                      onBlur={() => setFocusedField(null)}
                       required
-                      placeholder="Nhập họ và tên"
+                      className="floating-input"
+                      style={{
+                        paddingTop: formData.fullName || focusedField === 'fullName' ? '24px' : '16px',
+                        paddingBottom: formData.fullName || focusedField === 'fullName' ? '8px' : '16px',
+                        paddingLeft: '16px',
+                        paddingRight: '16px',
+                        fontSize: '16px',
+                        height: 'auto',
+                        minHeight: '56px',
+                        border: formData.fullName || focusedField === 'fullName' ? '2px solid #6c757d' : '1.5px solid #dee2e6',
+                        borderRadius: '10px',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        backgroundColor: focusedField === 'fullName' ? '#f8f9fa' : '#fff',
+                        boxShadow: focusedField === 'fullName' ? '0 0 0 3px rgba(108, 117, 125, 0.1)' : 'none'
+                      }}
                     />
+                    <label
+                      className="floating-label"
+                      htmlFor="formFullName"
+                      style={{
+                        position: 'absolute',
+                        left: '16px',
+                        top: formData.fullName || focusedField === 'fullName' ? '6px' : '50%',
+                        transform: formData.fullName || focusedField === 'fullName' ? 'translateY(0) scale(0.85)' : 'translateY(-50%) scale(1)',
+                        fontSize: formData.fullName || focusedField === 'fullName' ? '12px' : '16px',
+                        color: formData.fullName || focusedField === 'fullName' ? '#495057' : '#6c757d',
+                        pointerEvents: 'none',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        paddingLeft: formData.fullName || focusedField === 'fullName' ? '4px' : '0',
+                        paddingRight: formData.fullName || focusedField === 'fullName' ? '4px' : '0',
+                        fontWeight: formData.fullName || focusedField === 'fullName' ? '600' : '400',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        lineHeight: '1',
+                        whiteSpace: 'nowrap',
+                        transformOrigin: 'left center'
+                      }}
+                    >
+                      <i className="fas fa-id-card" style={{ fontSize: formData.fullName || focusedField === 'fullName' ? '12px' : '14px', transition: 'font-size 0.3s ease' }}></i>
+                      <span>Họ và tên</span>
+                    </label>
                   </div>
                 </Form.Group>
                 
                 <Form.Group className="mb-3" controlId="formPassword">
-                  <Form.Label>Mật khẩu</Form.Label>
-                  <div className="input-group">
-                    <span className="input-group-text">
-                      <i className="fas fa-lock"></i>
-                    </span>
+                  <div className="floating-label-group" style={{ position: 'relative', marginBottom: '8px' }}>
                     <Form.Control
                       type={showPassword ? "text" : "password"}
                       name="password"
                       value={formData.password}
                       onChange={handleChange}
+                      onFocus={() => setFocusedField('password')}
+                      onBlur={() => setFocusedField(null)}
                       required
-                      placeholder="Nhập mật khẩu"
+                      className="floating-input"
                       minLength="6"
+                      style={{
+                        paddingTop: formData.password || focusedField === 'password' ? '24px' : '16px',
+                        paddingBottom: formData.password || focusedField === 'password' ? '8px' : '16px',
+                        paddingLeft: '16px',
+                        paddingRight: '48px',
+                        fontSize: '16px',
+                        height: 'auto',
+                        minHeight: '56px',
+                        border: formData.password || focusedField === 'password' ? '2px solid #6c757d' : '1.5px solid #dee2e6',
+                        borderRadius: '10px',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        backgroundColor: focusedField === 'password' ? '#f8f9fa' : '#fff',
+                        boxShadow: focusedField === 'password' ? '0 0 0 3px rgba(108, 117, 125, 0.1)' : 'none'
+                      }}
                     />
-                    <Button 
-                      variant="outline-secondary"
-                      onClick={toggleShowPassword}
+                    <label
+                      className="floating-label"
+                      htmlFor="formPassword"
+                      style={{
+                        position: 'absolute',
+                        left: '16px',
+                        top: formData.password || focusedField === 'password' ? '6px' : '50%',
+                        transform: formData.password || focusedField === 'password' ? 'translateY(0) scale(0.85)' : 'translateY(-50%) scale(1)',
+                        fontSize: formData.password || focusedField === 'password' ? '12px' : '16px',
+                        color: formData.password || focusedField === 'password' ? '#495057' : '#6c757d',
+                        pointerEvents: 'none',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        paddingLeft: formData.password || focusedField === 'password' ? '4px' : '0',
+                        paddingRight: formData.password || focusedField === 'password' ? '4px' : '0',
+                        fontWeight: formData.password || focusedField === 'password' ? '600' : '400',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        lineHeight: '1',
+                        whiteSpace: 'nowrap',
+                        transformOrigin: 'left center'
+                      }}
                     >
-                      <i className={showPassword ? "fas fa-eye-slash" : "fas fa-eye"}></i>
-                    </Button>
+                      <i className="fas fa-lock" style={{ fontSize: formData.password || focusedField === 'password' ? '12px' : '14px', transition: 'font-size 0.3s ease' }}></i>
+                      <span>Mật khẩu</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={toggleShowPassword}
+                      style={{
+                        position: 'absolute',
+                        right: '12px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        padding: '8px',
+                        cursor: 'pointer',
+                        color: formData.password || focusedField === 'password' ? '#495057' : '#6c757d',
+                        zIndex: 10,
+                        outline: 'none',
+                        transition: 'all 0.3s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: '6px'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.color = '#343a40';
+                        e.currentTarget.style.backgroundColor = 'rgba(108, 117, 125, 0.1)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = formData.password || focusedField === 'password' ? '#495057' : '#6c757d';
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      <i className={showPassword ? "fas fa-eye-slash" : "fas fa-eye"} style={{ fontSize: '18px' }}></i>
+                    </button>
                   </div>
                   
                   <div className="password-strength-bar mt-2">
@@ -282,60 +477,194 @@ const Register = () => {
                 </Form.Group>
                 
                 <Form.Group className="mb-3" controlId="formConfirmPassword">
-                  <Form.Label>Xác nhận mật khẩu</Form.Label>
-                  <div className="input-group">
-                    <span className="input-group-text">
-                      <i className="fas fa-lock"></i>
-                    </span>
+                  <div className="floating-label-group" style={{ position: 'relative', marginBottom: '8px' }}>
                     <Form.Control
                       type={showConfirmPassword ? "text" : "password"}
                       name="confirmPassword"
                       value={formData.confirmPassword}
                       onChange={handleChange}
+                      onFocus={() => setFocusedField('confirmPassword')}
+                      onBlur={() => setFocusedField(null)}
                       required
-                      placeholder="Nhập lại mật khẩu"
+                      className="floating-input"
                       minLength="6"
+                      style={{
+                        paddingTop: formData.confirmPassword || focusedField === 'confirmPassword' ? '24px' : '16px',
+                        paddingBottom: formData.confirmPassword || focusedField === 'confirmPassword' ? '8px' : '16px',
+                        paddingLeft: '16px',
+                        paddingRight: '48px',
+                        fontSize: '16px',
+                        height: 'auto',
+                        minHeight: '56px',
+                        border: formData.confirmPassword || focusedField === 'confirmPassword' ? '2px solid #6c757d' : '1.5px solid #dee2e6',
+                        borderRadius: '10px',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        backgroundColor: focusedField === 'confirmPassword' ? '#f8f9fa' : '#fff',
+                        boxShadow: focusedField === 'confirmPassword' ? '0 0 0 3px rgba(108, 117, 125, 0.1)' : 'none'
+                      }}
                     />
-                    <Button 
-                      variant="outline-secondary"
-                      onClick={toggleShowConfirmPassword}
+                    <label
+                      className="floating-label"
+                      htmlFor="formConfirmPassword"
+                      style={{
+                        position: 'absolute',
+                        left: '16px',
+                        top: formData.confirmPassword || focusedField === 'confirmPassword' ? '6px' : '50%',
+                        transform: formData.confirmPassword || focusedField === 'confirmPassword' ? 'translateY(0) scale(0.85)' : 'translateY(-50%) scale(1)',
+                        fontSize: formData.confirmPassword || focusedField === 'confirmPassword' ? '12px' : '16px',
+                        color: formData.confirmPassword || focusedField === 'confirmPassword' ? '#495057' : '#6c757d',
+                        pointerEvents: 'none',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        paddingLeft: formData.confirmPassword || focusedField === 'confirmPassword' ? '4px' : '0',
+                        paddingRight: formData.confirmPassword || focusedField === 'confirmPassword' ? '4px' : '0',
+                        fontWeight: formData.confirmPassword || focusedField === 'confirmPassword' ? '600' : '400',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        lineHeight: '1',
+                        whiteSpace: 'nowrap',
+                        transformOrigin: 'left center'
+                      }}
                     >
-                      <i className={showConfirmPassword ? "fas fa-eye-slash" : "fas fa-eye"}></i>
-                    </Button>
+                      <i className="fas fa-lock" style={{ fontSize: formData.confirmPassword || focusedField === 'confirmPassword' ? '12px' : '14px', transition: 'font-size 0.3s ease' }}></i>
+                      <span>Xác nhận mật khẩu</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={toggleShowConfirmPassword}
+                      style={{
+                        position: 'absolute',
+                        right: '12px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        padding: '8px',
+                        cursor: 'pointer',
+                        color: formData.confirmPassword || focusedField === 'confirmPassword' ? '#495057' : '#6c757d',
+                        zIndex: 10,
+                        outline: 'none',
+                        transition: 'all 0.3s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: '6px'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.color = '#343a40';
+                        e.currentTarget.style.backgroundColor = 'rgba(108, 117, 125, 0.1)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = formData.confirmPassword || focusedField === 'confirmPassword' ? '#495057' : '#6c757d';
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      <i className={showConfirmPassword ? "fas fa-eye-slash" : "fas fa-eye"} style={{ fontSize: '18px' }}></i>
+                    </button>
                   </div>
                   {formData.confirmPassword && (
-                    <small className={`mt-1 d-block ${formData.password === formData.confirmPassword ? 'text-success' : 'text-danger'}`}>
+                    <small className={`mt-2 d-block ${formData.password === formData.confirmPassword ? 'text-success' : 'text-danger'}`} style={{ paddingLeft: '4px' }}>
                       <i className={`fas ${formData.password === formData.confirmPassword ? 'fa-check-circle' : 'fa-times-circle'} me-1`}></i>
                       {formData.password === formData.confirmPassword ? 'Mật khẩu khớp' : 'Mật khẩu không khớp'}
                     </small>
                   )}
                 </Form.Group>
                 
-                <Form.Group className="mb-3" controlId="formRole">
-                  <Form.Label>Vai trò</Form.Label>
-                  <div className="input-group">
-                    <span className="input-group-text">
-                      <i className="fas fa-id-badge"></i>
-                    </span>
+                <Form.Group className="mb-4" controlId="formRole">
+                  <div className="floating-label-group" style={{ position: 'relative', marginBottom: '8px' }}>
                     <Form.Select
                       name="role"
                       value={formData.role}
                       onChange={handleChange}
+                      onFocus={() => setFocusedField('role')}
+                      onBlur={() => setFocusedField(null)}
+                      className="floating-input"
+                      style={{
+                        paddingTop: formData.role || focusedField === 'role' ? '24px' : '16px',
+                        paddingBottom: formData.role || focusedField === 'role' ? '8px' : '16px',
+                        paddingLeft: '16px',
+                        paddingRight: '40px',
+                        fontSize: '16px',
+                        height: 'auto',
+                        minHeight: '56px',
+                        border: formData.role || focusedField === 'role' ? '2px solid #6c757d' : '1.5px solid #dee2e6',
+                        borderRadius: '10px',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        backgroundColor: focusedField === 'role' ? '#f8f9fa' : '#fff',
+                        boxShadow: focusedField === 'role' ? '0 0 0 3px rgba(108, 117, 125, 0.1)' : 'none',
+                        cursor: 'pointer',
+                        appearance: 'none',
+                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23495057' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
+                        backgroundRepeat: 'no-repeat',
+                        backgroundPosition: 'right 16px center',
+                        backgroundSize: '12px'
+                      }}
                     >
                       <option value="staff">Nhân viên</option>
                       <option value="admin">Quản trị viên</option>
                     </Form.Select>
+                    <label
+                      className="floating-label"
+                      htmlFor="formRole"
+                      style={{
+                        position: 'absolute',
+                        left: '16px',
+                        top: formData.role || focusedField === 'role' ? '6px' : '50%',
+                        transform: formData.role || focusedField === 'role' ? 'translateY(0) scale(0.85)' : 'translateY(-50%) scale(1)',
+                        fontSize: formData.role || focusedField === 'role' ? '12px' : '16px',
+                        color: formData.role || focusedField === 'role' ? '#495057' : '#6c757d',
+                        pointerEvents: 'none',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        paddingLeft: formData.role || focusedField === 'role' ? '4px' : '0',
+                        paddingRight: formData.role || focusedField === 'role' ? '4px' : '0',
+                        fontWeight: formData.role || focusedField === 'role' ? '600' : '400',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        lineHeight: '1',
+                        whiteSpace: 'nowrap',
+                        transformOrigin: 'left center'
+                      }}
+                    >
+                      <i className="fas fa-user-tag" style={{ fontSize: formData.role || focusedField === 'role' ? '12px' : '14px', transition: 'font-size 0.3s ease' }}></i>
+                      <span>Vai trò</span>
+                    </label>
                   </div>
-                  <Form.Text className="text-muted">
-                    Tài khoản cần được quản trị viên phê duyệt trước khi sử dụng.
-                  </Form.Text>
+                  <div style={{ 
+                    marginTop: '8px', 
+                    padding: '12px 16px', 
+                    backgroundColor: '#f8f9fa', 
+                    borderRadius: '8px',
+                    borderLeft: '3px solid #6c757d'
+                  }}>
+                    <small className="text-muted" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', lineHeight: '1.5', fontSize: '13px' }}>
+                      <i className="fas fa-info-circle mt-1" style={{ fontSize: '14px', color: '#6c757d', flexShrink: 0 }}></i>
+                      <span>
+                        {formData.role === 'staff' && 'Tài khoản cần được quản trị viên phê duyệt trước khi sử dụng.'}
+                        {formData.role === 'admin' && 'Tài khoản cần được Super Admin phê duyệt trước khi sử dụng.'}
+                      </span>
+                    </small>
+                  </div>
                 </Form.Group>
                 
                 <Button 
                   variant="primary" 
                   type="submit" 
-                  className="w-100 mt-3" 
+                  className="w-100 mt-4" 
                   disabled={loading || success || !isFormValid()}
+                  style={{
+                    borderRadius: '25px',
+                    padding: '14px 32px',
+                    fontWeight: '500',
+                    fontSize: '16px',
+                    letterSpacing: '-0.01em',
+                    border: 'none',
+                    background: (loading || success || !isFormValid()) ? '#314691' : '#314691',
+                    color: (loading || success || !isFormValid()) ? '#8E8E93' : '#ffffff',
+                    boxShadow: (loading || success || !isFormValid()) ? 'none' : '0 2px 8px rgba(0, 122, 255, 0.2)',
+                    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                    cursor: (loading || success || !isFormValid()) ? 'not-allowed' : 'pointer'
+                  }}
                 >
                   {loading ? (
                     <>
@@ -345,7 +674,7 @@ const Register = () => {
                   ) : (
                     <>
                       <i className="fas fa-user-plus me-2"></i>
-                      Đăng ký
+                      Đăng ký tài khoản
                     </>
                   )}
                 </Button>
@@ -353,7 +682,8 @@ const Register = () => {
               
               <div className="auth-footer mt-4">
                 <div className="text-center">
-                  Đã có tài khoản? <Link to="/login">Đăng nhập</Link>
+                  <i className="fas fa-sign-in-alt me-1"></i>
+                  Đã có tài khoản? <Link to="/login">Đăng nhập ngay</Link>
                 </div>
               </div>
             </div>

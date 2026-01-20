@@ -1,29 +1,82 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { Card, Table, Badge, Tabs, Tab, Spinner, Button, Image, Modal, Alert, Row, Col } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthContext';
 import { format, parseISO } from 'date-fns';
-import { toast } from 'react-toastify';
-import io from 'socket.io-client';
-import { Calendar, Clock, MapPin, Users, FileText, ArrowLeft, RefreshCw, Info, CheckCircle, AlertTriangle, XCircle, UserCheck, UserX, Camera, Mic, FileDown, Activity, Play, Download, ExternalLink, Wifi, WifiOff, RotateCcw } from 'lucide-react';
+import { useAlert } from '../../contexts/AlertContext';
+import { Calendar, Clock, MapPin, Users, FileText, ArrowLeft, Info, CheckCircle, AlertTriangle, XCircle, UserCheck, UserX, Camera, Mic, FileDown, Activity, Play, Download, ExternalLink } from 'lucide-react';
+import usePageTitle from '../../hooks/usePageTitle';
 
 const SessionHistory = () => {
+  usePageTitle('Lịch sử buổi học');
   const { id } = useParams();
+  const location = useLocation();
   const { api } = useAuth();
+  const { showAlert } = useAlert();
   const [session, setSession] = useState(null);
   const [students, setStudents] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [activeTab, setActiveTab] = useState('attendance');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [socketConnected, setSocketConnected] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState(null);
-  const socketRef = useRef(null);
+  // Auto-refresh indicator
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
+  
+  // Debounce timer
+  const debounceTimerRef = useRef(null);
   
   // Modal states
   const [showWebcamModal, setShowWebcamModal] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
   
+  // Function to refresh all data (session + history)
+  const refreshAllData = useCallback(async () => {
+    try {
+      setIsAutoRefreshing(true);
+      
+      // Fetch both session and history data in parallel
+      const [sessionResponse, historyResponse] = await Promise.all([
+        api.get(`/sessions/${id}`),
+        api.get(`/history/sessions/${id}`)
+      ]);
+      
+      // Update session data if changed
+      if (sessionResponse.data.success) {
+        const newSessionData = sessionResponse.data.data;
+        setSession(prevSession => {
+          if (JSON.stringify(prevSession) !== JSON.stringify(newSessionData)) {
+            return newSessionData;
+          }
+          return prevSession;
+        });
+      }
+      
+      // Update history data if changed
+      if (historyResponse.data.success) {
+        const newStudentsData = historyResponse.data.data;
+        
+        setStudents(prevStudents => {
+          if (JSON.stringify(prevStudents) !== JSON.stringify(newStudentsData)) {
+            return newStudentsData;
+          }
+          return prevStudents;
+        });
+        
+        // Update selected student data if one is already selected
+        if (selectedStudent) {
+          const updatedSelectedStudent = newStudentsData.find(student => student.id === selectedStudent.id);
+          if (updatedSelectedStudent && JSON.stringify(updatedSelectedStudent) !== JSON.stringify(selectedStudent)) {
+            setSelectedStudent(updatedSelectedStudent);
+          }
+        }
+      }
+    } catch (error) {
+      // Error refreshing all data
+    } finally {
+      setIsAutoRefreshing(false);
+    }
+  }, [api, id, selectedStudent]);
+
   const fetchSessionHistory = async (showLoadingState = true) => {
     try {
       if (showLoadingState) {
@@ -60,9 +113,6 @@ const SessionHistory = () => {
         setSelectedStudent(newStudentsData[0]);
       }
       
-      // Update last update time
-      setLastUpdate(new Date());
-      
     } catch (error) {
       console.error('Error fetching session history:', error);
       setError(error.response?.data?.message || 'Đã xảy ra lỗi khi tải dữ liệu. Vui lòng thử lại sau.');
@@ -75,122 +125,70 @@ const SessionHistory = () => {
   
   // Initial data fetch
   useEffect(() => {
+    setLoading(true);
     fetchSessionHistory();
   }, [id, api]);
-  
-  // Set up socket connection for real-time updates
+
+  // Auto-refresh data every 10 seconds with debounce
   useEffect(() => {
-    // Socket connection options with reconnection settings
-    const socketOptions = {
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 20000
-    };
-    
-    // Create socket connection
-    const socket = io(
-      process.env.NODE_ENV === 'production' ? window.location.origin : 'http://localhost:5000',
-      socketOptions
-    );
-    
-    socketRef.current = socket;
-    
-    // Connection events
-    socket.on('connect', () => {
-      console.log('Socket connected:', socket.id);
-      setSocketConnected(true);
-      
-      // Join session room
-      socket.emit('join_session', id);
-    });
-    
-    socket.on('disconnect', () => {
-      console.log('Socket disconnected');
-      setSocketConnected(false);
-    });
-    
-    socket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error);
-      setSocketConnected(false);
-    });
-    
-    socket.on('reconnect', (attemptNumber) => {
-      console.log(`Socket reconnected after ${attemptNumber} attempts`);
-      setSocketConnected(true);
-      
-      // Re-join session room after reconnection
-      socket.emit('join_session', id);
-      
-      // Refresh data after reconnection
-      fetchSessionHistory(false);
-    });
-    
-    socket.on('reconnect_attempt', (attemptNumber) => {
-      console.log(`Socket reconnection attempt #${attemptNumber}`);
-    });
-    
-    socket.on('reconnect_error', (error) => {
-      console.error('Socket reconnection error:', error);
-    });
-    
-    socket.on('reconnect_failed', () => {
-      console.error('Socket reconnection failed');
-      toast.error('Không thể kết nối lại với máy chủ. Vui lòng làm mới trang.');
-    });
-    
-    // Data update events
-    socket.on('monitoring_update', (data) => {
-      console.log('Received monitoring update:', data);
-      
-      // Check if update is for the current session
-      if (data.sessionId === id || data.session_id === id) {
-        console.log('Updating session history data due to monitoring update');
-        toast.info('Đang cập nhật dữ liệu mới...', { autoClose: 1000 });
-        fetchSessionHistory(false); // Don't show loading state for auto updates
+    if (session) {
+      // Clear any existing debounce timer
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
       }
-    });
-    
-    socket.on('history_update', (data) => {
-      console.log('Received history update:', data);
       
-      // Check if update is for the current session
-      if (data.sessionId === id || data.session_id === id) {
-        console.log('Updating session history data due to history update');
-        
-        // If the update is for the currently selected student, show a notification
-        if (selectedStudent && (data.studentId === selectedStudent.id || data.student_id === selectedStudent.id)) {
-          toast.info(`Dữ liệu mới từ ${data.studentName || 'sinh viên'}: ${data.type}`, { autoClose: 1500 });
+      // Start auto-refresh interval
+      const refreshInterval = setInterval(() => {
+        // Debounce the refresh to avoid rapid successive calls
+        debounceTimerRef.current = setTimeout(() => {
+          refreshAllData();
+        }, 1000); // 1 second debounce
+      }, 10000); // 10 seconds
+
+      // Clean up intervals on unmount
+      return () => {
+        clearInterval(refreshInterval);
+        if (debounceTimerRef.current) {
+          clearTimeout(debounceTimerRef.current);
+          debounceTimerRef.current = null;
         }
+      };
+    }
+  }, [session, id, refreshAllData]);
+
+  // Handle hash navigation to specific file
+  useEffect(() => {
+    if (location.hash && students.length > 0) {
+      const fileId = location.hash.replace('#file-', '');
+      
+      // Find the student who has this file
+      const studentWithFile = students.find(student => 
+        student.files && student.files.some(file => file.id == fileId)
+      );
+      
+      if (studentWithFile) {
+        setSelectedStudent(studentWithFile);
+        setActiveTab('files');
         
-        // Refresh data without showing loading state
-        fetchSessionHistory(false);
+        // Scroll to the file after a short delay to ensure DOM is updated
+        setTimeout(() => {
+          const fileElement = document.getElementById(`file-${fileId}`);
+          if (fileElement) {
+            fileElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            fileElement.classList.add('highlight-file');
+            
+            // Remove highlight after 3 seconds
+            setTimeout(() => {
+              fileElement.classList.remove('highlight-file');
+            }, 3000);
+          }
+        }, 500);
       }
-    });
-    
-    socket.on('session_update', (data) => {
-      console.log('Received session update:', data);
-      if (data.sessionId === id || data.session_id === id) {
-        fetchSessionHistory(false);
-      }
-    });
-    
-    // Clean up on unmount
-    return () => {
-      if (socket) {
-        try {
-          socket.emit('leave_session', id);
-          socket.disconnect();
-        } catch (error) {
-          console.error('Error during socket cleanup:', error);
-        }
-      }
-    };
-  }, [id, selectedStudent]);
+    }
+  }, [location.hash, students]);
   
   // Format date
-  const formatDate = (dateString) => {
+  const formatDate = useCallback((dateString) => {
     try {
       if (!dateString) return '';
       const date = parseISO(dateString);
@@ -198,36 +196,59 @@ const SessionHistory = () => {
     } catch (error) {
       return dateString;
     }
-  };
+  }, []);
   
   // Format time
-  const formatTime = (timeString) => {
+  const formatTime = useCallback((timeString) => {
     if (!timeString) return '';
     return timeString;
-  };
+  }, []);
   
   // Format datetime
-  const formatDateTime = (dateTimeString) => {
+  const formatDateTime = useCallback((dateTimeString) => {
     try {
       if (!dateTimeString) return '';
-      const date = new Date(dateTimeString);
+      
+      // Handle different date formats
+      let date;
+      if (typeof dateTimeString === 'string') {
+        // Try parsing as ISO string first
+        date = new Date(dateTimeString);
+        
+        // Check if date is valid
+        if (isNaN(date.getTime())) {
+          console.warn('Invalid date string:', dateTimeString);
+          return dateTimeString; // Return original string if parsing fails
+        }
+      } else if (dateTimeString instanceof Date) {
+        date = dateTimeString;
+      } else {
+        console.warn('Unsupported date type:', typeof dateTimeString, dateTimeString);
+        return String(dateTimeString);
+      }
+      
       return format(date, 'dd/MM/yyyy HH:mm:ss');
     } catch (error) {
-      return dateTimeString;
+      console.error('Error formatting datetime:', error, 'Input:', dateTimeString);
+      return String(dateTimeString || '');
     }
-  };
+  }, []);
   
   // Handle student selection
-  const handleSelectStudent = (student) => {
+  const handleSelectStudent = useCallback((student) => {
     setSelectedStudent(student);
-  };
+  }, []);
   
   // Handle webcam image click
-  const handleWebcamClick = (image) => {
+  const handleWebcamClick = useCallback((image) => {
     setSelectedImage(image);
     setShowWebcamModal(true);
-  };
+  }, []);
   
+  // Memoized computed values to prevent unnecessary re-renders
+  const memoizedStudents = useMemo(() => students, [students]);
+  const memoizedSelectedStudent = useMemo(() => selectedStudent, [selectedStudent]);
+  const memoizedSession = useMemo(() => session, [session]);
   
   // Render attendance history
   const renderAttendanceHistory = () => {
@@ -493,8 +514,8 @@ const SessionHistory = () => {
     );
   };
   
-  // Render webcam history
-  const renderWebcamHistory = () => {
+  // Render webcam history - memoized to prevent unnecessary re-renders
+  const renderWebcamHistory = useMemo(() => {
     // Check first for profile image from attendance
     const hasProfileImage = selectedStudent?.attendance?.profile_image;
     
@@ -512,82 +533,94 @@ const SessionHistory = () => {
     
     // Combine profile image and regular webcam images
     const allImages = [];
+    const processedPaths = new Set(); // Track processed image paths to avoid duplicates
     
-    // Add regular webcam images first with attendance type from attendance record
+    // Get attendance info once
+    const attendanceInfo = selectedStudent.attendance ? {
+      attendance_type: selectedStudent.attendance.attendance_type || 'default',
+      minutes_early: selectedStudent.attendance.minutes_early,
+      minutes_late: selectedStudent.attendance.minutes_late,
+      profile_image: selectedStudent.attendance.profile_image,
+      timestamp: selectedStudent.attendance.timestamp || selectedStudent.attendance.created_at
+    } : null;
+    
+    // Add regular webcam images first
     if (hasWebcamData) {
-      // Add attendance type information to all webcam images
-      const webcamWithAttendanceType = selectedStudent.webcam.map(image => {
-        // Clone the image object to avoid modifying the original
+      selectedStudent.webcam.forEach(image => {
+        // Skip if already processed
+        if (processedPaths.has(image.data_path)) {
+          return;
+        }
+        
         const enhancedImage = { ...image };
         
-        // If attendance record exists, assign its type to all images
-        if (selectedStudent.attendance) {
-          enhancedImage.attendance_type = selectedStudent.attendance.attendance_type;
-          enhancedImage.minutes_early = selectedStudent.attendance.minutes_early;
-          enhancedImage.minutes_late = selectedStudent.attendance.minutes_late;
-        }
+        // Check if this is the profile image
+        const isProfileImage = attendanceInfo && 
+                              attendanceInfo.profile_image && 
+                              image.data_path === attendanceInfo.profile_image;
         
-        // Identify profile image
-        const isProfileImage = selectedStudent.attendance && 
-                              selectedStudent.attendance.profile_image && 
-                              image.data_path === selectedStudent.attendance.profile_image;
-        
-        // Mark as profile image if matched
         if (isProfileImage) {
+          // This is the profile image - use attendance info
           enhancedImage.is_profile = true;
+          enhancedImage.attendance_type = attendanceInfo.attendance_type;
+          enhancedImage.minutes_early = attendanceInfo.minutes_early;
+          enhancedImage.minutes_late = attendanceInfo.minutes_late;
+        } else {
+          // This is a regular webcam image - determine type based on timing
+          if (session && image.created_at) {
+            const imageTime = new Date(image.created_at);
+            const sessionStart = new Date(session.start_time);
+            const sessionEnd = new Date(session.end_time);
+            
+            // Calculate time differences in minutes
+            const minutesBeforeStart = (sessionStart - imageTime) / (1000 * 60);
+            const minutesAfterEnd = (imageTime - sessionEnd) / (1000 * 60);
+            
+            if (minutesBeforeStart > 0) {
+              enhancedImage.attendance_type = 'before';
+              enhancedImage.minutes_early = Math.round(minutesBeforeStart);
+            } else if (minutesAfterEnd > 0) {
+              enhancedImage.attendance_type = 'after';
+            } else {
+              enhancedImage.attendance_type = 'during';
+            }
+          } else {
+            enhancedImage.attendance_type = 'during';
+          }
+          enhancedImage.minutes_early = null;
+          enhancedImage.minutes_late = null;
         }
         
-        // Add debug log
-        console.log('Processed webcam image with attendance type:', enhancedImage.attendance_type);
-        
-        return enhancedImage;
-      });
-      
-      allImages.push(...webcamWithAttendanceType);
-    }
-    
-    // Add profile image if exists and not already in the webcam data
-    if (hasProfileImage) {
-      // Check if profile image already exists in webcam data
-      const isDuplicate = allImages.some(image => 
-        image.data_path === selectedStudent.attendance.profile_image
-      );
-      
-      if (!isDuplicate) {
-        // Make sure attendance type and related information is explicitly set
-        const attendanceType = selectedStudent.attendance.attendance_type || 'default';
-        const minutesEarly = selectedStudent.attendance.minutes_early;
-        const minutesLate = selectedStudent.attendance.minutes_late;
-        
-        allImages.push({
-          data_path: selectedStudent.attendance.profile_image,
-          created_at: selectedStudent.attendance.timestamp || selectedStudent.attendance.created_at,
-          is_profile: true,
-          attendance_type: attendanceType,
-          minutes_early: minutesEarly,
-          minutes_late: minutesLate
+        // Debug logging
+        console.log('Processed webcam image:', {
+          imageId: image.id,
+          dataPath: image.data_path,
+          createdAt: image.created_at,
+          isProfile: isProfileImage,
+          attendanceType: enhancedImage.attendance_type,
+          minutesEarly: enhancedImage.minutes_early,
+          minutesLate: enhancedImage.minutes_late,
+          sessionStart: session?.start_time,
+          sessionEnd: session?.end_time
         });
         
-        console.log('Added profile image with attendance type:', attendanceType);
-      } else {
-        // Mark the existing image as profile image
-        const existingImage = allImages.find(image => 
-          image.data_path === selectedStudent.attendance.profile_image
-        );
-        if (existingImage) {
-          // Make sure attendance type and related information is explicitly set
-          const attendanceType = selectedStudent.attendance.attendance_type || 'default';
-          const minutesEarly = selectedStudent.attendance.minutes_early;
-          const minutesLate = selectedStudent.attendance.minutes_late;
-          
-          existingImage.is_profile = true;
-          existingImage.attendance_type = attendanceType;
-          existingImage.minutes_early = minutesEarly;
-          existingImage.minutes_late = minutesLate;
-          
-          console.log('Updated existing image as profile with attendance type:', attendanceType);
-        }
-      }
+        allImages.push(enhancedImage);
+        processedPaths.add(image.data_path);
+      });
+    }
+    
+    // Add profile image if it exists and wasn't already added from webcam data
+    if (hasProfileImage && !processedPaths.has(attendanceInfo.profile_image)) {
+      allImages.push({
+        data_path: attendanceInfo.profile_image,
+        created_at: attendanceInfo.timestamp,
+        is_profile: true,
+        attendance_type: attendanceInfo.attendance_type,
+        minutes_early: attendanceInfo.minutes_early,
+        minutes_late: attendanceInfo.minutes_late
+      });
+      
+      console.log('Added standalone profile image with attendance type:', attendanceInfo.attendance_type);
     }
     
     // Sort by creation time (newest first)
@@ -603,37 +636,48 @@ const SessionHistory = () => {
           <div key={index} className="webcam-item" onClick={() => handleWebcamClick(item)}>
             <div className="webcam-thumbnail">
               <img 
-                src={item.is_profile ? 
-                  (item.data_path ? `/api${item.data_path.startsWith('/') ? '' : '/'}${item.data_path.startsWith('/uploads/') ? item.data_path : `/uploads/${item.data_path.split('/').pop()}`}` : '/api/uploads/placeholder.jpg') : 
-                  `/api/monitoring/data/${id}/${selectedStudent.id}/webcam?image=${item.id}`
-                } 
+                src={(() => {
+                  // Priority 1: Use data_path if available (most reliable)
+                  if (item.data_path) {
+                    const path = item.data_path.startsWith('/') ? item.data_path : `/${item.data_path}`;
+                    return `/api${path.startsWith('/uploads/') ? path : `/uploads/${path.split('/').pop()}`}`;
+                  }
+                  
+                  // Priority 2: Use monitoring endpoint only if item.id is valid (> 0)
+                  if (item.id && item.id > 0) {
+                    return `/api/monitoring/data/${id}/${selectedStudent.id}/webcam?image=${item.id}`;
+                  }
+                  
+                  // Priority 3: Fallback to placeholder
+                  return 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2RkZGRkZCI+PC9yZWN0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZmlsbD0iIzk5OTk5OSI+Tm8gaW1hZ2U8L3RleHQ+PC9zdmc+';
+                })()}
                 alt={`Webcam image ${index + 1}`}
                 style={item.is_profile ? { border: '3px solid #28a745' } : {}}
                 onError={(e) => {
-                  // Log error with source information
-                  console.error(`Error loading image: ${e.target.src}`, {
-                    imageId: item.id,
-                    isProfile: item.is_profile,
-                    dataPath: item.data_path,
-                    sessionId: id,
-                    studentId: selectedStudent.id
-                  });
-                  
-                  // Try to load placeholder image from server
-                  e.target.src = '/api/uploads/placeholder.jpg';
-                  
-                  // Add error class to parent for styling
-                  if (e.target.parentElement) {
-                    e.target.parentElement.classList.add('image-load-error');
-                  }
-                  
-                  // Add onerror handler to placeholder image in case that fails too
-                  e.target.onerror = () => {
-                    // If placeholder also fails, use data URI for a simple colored box
+                  // Only log error if not already a fallback image
+                  if (!e.target.src.includes('data:image/svg+xml')) {
+                    console.error(`Error loading image: ${e.target.src}`, {
+                      imageId: item.id,
+                      isProfile: item.is_profile,
+                      dataPath: item.data_path,
+                      sessionId: id,
+                      studentId: selectedStudent.id
+                    });
+                    
+                    // Add error class to parent for styling
+                    if (e.target.parentElement) {
+                      e.target.parentElement.classList.add('image-load-error');
+                    }
+                    
+                    // Use data URI fallback directly (no server request)
                     e.target.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2RkZGRkZCI+PC9yZWN0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZmlsbD0iIzk5OTk5OSI+TG9hZCBlcnJvcjwvdGV4dD48L3N2Zz4=';
-                    e.target.style.opacity = '0.7';
-                    e.target.onerror = null; // Remove this handler to prevent infinite loop
-                  };
+                    if (e.target && e.target.style) {
+                      e.target.style.opacity = '0.7';
+                    }
+                    if (e.target) {
+                      e.target.onerror = null; // Remove this handler to prevent infinite loop
+                    }
+                  }
                 }}
               />
             </div>
@@ -649,10 +693,6 @@ const SessionHistory = () => {
                 {item.attendance_type === 'missing_before' && <span className="badge bg-danger ms-2">Thiếu điểm danh trước</span>}
                 {item.attendance_type === 'missing_during' && <span className="badge bg-danger ms-2">Thiếu điểm danh trong</span>}
                 {item.attendance_type === 'missing_after' && <span className="badge bg-danger ms-2">Thiếu điểm danh sau</span>}
-                {item.attendance_type === 'absent_perm' && <span className="badge bg-danger ms-2">Phép cả buổi</span>}
-                {item.attendance_type === 'absent_before_perm' && <span className="badge bg-info ms-2">Phép trước buổi</span>}
-                {item.attendance_type === 'absent_during_perm' && <span className="badge bg-warning ms-2">Phép trong buổi</span>}
-                {item.attendance_type === 'absent_after_perm' && <span className="badge bg-secondary ms-2">Phép sau buổi</span>}
                 {!item.attendance_type && <span className="badge bg-success ms-2">Có mặt</span>}
               </>
             </div>
@@ -764,7 +804,7 @@ const SessionHistory = () => {
         `}</style>
       </div>
     );
-  };
+  }, [selectedStudent, session, id, handleWebcamClick]);
   
   
   // Render file history
@@ -793,7 +833,7 @@ const SessionHistory = () => {
           </thead>
           <tbody>
             {selectedStudent.files.map((file, index) => (
-              <tr key={index} className={file.is_recalled ? 'file-recalled' : ''}>
+              <tr key={index} id={`file-${file.id}`} className={file.is_recalled ? 'file-recalled' : ''}>
                 <td style={{ width: '150px' }}>{formatDateTime(file.uploaded_at)}</td>
                 <td style={{ width: '200px' }}>
                   <div className={file.is_recalled ? 'text-muted' : ''}>
@@ -806,7 +846,6 @@ const SessionHistory = () => {
                 <td style={{ width: '300px' }}>
                   {file.note ? (
                     <div className={`${file.is_recalled ? 'text-muted' : 'text-info'}`}>
-                      <i className="fas fa-sticky-note me-1"></i>
                       {file.note}
                     </div>
                   ) : (
@@ -817,7 +856,6 @@ const SessionHistory = () => {
                   {file.is_recalled ? (
                     <div className="text-muted">
                       <i className="fas fa-ban me-1"></i>
-                      Không thể tải xuống
                     </div>
                   ) : (
                     <button 
@@ -862,7 +900,7 @@ const SessionHistory = () => {
                         setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
                       } catch (error) {
                         console.error('Lỗi khi tải file:', error);
-                        toast.error('Không thể tải xuống file. Vui lòng thử lại sau.');
+                        showAlert('Không thể tải xuống file. Vui lòng thử lại sau.', 'danger');
                       }
                     }}
                     >
@@ -981,67 +1019,16 @@ const SessionHistory = () => {
   return (
     <div>
       <div className="d-flex justify-content-between align-items-center mb-4">
-        <div>
-          <h2 className="fw-bold">Lịch sử hoạt động buổi học</h2>
-          <div className="d-flex align-items-center mt-2">
-            <div className={`connection-status ${socketConnected ? 'connected' : 'disconnected'}`}>
-              {socketConnected ? <Wifi className="me-2 text-success" size={16} /> : <WifiOff className="me-2 text-danger" size={16} />}
-              <small className="fw-medium">{socketConnected ? 'Đang kết nối trực tuyến' : 'Mất kết nối'}</small>
+        <div className="d-flex align-items-center">
+          <h2 className="mb-0 fw-bold">Lịch sử hoạt động buổi học</h2>
+          {isAutoRefreshing && (
+            <div className="auto-refresh-indicator ms-3">
+              <div className="spinner-border spinner-border-sm text-primary" role="status">
+                <span className="visually-hidden">Đang cập nhật...</span>
+              </div>
+              <span className="ms-2 small text-muted">Đang cập nhật...</span>
             </div>
-            {lastUpdate && (
-              <small className="text-muted ms-3">
-                Cập nhật lần cuối: {format(lastUpdate, 'HH:mm:ss')}
-              </small>
-            )}
-            <button 
-              className="btn-modern ms-2" 
-              style={{ backgroundColor: '#6c757d', padding: '8px 12px' }}
-              onClick={() => {
-                toast.info('Đang tải lại dữ liệu...');
-                fetchSessionHistory(false);
-              }}
-              title="Làm mới dữ liệu"
-            >
-              <RotateCcw size={16} />
-            </button>
-          </div>
-          <style jsx="true">{`
-            .connection-status {
-              display: flex;
-              align-items: center;
-              font-size: 0.8rem;
-            }
-            .status-dot {
-              width: 8px;
-              height: 8px;
-              border-radius: 50%;
-              margin-right: 5px;
-            }
-            .connected .status-dot {
-              background-color: #28a745;
-              box-shadow: 0 0 5px #28a745;
-            }
-            .disconnected .status-dot {
-              background-color: #dc3545;
-              box-shadow: 0 0 5px #dc3545;
-            }
-            
-            /* Custom scrollbar for student list */
-            .list-group::-webkit-scrollbar {
-              width: 6px;
-            }
-            .list-group::-webkit-scrollbar-track {
-              background: #f1f1f1;
-              border-radius: 3px;
-            }
-            .list-group::-webkit-scrollbar-thumb {
-              background: #c1c1c1;
-              border-radius: 3px;
-            }
-            .list-group::-webkit-scrollbar-thumb:hover {
-              background: #a8a8a8;
-            }
-          `}</style>
+          )}
         </div>
         <button 
           className="btn-modern" 
@@ -1051,6 +1038,24 @@ const SessionHistory = () => {
           <ArrowLeft size={16} className="me-2" />
           Quay lại danh sách
         </button>
+        
+        <style jsx="true">{`
+          /* Custom scrollbar for student list */
+          .list-group::-webkit-scrollbar {
+            width: 6px;
+          }
+          .list-group::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 3px;
+          }
+          .list-group::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+          }
+          .list-group::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+          }
+        `}</style>
       </div>
       
       {session && (
@@ -1065,7 +1070,9 @@ const SessionHistory = () => {
                   <div className="d-flex align-items-center">
                     <Calendar className="me-2 text-primary" size={18} />
                     <span className="fw-medium">Ngày:</span>
-                    <span className="ms-2">{formatDate(session.date)}</span>
+                    <span className="ms-2">{session.end_date && session.end_date !== session.date ? 
+                      `${formatDate(session.date)} - ${formatDate(session.end_date)}` : 
+                      formatDate(session.date)}</span>
                   </div>
                   <div className="d-flex align-items-center">
                     <Clock className="me-2 text-primary" size={18} />
@@ -1084,7 +1091,7 @@ const SessionHistory = () => {
                   <div className="d-flex align-items-center">
                     <Users className="me-2 text-primary" size={18} />
                     <span className="fw-medium">Nhóm:</span>
-                    <span className="ms-2">{session.group_name}</span>
+                    <span className="ms-2">{session.group_names}</span>
                   </div>
                   <div className="d-flex align-items-center">
                     <Users className="me-2 text-primary" size={18} />
@@ -1103,6 +1110,50 @@ const SessionHistory = () => {
                 </div>
               </Col>
             </Row>
+            
+            {/* Sinh viên ra ca trực */}
+            {(() => {
+              let dutyStudents = [];
+              try {
+                if (session.monitoring_options) {
+                  const config = typeof session.monitoring_options === 'string' 
+                    ? JSON.parse(session.monitoring_options) 
+                    : session.monitoring_options;
+                  
+                  if (config?.attendance?.during_session?.duty_students) {
+                    dutyStudents = config.attendance.during_session.duty_students;
+                  }
+                }
+              } catch (error) {
+                console.error('Error parsing monitoring_options for duty students:', error);
+              }
+              
+              return dutyStudents.length > 0 ? (
+                <div className="mt-4 pt-3 border-top">
+                  <h6 className="fw-bold text-primary mb-3">
+                    <Users className="me-2" size={18} />
+                    Sinh viên ra ca trực giữa giờ
+                  </h6>
+                  <div className="row">
+                    {dutyStudents.map((student, index) => (
+                      <div key={index} className="col-md-6 col-lg-4 mb-2">
+                        <div className="d-flex align-items-center p-2 border rounded" style={{ backgroundColor: '#f8f9fa' }}>
+                          <div className="me-2">
+                            <div className="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style={{ width: '32px', height: '32px', fontSize: '0.8rem' }}>
+                              <span className="fw-bold">{student.name ? student.name.charAt(0).toUpperCase() : 'S'}</span>
+                            </div>
+                          </div>
+                          <div>
+                            <div className="fw-bold small">{student.name || student.full_name || 'Sinh viên'}</div>
+                            <small className="text-muted">MSSV: {student.id || student.student_id || 'N/A'}</small>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null;
+            })()}
           </div>
         </div>
       )}
@@ -1135,14 +1186,43 @@ const SessionHistory = () => {
                     overflowY: students.length > 10 ? 'auto' : 'visible'
                   }}
                 >
-                  {students.map((student) => (
+                  {students.map((student) => {
+                    // Kiểm tra xem sinh viên có phải là sinh viên ra ca trực không
+                    const isDutyStudent = (() => {
+                      try {
+                        if (session.monitoring_options) {
+                          const config = typeof session.monitoring_options === 'string' 
+                            ? JSON.parse(session.monitoring_options) 
+                            : session.monitoring_options;
+                          
+                          if (config?.attendance?.during_session?.duty_students) {
+                            return config.attendance.during_session.duty_students.some(dutyStudent => 
+                              dutyStudent.id === student.id || dutyStudent.student_id === student.username
+                            );
+                          }
+                        }
+                      } catch (error) {
+                        console.error('Error checking duty student:', error);
+                      }
+                      return false;
+                    })();
+
+                    return (
                     <button
                       key={student.id}
                       className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center ${selectedStudent && selectedStudent.id === student.id ? 'active' : ''}`}
                       onClick={() => handleSelectStudent(student)}
                     >
                       <div>
-                        <div className="fw-bold">{student.full_name}</div>
+                        <div className="fw-bold d-flex align-items-center">
+                          <span>{student.full_name}</span>
+                          {isDutyStudent && (
+                            <Badge bg="info" className="ms-2 modern-badge" style={{ fontSize: '0.6rem' }}>
+                              <Users size={10} className="me-1" />
+                              Ra ca trực giữa giờ 
+                            </Badge>
+                          )}
+                        </div>
                         <small>{student.username}</small>
                       </div>
                       {student.attendance && (
@@ -1151,7 +1231,8 @@ const SessionHistory = () => {
                         </Badge>
                       )}
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1187,7 +1268,7 @@ const SessionHistory = () => {
                       <span>Hình ảnh</span>
                     </span>
                   }>
-                    {renderWebcamHistory()}
+                    {renderWebcamHistory}
                   </Tab>
                   <Tab eventKey="files" title={
                     <span className="tab-title">
@@ -1227,120 +1308,65 @@ const SessionHistory = () => {
             <>
               <div className="modal-image-container">
                 <img 
-                  src={selectedImage.is_profile ? 
-                    (selectedImage.data_path ? `/api${selectedImage.data_path.startsWith('/') ? '' : '/'}${selectedImage.data_path.startsWith('/uploads/') ? selectedImage.data_path : `/uploads/${selectedImage.data_path.split('/').pop()}`}` : '/api/uploads/placeholder.jpg') : 
-                    `/api/monitoring/data/${id}/${selectedStudent.id}/webcam?image=${selectedImage.id}`
-                  }
+                  src={(() => {
+                    // Priority 1: Use data_path if available (most reliable)
+                    if (selectedImage.data_path) {
+                      const path = selectedImage.data_path.startsWith('/') ? selectedImage.data_path : `/${selectedImage.data_path}`;
+                      return `/api${path.startsWith('/uploads/') ? path : `/uploads/${path.split('/').pop()}`}`;
+                    }
+                    
+                    // Priority 2: Use monitoring endpoint only if selectedImage.id is valid (> 0)
+                    if (selectedImage.id && selectedImage.id > 0) {
+                      return `/api/monitoring/data/${id}/${selectedStudent.id}/webcam?image=${selectedImage.id}`;
+                    }
+                    
+                    // Priority 3: Fallback to placeholder
+                    return 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2RkZGRkZCI+PC9yZWN0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZmlsbD0iIzk5OTk5OSI+Tm8gaW1hZ2U8L3RleHQ+PC9zdmc+';
+                  })()}
                   alt="Webcam image"
                   className="modal-image"
                   onError={(e) => {
-                    // Log error with source information
-                    console.error(`Error loading image in modal: ${e.target.src}`, {
-                      imageId: selectedImage.id,
-                      isProfile: selectedImage.is_profile,
-                      dataPath: selectedImage.data_path,
-                      sessionId: id,
-                      studentId: selectedStudent.id
-                    });
-                    
-                    // Try to load placeholder image from server
-                    e.target.src = '/api/uploads/placeholder.jpg';
-                    
-                    // Add error class for styling
-                    e.target.classList.add('image-load-error');
-                    
-                    // Add onerror handler to placeholder image in case that fails too
-                    e.target.onerror = () => {
-                      // If placeholder also fails, use data URI for a simple colored box
-                      e.target.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMjAwIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2RkZGRkZCI+PC9yZWN0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZmlsbD0iIzk5OTk5OSI+S2jDtG5nIHRo4buDIHThuqNpIGjDrG5oIOG6o25oPC90ZXh0Pjwvc3ZnPg==';
-                      e.target.style.opacity = '0.7';
-                      e.target.onerror = null; // Remove this handler to prevent infinite loop
-                    };
+                    // Only log error if not already a fallback image
+                    if (!e.target.src.includes('data:image/svg+xml')) {
+                      console.error(`Error loading image in modal: ${e.target.src}`, {
+                        imageId: selectedImage.id,
+                        isProfile: selectedImage.is_profile,
+                        dataPath: selectedImage.data_path,
+                        sessionId: id,
+                        studentId: selectedStudent.id
+                      });
+                      
+                      // Add error class for styling
+                      e.target.classList.add('image-load-error');
+                      
+                      // Use data URI fallback directly (no server request)
+                      e.target.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2RkZGRkZCI+PC9yZWN0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZmlsbD0iIzk5OTk5OSI+TG9hZCBlcnJvcjwvdGV4dD48L3N2Zz4=';
+                      if (e.target && e.target.style) {
+                        e.target.style.opacity = '0.7';
+                      }
+                      if (e.target) {
+                        e.target.onerror = null; // Remove this handler to prevent infinite loop
+                      }
+                    }
                   }}
                 />
               </div>
-              <div className="mt-3">
-                <h3><Badge bg="success">Ảnh điểm danh</Badge></h3>
-                <p><strong>Thời gian:</strong> {formatDateTime(selectedImage.created_at)}</p>
-                <div className="mt-2">
-                  <p>
-                    <strong>Loại điểm danh:</strong>{' '}
-                    {selectedImage.attendance_type === 'before' && <Badge bg="success">Trước buổi học</Badge>}
-                    {selectedImage.attendance_type === 'during' && <Badge bg="success">Trong buổi học</Badge>}
-                    {selectedImage.attendance_type === 'after' && <Badge bg="success">Sau buổi học</Badge>}
-                    {selectedImage.attendance_type === 'early' && <Badge bg="info">Sớm {selectedImage.minutes_early} phút</Badge>}
-                    {selectedImage.attendance_type === 'late' && <Badge bg="warning">Trễ {selectedImage.minutes_late} phút</Badge>}
-                    {selectedImage.attendance_type === 'late_leave' && <Badge bg="warning">Về trễ {selectedImage.minutes_late} phút</Badge>}
-                    {selectedImage.attendance_type === 'missing_before' && <Badge bg="danger">Thiếu điểm danh trước</Badge>}
-                    {selectedImage.attendance_type === 'missing_during' && <Badge bg="danger">Thiếu điểm danh trong</Badge>}
-                    {selectedImage.attendance_type === 'missing_after' && <Badge bg="danger">Thiếu điểm danh sau</Badge>}
-                    {selectedImage.attendance_type === 'absent_perm' && <Badge bg="danger">Phép cả buổi</Badge>}
-                    {selectedImage.attendance_type === 'absent_before_perm' && <Badge bg="info">Phép trước buổi</Badge>}
-                    {selectedImage.attendance_type === 'absent_during_perm' && <Badge bg="warning">Phép trong buổi</Badge>}
-                    {selectedImage.attendance_type === 'absent_after_perm' && <Badge bg="secondary">Phép sau buổi</Badge>}
-                    {!selectedImage.attendance_type && <Badge bg="success">Có mặt</Badge>}
-                  </p>
-                  {(selectedImage.attendance_type === 'early' || selectedImage.attendance_type === 'late' || selectedImage.attendance_type === 'late_leave') && (
-                    <p>
-                      <strong>Thời gian {selectedImage.attendance_type === 'early' ? 'sớm' : 'trễ'}:</strong>{' '}
-                      {selectedImage.attendance_type === 'early' ? selectedImage.minutes_early : selectedImage.minutes_late} phút
-                    </p>
-                  )}
-                </div>
-                <p className="mt-2">
-                  <button 
-                    className="btn-modern" 
-                    style={{ backgroundColor: '#256176', padding: '6px 12px', fontSize: '0.875rem' }}
-                    onClick={async () => {
-                      try {
-                        // Tạo URL đầy đủ - sử dụng API endpoint
-                        const imageUrl = selectedImage.is_profile ? 
-                          (selectedImage.data_path ? `/api${selectedImage.data_path.startsWith('/') ? '' : '/'}${selectedImage.data_path.startsWith('/uploads/') ? selectedImage.data_path : `/uploads/${selectedImage.data_path.split('/').pop()}`}` : '/api/uploads/placeholder.jpg') : 
-                          `/api/monitoring/data/${id}/${selectedStudent.id}/webcam?image=${selectedImage.id}`;
-                        const token = localStorage.getItem('token');
-                        
-                        // Sử dụng fetch với token trong header để lấy hình ảnh
-                        const response = await fetch(imageUrl, {
-                          headers: {
-                            'x-auth-token': token
-                          }
-                        });
-                        
-                        if (!response.ok) {
-                          throw new Error('Không thể tải hình ảnh');
-                        }
-                        
-                        // Chuyển đổi response thành blob
-                        const blob = await response.blob();
-                        
-                        // Tạo URL cho blob
-                        const blobUrl = URL.createObjectURL(blob);
-                        
-                        // Mở URL trong tab mới
-                        window.open(blobUrl, '_blank');
-                      } catch (error) {
-                        console.error('Lỗi khi tải hình ảnh:', error);
-                        toast.error('Không thể tải hình ảnh. Vui lòng thử lại sau.');
-                      }
-                    }}
-                  >
-                    <ExternalLink size={14} className="me-1" />
-                    Xem ảnh đầy đủ
-                  </button>
-                </p>
+              <div className="modal-image-info mt-3">
+                <p className="mb-1"><strong>Thời gian:</strong> {formatDateTime(selectedImage.created_at)}</p>
+                {selectedImage.is_profile && (
+                  <Badge bg="success">Ảnh điểm danh</Badge>
+                )}
+                {selectedImage.attendance_type && (
+                  <>
+                    {selectedImage.attendance_type === 'before' && <Badge bg="info" className="ms-2">Điểm danh trước buổi học</Badge>}
+                    {selectedImage.attendance_type === 'during' && <Badge bg="info" className="ms-2">Điểm danh trong buổi học</Badge>}
+                    {selectedImage.attendance_type === 'after' && <Badge bg="info" className="ms-2">Điểm danh sau buổi học</Badge>}
+                  </>
+                )}
               </div>
             </>
           )}
         </Modal.Body>
-        <Modal.Footer>
-          <button 
-            className="btn-modern" 
-            style={{ backgroundColor: '#6c757d' }}
-            onClick={() => setShowWebcamModal(false)}
-          >
-            Đóng
-          </button>
-        </Modal.Footer>
       </Modal>
     </div>
   );
@@ -1348,7 +1374,7 @@ const SessionHistory = () => {
 
 export default SessionHistory;
 
-// Add CSS for recalled files
+// Add CSS for recalled files and highlight effect
 const style = document.createElement('style');
 style.textContent = `
   .file-recalled {
@@ -1363,6 +1389,18 @@ style.textContent = `
   
   .file-recalled td {
     text-decoration: line-through;
+  }
+  
+  .highlight-file {
+    background-color: #fff3cd !important;
+    border: 2px solid #ffc107 !important;
+    animation: highlight-pulse 0.5s ease-in-out 3;
+  }
+  
+  @keyframes highlight-pulse {
+    0% { background-color: #fff3cd; }
+    50% { background-color: #ffeaa7; }
+    100% { background-color: #fff3cd; }
   }
 `;
 document.head.appendChild(style);

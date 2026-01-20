@@ -3,10 +3,13 @@ import { Card, Button, Row, Col, Alert, Form, Spinner, Modal, Badge } from 'reac
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import QRCode from 'qrcode.react';
-import { toast } from 'react-toastify';
+import { useAlert } from '../../contexts/AlertContext';
 import { QrCode, ArrowLeft, Download, RefreshCw, Key, Clock, Copy, Info, AlertTriangle, CheckCircle, XCircle, Edit3, Save, X } from 'lucide-react';
+import usePageTitle from '../../hooks/usePageTitle';
 
 const QRCodePage = () => {
+  usePageTitle('Mã QR điểm danh');
+  const { showAlert } = useAlert();
   const { id } = useParams();
   const navigate = useNavigate();
   const { api } = useAuth();
@@ -87,11 +90,11 @@ const QRCodePage = () => {
       
       if (response.data.success) {
         setSharedQRCodeData(response.data.data);
-        toast.success('Đã tạo mã QR dùng chung mới thành công');
+        showAlert('Đã tạo mã QR dùng chung mới thành công', 'success');
       }
     } catch (error) {
       console.error('Error generating shared QR code:', error);
-      toast.error(error.response?.data?.message || 'Không thể tạo mã QR dùng chung. Vui lòng thử lại sau.');
+      showAlert(error.response?.data?.message || 'Không thể tạo mã QR dùng chung. Vui lòng thử lại sau.', 'danger');
     } finally {
       setGenerating(false);
     }
@@ -116,11 +119,11 @@ const QRCodePage = () => {
         }));
         
         setShowPasswordModal(false);
-        toast.success('Đã cập nhật mật khẩu thành công');
+        showAlert('Đã cập nhật mật khẩu thành công', 'success');
       }
     } catch (error) {
       console.error('Error updating password:', error);
-      toast.error(error.response?.data?.message || 'Không thể cập nhật mật khẩu. Vui lòng thử lại sau.');
+      showAlert(error.response?.data?.message || 'Không thể cập nhật mật khẩu. Vui lòng thử lại sau.', 'danger');
     } finally {
       setUpdatingPassword(false);
     }
@@ -130,7 +133,7 @@ const QRCodePage = () => {
   const downloadQRCode = (elementId, fileName) => {
     const canvas = document.getElementById(elementId);
     if (!canvas) {
-      toast.error('Không thể tải xuống mã QR');
+      showAlert('Không thể tải xuống mã QR', 'danger');
       return;
     }
     
@@ -406,7 +409,7 @@ const QRCodePage = () => {
                       type="button"
                       onClick={() => {
                         navigator.clipboard.writeText(sharedQRCodeData.qrUrl);
-                        toast.success('Đã sao chép link QR');
+                        showAlert('Đã sao chép link QR', 'success');
                       }}
                       title="Sao chép link"
                     >

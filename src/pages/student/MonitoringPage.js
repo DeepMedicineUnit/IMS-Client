@@ -1,17 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Row, Col, Button, Alert, Form, Spinner, Modal } from 'react-bootstrap';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import Webcam from 'react-webcam';
-import { toast } from 'react-toastify';
+import { useAlert } from '../../contexts/AlertContext';
 import io from 'socket.io-client';
 import axios from 'axios';
 import '../../styles/modern-ui.css';
+import usePageTitle from '../../hooks/usePageTitle';
+import { useTranslation } from 'react-i18next';
 
 const MonitoringPage = () => {
+  const { t } = useTranslation();
+  usePageTitle(t('monitoringPage.title'));
+  const { showAlert } = useAlert();
   const { id } = useParams();
-  const { api } = useAuth();
+  const { api, currentUser } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -118,26 +124,26 @@ const MonitoringPage = () => {
             // Show warning after first violation
             if (!showGeofenceWarning) {
               setShowGeofenceWarning(true);
-              toast.warning(`Bạn đang ở ngoài phạm vi cho phép (${session.monitoring_options.location.geofence.radius}m). Vui lòng di chuyển trở lại khu vực buổi học.`);
+              showAlert(t('monitoringPage.geofence.outsideRange', { radius: session.monitoring_options.location.geofence.radius }), 'warning');
             }
             
             // If too many violations (3+), force stop monitoring
             if (geofenceViolationCount >= 2) {
-              toast.error('Bạn đã ở ngoài phạm vi cho phép quá lâu. Buổi học của bạn sẽ bị kết thúc.');
+              showAlert(t('monitoringPage.geofence.tooLongOutside'), 'danger');
               stopMonitoring();
-              navigate('/student/dashboard');
+              navigate('/student/attendance');
             }
           } else {
             // Reset if back within geofence
             if (showGeofenceWarning) {
               setShowGeofenceWarning(false);
               setGeofenceViolationCount(0);
-              toast.success('Bạn đã trở lại khu vực buổi học.');
+              showAlert(t('monitoringPage.geofence.returnedToArea'), 'success');
             }
           }
         },
         (error) => {
-          console.error('Error getting location for geofence check:', error);
+          // Error getting location for geofence check
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
@@ -153,8 +159,8 @@ const MonitoringPage = () => {
           const stream = await navigator.mediaDevices.getUserMedia({ video: true });
           // We'll use this stream later, so don't stop it now
         } catch (err) {
-          console.error('Error accessing webcam:', err);
-          toast.error('Không thể truy cập camera. Buổi học này yêu cầu quyền truy cập camera.');
+          // Error accessing webcam
+          showAlert(t('monitoringPage.monitoring.permissions.cameraRequired'), 'danger');
           // For delayed enforcement, we warn but don't force logout yet
         }
       }, 5 * 60 * 1000); // Check after 5 minutes
@@ -166,8 +172,8 @@ const MonitoringPage = () => {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           stream.getTracks().forEach(track => track.stop());
         } catch (err) {
-          console.error('Error accessing microphone:', err);
-          toast.error('Không thể truy cập microphone. Buổi học này yêu cầu quyền ghi âm.');
+          // Error accessing microphone
+          showAlert(t('monitoringPage.monitoring.permissions.microphoneRequired'), 'danger');
         }
       }, 5 * 60 * 1000); // Check after 5 minutes
     }
@@ -178,8 +184,8 @@ const MonitoringPage = () => {
           navigator.geolocation.getCurrentPosition(
             () => {},
             (err) => {
-              console.error('Error accessing location:', err);
-              toast.error('Không thể truy cập vị trí. Buổi học này yêu cầu quyền truy cập vị trí.');
+              // Error accessing location
+              showAlert(t('monitoringPage.monitoring.permissions.locationRequired'), 'danger');
             }
           );
         }
@@ -218,6 +224,96 @@ const MonitoringPage = () => {
   // Auto-refresh indicator
   const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
   
+  // File info display state
+  const [showFileInfo, setShowFileInfo] = useState({});
+  
+  // Toggle file info display
+  const toggleFileInfo = (fileId) => {
+    setShowFileInfo(prev => ({
+      ...prev,
+      [fileId]: !prev[fileId]
+    }));
+  };
+
+  // Helper function to check if current user is a duty student
+  const isCurrentUserDutyStudent = () => {
+    if (!currentUser || !session?.monitoring_options?.attendance?.during_session?.duty_students) {
+      return false;
+    }
+    
+    const dutyStudents = session.monitoring_options.attendance.during_session.duty_students;
+    
+    // Debug logging
+    console.log('Checking duty student status:');
+    console.log('Current user:', { id: currentUser.id, student_id: currentUser.student_id, username: currentUser.username });
+    console.log('Duty students:', dutyStudents);
+    
+    const isDuty = dutyStudents.some(dutyStudent => 
+      dutyStudent.id === currentUser.id || 
+      dutyStudent.student_id === currentUser.id ||
+      dutyStudent.student_id === currentUser.student_id || 
+      dutyStudent.student_id === currentUser.username ||
+      dutyStudent.id === currentUser.student_id
+    );
+    
+    console.log('Is duty student:', isDuty);
+    return isDuty;
+  };
+
+  // Helper function to check attendance status for each window
+  const getAttendanceStatus = (windowType) => {
+    if (!attendanceData) {
+      return { hasAttended: false, attendanceType: null };
+    }
+
+    // API trả về dữ liệu với cấu trúc: { attended: boolean, attendance: record, attendance_history: [...] }
+    const currentAttendance = attendanceData.attendance;
+    const attendanceHistory = attendanceData.attendance_history || [];
+    
+    // Tạo array tất cả records (current + history)
+    const allRecords = [];
+    if (currentAttendance) {
+      allRecords.push(currentAttendance);
+    }
+    allRecords.push(...attendanceHistory);
+    
+    switch (windowType) {
+      case 'before':
+        const beforeRecord = allRecords.find(record => 
+          record.attendance_type === 'before' || record.attendance_type === 'early' || record.attendance_type === 'late_before'
+        );
+        return {
+          hasAttended: !!beforeRecord,
+          attendanceType: beforeRecord?.attendance_type,
+          isLate: beforeRecord?.attendance_type === 'late_before',
+          minutesLate: beforeRecord?.minutes_late || 0
+        };
+      
+      case 'during':
+        return {
+          hasAttended: allRecords.some(record => 
+            record.attendance_type === 'during'
+          ),
+          attendanceType: allRecords.find(record => 
+            record.attendance_type === 'during'
+          )?.attendance_type
+        };
+      
+      case 'after':
+        return {
+          hasAttended: allRecords.some(record => 
+            record.attendance_type === 'after' || record.attendance_type === 'late_leave'
+          ),
+          attendanceType: allRecords.find(record => 
+            record.attendance_type === 'after' || record.attendance_type === 'late_leave'
+          )?.attendance_type
+        };
+      
+      default:
+        return { hasAttended: false, attendanceType: null };
+    }
+  };
+  
   // Function to fetch session data silently (without loading state)
   const fetchSessionDataSilently = async () => {
     try {
@@ -232,21 +328,27 @@ const MonitoringPage = () => {
           try {
             parsedSessionData.monitoring_options = JSON.parse(sessionData.monitoring_options);
           } catch (error) {
-            console.error('Error parsing monitoring_options:', error);
+            // Error parsing monitoring_options
             parsedSessionData.monitoring_options = null;
           }
         }
         
-        // Update session state silently
+        // Log duty students for debugging
+        if (parsedSessionData.monitoring_options?.attendance?.during_session?.duty_students) {
+          console.log('Duty students updated:', parsedSessionData.monitoring_options.attendance.during_session.duty_students);
+        }
+        
+        // Update session state silently - make sure monitoring_options is fully replaced
         setSession(prevSession => ({
           ...prevSession,
           ...parsedSessionData,
+          monitoring_options: parsedSessionData.monitoring_options, // Ensure this is replaced, not merged
           students: parsedSessionData.students || prevSession?.students,
           class_students: parsedSessionData.class_students || prevSession?.class_students
         }));
       }
     } catch (error) {
-      console.error('Error fetching session data silently:', error);
+      // Error fetching session data silently
     } finally {
       setIsAutoRefreshing(false);
     }
@@ -261,7 +363,7 @@ const MonitoringPage = () => {
         setAttendanceData(attendanceResponse.data.data);
       }
     } catch (error) {
-      console.error('Error fetching attendance data silently:', error);
+      // Error fetching attendance data silently
     }
   };
 
@@ -273,7 +375,7 @@ const MonitoringPage = () => {
         setUploadedFiles(filesResponse.data.data);
       }
     } catch (error) {
-      console.error('Error fetching files data silently:', error);
+      console.error('Error fetching files data:', error);
     }
   };
 
@@ -286,7 +388,7 @@ const MonitoringPage = () => {
         // Get session details
         const sessionResponse = await api.get(`/sessions/${id}`);
         if (!sessionResponse.data.success) {
-          throw new Error(sessionResponse.data.message || 'Không thể tải thông tin buổi học');
+          throw new Error(sessionResponse.data.message || t('monitoringPage.cannotLoad'));
         }
         
         const sessionData = sessionResponse.data.data;
@@ -297,7 +399,7 @@ const MonitoringPage = () => {
           try {
             parsedSessionData.monitoring_options = JSON.parse(sessionData.monitoring_options);
           } catch (error) {
-            console.error('Error parsing monitoring_options:', error);
+            // Error parsing monitoring_options
             parsedSessionData.monitoring_options = null;
           }
         }
@@ -330,12 +432,12 @@ const MonitoringPage = () => {
             
             if (!geofenceResponse.data.success) {
               // If not within geofence, show error and redirect to dashboard
-              setError(`Bạn đang ở ngoài phạm vi cho phép (${parsedSessionData.monitoring_options.location.geofence.radius}m). Vui lòng di chuyển đến địa điểm buổi học để tham gia.`);
-              toast.error('Không thể tham gia buổi học: Bạn đang ở ngoài phạm vi cho phép.');
+              setError(t('monitoringPage.geofence.cannotJoin', { radius: parsedSessionData.monitoring_options.location.geofence.radius }));
+              showAlert(t('monitoringPage.geofence.cannotJoinAlert'), 'danger');
               
               // Redirect to dashboard after 3 seconds
               setTimeout(() => {
-                navigate('/student/dashboard');
+                navigate('/student/attendance');
               }, 3000);
               
               return; // Exit function early
@@ -345,18 +447,18 @@ const MonitoringPage = () => {
             
             // If location error is from the API (403 status), it's a geofence violation
             if (locError.response?.status === 403) {
-              setError(locError.response.data.message || 'Bạn đang ở ngoài phạm vi cho phép của buổi học này.');
-              toast.error('Không thể tham gia buổi học: Bạn đang ở ngoài phạm vi cho phép.');
+              setError(locError.response.data.message || t('monitoringPage.geofence.cannotJoinOutside'));
+              showAlert(t('monitoringPage.geofence.cannotJoinAlertOutside'), 'danger');
               
               // Redirect to dashboard after 3 seconds
               setTimeout(() => {
-                navigate('/student/dashboard');
+                navigate('/student/attendance');
               }, 3000);
               
               return; // Exit function early
             } else {
               // For other errors, just show a warning but allow continuing
-              toast.warning('Không thể xác định vị trí của bạn. Vui lòng cấp quyền truy cập vị trí.');
+              showAlert(t('monitoringPage.geofence.locationPermission'), 'warning');
             }
           }
         }
@@ -385,15 +487,15 @@ const MonitoringPage = () => {
         
         // Check if already attended
         try {
-          console.log('Checking attendance for session:', id);
+          // Checking attendance for session
         const attendanceResponse = await api.get(`/sessions/${id}/attendance`);
-          console.log('Attendance response:', attendanceResponse.data);
+          // Attendance response
           
         if (attendanceResponse.data.success) {
           setIsAttended(attendanceResponse.data.data.attended);
             setAttendanceData(attendanceResponse.data.data);
-            console.log('Attendance status:', attendanceResponse.data.data.attended);
-            console.log('Full attendance data:', JSON.stringify(attendanceResponse.data.data, null, 2));
+            // Attendance status
+            // Full attendance data
           
           // Automatically start monitoring since the user is already attended
           if (attendanceResponse.data.data.attended) {
@@ -403,7 +505,7 @@ const MonitoringPage = () => {
           }
           }
         } catch (attendanceError) {
-          console.error('Error checking attendance:', attendanceError);
+          // Error checking attendance
           // If attendance check fails, assume not attended
           setIsAttended(false);
         }
@@ -415,9 +517,9 @@ const MonitoringPage = () => {
         }
         
         // Get all students in the session - try multiple approaches
-        console.log('Session data students:', sessionData.students);
-        console.log('Session class_id:', sessionData.class_id);
-        console.log('Session group_id:', sessionData.group_id);
+        // Session data students
+        // Session class_id
+        // Session group_id
         
         // Try to get students from multiple sources
         let studentsData = [];
@@ -425,49 +527,46 @@ const MonitoringPage = () => {
         // 1. Try session.students first
         if (sessionData.students && sessionData.students.length > 0) {
           studentsData = sessionData.students;
-          console.log('Using students from session data:', studentsData.length);
+          // Using students from session data
         }
         
         // 2. Try class students if no session students
         if (studentsData.length === 0 && sessionData.class_id) {
           try {
-            console.log('Fetching class students for class_id:', sessionData.class_id);
+            // Fetching class students for class_id
             const classStudentsResponse = await api.get(`/classes/${sessionData.class_id}/students`);
             if (classStudentsResponse.data.success && classStudentsResponse.data.data) {
               studentsData = classStudentsResponse.data.data;
-              console.log('Got class students:', studentsData.length);
+              // Got class students
             }
           } catch (error) {
-            console.error('Error fetching class students:', error);
+            // Error fetching class students
           }
         }
         
         // 3. Try group students if no students yet
         if (studentsData.length === 0 && sessionData.group_id) {
           try {
-            console.log('Fetching group students for group_id:', sessionData.group_id, 'session_id:', id);
-            console.log('API URL:', `/sessions/groups/${sessionData.group_id}/members?sessionId=${id}`);
+            // Fetching group students for group_id
+            // API URL
             const groupStudentsResponse = await api.get(`/sessions/groups/${sessionData.group_id}/members?sessionId=${id}`);
-            console.log('Group students response:', groupStudentsResponse.data);
+
             if (groupStudentsResponse.data.success && groupStudentsResponse.data.data) {
               studentsData = groupStudentsResponse.data.data;
-              console.log('Got group students with attendance:', studentsData.length);
-              console.log('Sample student data:', studentsData[0]);
+
             } else {
-              console.log('No students data in response:', groupStudentsResponse.data);
+
             }
           } catch (error) {
-            console.error('Error fetching group students:', error);
-            console.error('Error details:', error.response?.data);
           }
         } else {
-          console.log('Skipping group students fetch - studentsData.length:', studentsData.length, 'group_id:', sessionData.group_id);
+
         }
         
         // 4. Try to get students from session attendance if still no students
         if (studentsData.length === 0) {
           try {
-            console.log('Trying to get students from session attendance...');
+
             const attendanceResponse = await api.get(`/sessions/${id}/attendance`);
             if (attendanceResponse.data.success && attendanceResponse.data.data) {
               // Extract students from attendance data
@@ -481,18 +580,18 @@ const MonitoringPage = () => {
                   class_name: record.class_name,
                   attendance: record.has_attended || false
                 }));
-                console.log('Got students from session attendance:', studentsData.length);
+
               }
             }
           } catch (error) {
-            console.error('Error fetching session students:', error);
+
           }
         }
         
         // 5. If still no students, try to get from history API
         if (studentsData.length === 0) {
           try {
-            console.log('Trying to get students from history API...');
+
             // Try to get students from history API (this might work for students)
             const historyResponse = await api.get(`/history/sessions/${id}`);
             if (historyResponse.data.success && historyResponse.data.data) {
@@ -513,44 +612,41 @@ const MonitoringPage = () => {
                   }
                 });
                 studentsData = Array.from(studentMap.values());
-                console.log('Got students from history API:', studentsData.length);
+
               }
             }
           } catch (error) {
-            console.error('Error fetching history data:', error);
+
           }
         }
         
         // 6. If still no students, try to get from session data directly
         if (studentsData.length === 0) {
           try {
-            console.log('Trying to get students from session data directly...');
+
             // Try to get session details with students included
             const sessionDetailsResponse = await api.get(`/sessions/${id}`);
             if (sessionDetailsResponse.data.success && sessionDetailsResponse.data.data) {
               const sessionDetails = sessionDetailsResponse.data.data;
               if (sessionDetails.students && Array.isArray(sessionDetails.students)) {
                 studentsData = sessionDetails.students;
-                console.log('Got students from session details:', studentsData.length);
+
               }
             }
           } catch (error) {
-            console.error('Error fetching session details:', error);
+
           }
         }
         
         parsedSessionData.class_students = studentsData;
-        console.log('Final class_students:', parsedSessionData.class_students);
-        console.log('Final studentsData length:', studentsData.length);
-        console.log('Setting parsedSessionData.class_students to:', studentsData);
         
         // Update session data state
         setSession(parsedSessionData);
-        console.log('Updated session state with class_students:', parsedSessionData.class_students);
+
         
       } catch (error) {
         console.error('Error fetching session data:', error);
-        setError(error.response?.data?.message || 'Không thể tải dữ liệu. Vui lòng thử lại sau.');
+        setError(error.response?.data?.message || t('monitoringPage.cannotLoadData'));
       } finally {
         setLoading(false);
       }
@@ -563,6 +659,21 @@ const MonitoringPage = () => {
       stopMonitoring();
     };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Force reload session data when reload query param changes (from attendance page)
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const reloadParam = searchParams.get('reload');
+    
+    if (reloadParam && session) {
+      // Force reload session data to get updated duty_students list
+      console.log('Force reloading session data due to reload parameter');
+      fetchSessionDataSilently();
+      
+      // Clean up the reload parameter from URL
+      navigate(`/session/${id}/monitor`, { replace: true });
+    }
+  }, [location.search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-refresh data every 10 seconds
   useEffect(() => {
@@ -650,7 +761,7 @@ const MonitoringPage = () => {
         );
         
         if (!withinGeofence) {
-          toast.error(`Bạn đang ở ngoài phạm vi cho phép (${session.monitoring_options.location.geofence.radius}m). Không thể bắt đầu giám sát.`);
+          showAlert(t('monitoringPage.geofence.cannotStart', { radius: session.monitoring_options.location.geofence.radius }), 'danger');
           return; // Exit function if outside geofence
         }
         
@@ -661,7 +772,7 @@ const MonitoringPage = () => {
         
       } catch (error) {
         console.error('Error checking geofence before starting monitoring:', error);
-        toast.error('Không thể xác định vị trí của bạn. Vui lòng cấp quyền truy cập vị trí và thử lại.');
+        showAlert(t('monitoringPage.geofence.cannotDetermine'), 'danger');
         return; // Exit function if can't get location
       }
     }
@@ -676,7 +787,7 @@ const MonitoringPage = () => {
         // We'll use this stream in webcamRef, so don't stop it
       } catch (err) {
         console.error('Error accessing webcam:', err);
-        toast.error('Không thể truy cập camera. Buổi học này yêu cầu quyền truy cập camera.');
+        showAlert(t('monitoringPage.monitoring.permissions.cameraRequired'), 'danger');
         
         if (session.monitoring_options?.webcam?.enforcement === 'immediate') {
           canStartMonitoring = false;
@@ -692,7 +803,7 @@ const MonitoringPage = () => {
         stream.getTracks().forEach(track => track.stop());
       } catch (err) {
         console.error('Error accessing microphone:', err);
-        toast.error('Không thể truy cập microphone. Buổi học này yêu cầu quyền ghi âm.');
+        showAlert(t('monitoringPage.monitoring.permissions.microphoneRequired'), 'danger');
         
         if (session.monitoring_options?.audio?.enforcement === 'immediate') {
           canStartMonitoring = false;
@@ -703,7 +814,7 @@ const MonitoringPage = () => {
     // Check location permission if required
     if (monitoringSettings.location && session.monitoring_options?.location?.required) {
       if (!navigator.geolocation) {
-        toast.error('Trình duyệt của bạn không hỗ trợ định vị. Buổi học này yêu cầu quyền truy cập vị trí.');
+        showAlert(t('monitoringPage.monitoring.permissions.locationNotSupported'), 'danger');
         
         if (session.monitoring_options?.location?.enforcement === 'immediate') {
           canStartMonitoring = false;
@@ -718,7 +829,7 @@ const MonitoringPage = () => {
           });
         } catch (err) {
           console.error('Error accessing location:', err);
-          toast.error('Không thể truy cập vị trí. Buổi học này yêu cầu quyền truy cập vị trí.');
+          showAlert(t('monitoringPage.monitoring.permissions.locationRequired'), 'danger');
           
           if (session.monitoring_options?.location?.enforcement === 'immediate') {
             canStartMonitoring = false;
@@ -728,12 +839,12 @@ const MonitoringPage = () => {
     }
     
     if (!canStartMonitoring) {
-      toast.error('Không thể bắt đầu giám sát do thiếu quyền truy cập bắt buộc. Vui lòng cấp quyền và thử lại.');
+      showAlert(t('monitoringPage.monitoring.cannotStart'), 'danger');
       return;
     }
     
     setIsMonitoring(true);
-    toast.success('Đã bắt đầu giám sát buổi học');
+    showAlert(t('monitoringPage.monitoring.started'), 'success');
     
     // Start geofence monitoring if location is enabled
     if (monitoringSettings.location && session.monitoring_options?.location?.geofence?.enabled) {
@@ -837,7 +948,7 @@ const MonitoringPage = () => {
     // Check for end-of-session required file uploads
     // Only check if session exists and has monitoring options
     if (session && session.monitoring_options?.file_upload?.required && uploadedFiles.length === 0) {
-      toast.error('Buổi học này yêu cầu tải lên ít nhất một tệp tin trước khi kết thúc.');
+      showAlert(t('monitoringPage.monitoring.fileRequired'), 'danger');
     }
   };
   
@@ -916,7 +1027,7 @@ const MonitoringPage = () => {
         },
         (error) => {
           console.error('Error getting location:', error);
-          toast.error('Không thể lấy dữ liệu vị trí. Vui lòng kiểm tra quyền truy cập.');
+          showAlert(t('monitoringPage.monitoring.permissions.locationError'), 'danger');
         }
       );
     }
@@ -995,28 +1106,51 @@ const MonitoringPage = () => {
     setFileNote(e.target.value);
   };
   
+  // Handle file remove
+  const handleFileRemove = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedFile(null);
+    setFileNote('');
+  };
+  
   // Upload file
   const handleFileUpload = async () => {
     if (!selectedFile) {
-      toast.error('Vui lòng chọn file để tải lên');
+      showAlert(t('monitoringPage.fileUpload.errors.noFileSelected'), 'danger');
+      return;
+    }
+    
+    // Check if session is active and file upload is allowed
+    if (!session) {
+      showAlert(t('monitoringPage.fileUpload.errors.sessionNotAvailable'), 'danger');
+      return;
+    }
+    
+    if (session.status !== 'active') {
+      showAlert(t('monitoringPage.fileUpload.errors.sessionNotActive'), 'danger');
+      return;
+    }
+    
+    // Check if file upload is allowed - allow if still within the same day
+    const now = new Date();
+    const sessionDate = new Date(session.date);
+    
+    // Check if current date is the same as session date (allow upload on the same day)
+    const isSameDay = now.toDateString() === sessionDate.toDateString();
+    
+    if (!isSameDay) {
+      showAlert(t('monitoringPage.fileUpload.errors.notSameDay'), 'danger');
       return;
     }
     
     try {
       setUploading(true);
       
-      console.log('Uploading file for session ID:', id);
-      console.log('Selected file:', selectedFile);
-      
       const formData = new FormData();
       formData.append('file', selectedFile);
       formData.append('sessionId', id);
       formData.append('note', fileNote);
-      
-      // Debug: Log FormData contents
-      for (let [key, value] of formData.entries()) {
-        console.log('FormData:', key, value);
-      }
       
       // Create a separate axios instance for file upload to avoid Content-Type conflicts
       const uploadApi = axios.create({
@@ -1041,8 +1175,26 @@ const MonitoringPage = () => {
         fetchFilesDataSilently();
       }
     } catch (error) {
-      console.error('Error uploading file:', error);
-      toast.error(error.response?.data?.message || 'Không thể tải file lên. Vui lòng thử lại sau.');
+      // Handle specific error cases
+      if (error.response?.status === 403) {
+        const errorMessage = error.response?.data?.message || '';
+        
+        if (errorMessage.includes('không thuộc nhóm') || errorMessage.includes('không được phép') || errorMessage.includes('Không có quyền')) {
+          showAlert(t('monitoringPage.fileUpload.errors.notInGroup'), 'danger');
+        } else if (errorMessage.includes('chưa bắt đầu') || errorMessage.includes('đã kết thúc')) {
+          showAlert(t('monitoringPage.fileUpload.errors.sessionEnded'), 'danger');
+        } else if (errorMessage.includes('không tìm thấy thông tin sinh viên')) {
+          showAlert(t('monitoringPage.fileUpload.errors.studentNotFound'), 'danger');
+        } else {
+          showAlert(t('monitoringPage.fileUpload.errors.noPermission'), 'danger');
+        }
+      } else if (error.response?.status === 400) {
+        showAlert(error.response?.data?.message || t('monitoringPage.fileUpload.errors.invalidData'), 'danger');
+      } else if (error.response?.status === 413) {
+        showAlert(t('monitoringPage.fileUpload.errors.fileTooLarge'), 'danger');
+      } else {
+        showAlert(error.response?.data?.message || t('monitoringPage.fileUpload.errors.uploadFailed'), 'danger');
+      }
     } finally {
       setUploading(false);
     }
@@ -1050,36 +1202,85 @@ const MonitoringPage = () => {
   
   // Recall file (hide from download but keep in uploads)
   const handleRecallFile = async (fileId) => {
-    if (!window.confirm('Bạn có chắc chắn muốn thu hồi file này? File sẽ không thể tải xuống nữa nhưng vẫn được lưu trữ.')) {
-      return;
+    // Validate fileId
+    if (!fileId || fileId === 0 || fileId === null || fileId === undefined) {
+      showAlert(t('monitoringPage.fileUpload.recall.invalidId'), 'danger');
+      return false;
+    }
+    
+    // Show confirmation dialog
+    let confirmed = false;
+    try {
+      confirmed = window.confirm(t('monitoringPage.fileUpload.recall.confirm'));
+    } catch (confirmError) {
+      // If confirm fails, show alert and return
+      showAlert(t('monitoringPage.fileUpload.recall.confirmError'), 'warning');
+      return false;
+    }
+    
+    if (!confirmed) {
+      return false;
     }
     
     try {
       const response = await api.put(`/monitoring/file/${fileId}/recall`);
       
-      if (response.data.success) {
-        // Silent success - no toast notification
+      // Check response
+      if (response && response.data && response.data.success) {
+        showAlert(t('monitoringPage.fileUpload.recall.success'), 'success');
         
-        // Update file list to show recalled status silently
-        setUploadedFiles(uploadedFiles.map(file => 
-          file.id === fileId ? { ...file, is_recalled: true } : file
-        ));
+        // Update file list to show recalled status using functional update
+        setUploadedFiles(prevFiles => {
+          if (!Array.isArray(prevFiles)) {
+            return prevFiles;
+          }
+          return prevFiles.map(file => {
+            if (file && file.id === fileId) {
+              return { ...file, is_recalled: true };
+            }
+            return file;
+          });
+        });
+        
+        return true;
+      } else {
+        showAlert(t('monitoringPage.fileUpload.recall.invalidResponse'), 'danger');
+        return false;
       }
     } catch (error) {
-      console.error('Error recalling file:', error);
-      toast.error('Không thể thu hồi file. Vui lòng thử lại sau.');
+      // Handle different types of errors
+      if (error && error.response) {
+        const status = error.response.status;
+        const message = error.response.data?.message;
+        
+        if (status === 403) {
+          showAlert(message || t('monitoringPage.fileUpload.recall.noPermission'), 'danger');
+        } else if (status === 404) {
+          showAlert(message || t('monitoringPage.fileUpload.recall.notFound'), 'danger');
+        } else if (status === 400) {
+          showAlert(message || t('monitoringPage.fileUpload.recall.alreadyRecalled'), 'warning');
+        } else {
+          showAlert(message || t('monitoringPage.fileUpload.recall.error', { status }), 'danger');
+        }
+      } else if (error && error.request) {
+        showAlert(t('monitoringPage.fileUpload.recall.networkError'), 'danger');
+      } else {
+        showAlert(t('monitoringPage.fileUpload.recall.genericError'), 'danger');
+      }
+      
+      return false;
     }
   };
   
   // Go back to dashboard
   const handleBackToDashboard = () => {
     if (isMonitoring) {
-      if (window.confirm('Nếu bạn rời khỏi trang này, quá trình giám sát sẽ bị dừng. Bạn có chắc chắn muốn tiếp tục?')) {
+      if (window.confirm(t('monitoringPage.monitoring.leaveConfirm'))) {
         stopMonitoring();
-        navigate('/student/dashboard');
+        navigate('/student/attendance');
       }
     } else {
-      navigate('/student/dashboard');
+      navigate('/student/attendance');
     }
   };
 
@@ -1092,7 +1293,7 @@ const MonitoringPage = () => {
             <div className="spinner-border text-primary mb-3" role="status">
               <span className="visually-hidden">Loading...</span>
             </div>
-            <p className="mb-0">Đang tải thông tin buổi học...</p>
+            <p className="mb-0">{t('monitoringPage.loading')}</p>
           </div>
         </div>
       </div>
@@ -1105,19 +1306,19 @@ const MonitoringPage = () => {
         <div className="card-header">
           <div className="d-flex align-items-center">
             <i className="fas fa-exclamation-triangle me-2 text-danger"></i>
-            <h5 className="mb-0 fw-bold">Không thể tải thông tin buổi học</h5>
+            <h5 className="mb-0 fw-bold">{t('monitoringPage.cannotLoad')}</h5>
           </div>
         </div>
         <div className="card-body">
-          <p className="mb-3">{error || 'Có lỗi xảy ra. Vui lòng thử lại sau.'}</p>
+          <p className="mb-3">{error || t('monitoringPage.errorOccurred')}</p>
         <div className="d-flex justify-content-end">
             <button 
               className="btn-modern" 
               style={{ backgroundColor: '#dc3545' }}
-              onClick={() => navigate('/student/dashboard')}
+              onClick={() => navigate('/student/attendance')}
             >
               <i className="fas fa-arrow-left me-2"></i>
-            Quay lại Dashboard
+            {t('monitoringPage.goBack')}
             </button>
         </div>
         </div>
@@ -1130,13 +1331,13 @@ const MonitoringPage = () => {
       <div className="modern-card shadow-sm p-4 mb-4">
         <div className="d-flex justify-content-between align-items-center">
           <div className="d-flex align-items-center">
-            <h2 className="fw-bold mb-1 me-3">Buổi học: {session.title}</h2>
+            <h2 className="fw-bold mb-0 text-dark session-title-wrap">{session.title}</h2>
             {isAutoRefreshing && (
               <div className="auto-refresh-indicator">
                 <div className="spinner-border spinner-border-sm text-primary" role="status">
                   <span className="visually-hidden">Đang cập nhật...</span>
                 </div>
-                <span className="ms-2 small text-muted">Đang cập nhật...</span>
+                <span className="ms-2 small text-muted">{t('monitoringPage.updating')}</span>
               </div>
             )}
           </div>
@@ -1144,9 +1345,9 @@ const MonitoringPage = () => {
             className="btn-modern" 
             style={{ backgroundColor: '#6c757d' }}
             onClick={handleBackToDashboard}
+            title={t('monitoringPage.back')}
           >
             <i className="fas fa-arrow-left me-2"></i>
-            Quay lại
           </button>
         </div>
       </div>
@@ -1156,8 +1357,8 @@ const MonitoringPage = () => {
           <div className="d-flex align-items-start">
             <i className="fas fa-exclamation-triangle mt-1 me-2"></i>
             <div>
-              <h6 className="fw-bold mb-2">Bạn chưa điểm danh cho buổi học này</h6>
-              <p className="mb-0">Vui lòng quét mã QR hoặc chọn nút "Điểm danh" để điểm danh trước khi tham gia buổi học.</p>
+              <h6 className="fw-bold mb-2">{t('monitoringPage.notAttended.title')}</h6>
+              <p className="mb-0">{t('monitoringPage.notAttended.description')}</p>
             </div>
           </div>
         </div>
@@ -1171,7 +1372,7 @@ const MonitoringPage = () => {
                     <div className="rounded-circle bg-grey bg-opacity-20 p-2 me-2">
                       <i className="fas fa-info-circle text-grey"></i>
                     </div>
-                    <h5 className="mb-0 fw-bold">Thông tin buổi học</h5>
+                    <h5 className="mb-0 fw-bold">{t('monitoringPage.sessionInfo.title')}</h5>
                   </div>
                 </div>
                 <div className="card-body">
@@ -1179,7 +1380,7 @@ const MonitoringPage = () => {
                     <div className="d-flex align-items-start">
                       <i className="fas fa-check-circle mt-1 me-2"></i>
                       <div>
-                        <h6 className="fw-bold mb-2">Bạn đã tham gia buổi học thành công</h6>
+                        <h6 className="fw-bold mb-2">{t('monitoringPage.sessionInfo.joinedSuccessfully')}</h6>
                       </div>
                     </div>
                   </div>
@@ -1190,22 +1391,27 @@ const MonitoringPage = () => {
                       <div className="info-section mb-4">
                         <h6 className="fw-bold text-primary mb-3">
                           <i className="fas fa-calendar-alt me-2"></i>
-                          Thông tin cơ bản
+                          {t('monitoringPage.sessionInfo.basicInfo')}
                         </h6>
-                        <div className="info-item mb-2">
-                          <strong>Ngày:</strong> {new Date(session.date).toLocaleDateString('vi-VN')}
+                        <div className="info-item1 mb-2">
+                          <strong>{t('monitoringPage.sessionInfo.date')}:</strong> {session.end_date && session.end_date !== session.date ? 
+                            `${new Date(session.date).toLocaleDateString('vi-VN')} - ${new Date(session.end_date).toLocaleDateString('vi-VN')}` :
+                            new Date(session.date).toLocaleDateString('vi-VN')}
                         </div>
-                        <div className="info-item mb-2">
-                          <strong>Giờ bắt đầu:</strong> {session.start_time}
+                        <div className="info-item1 mb-2">
+                          <strong>{t('monitoringPage.sessionInfo.startTime')}:</strong> {session.start_time}
                         </div>
-                        <div className="info-item mb-2">
-                          <strong>Giờ kết thúc:</strong> {session.end_time}
+                        <div className="info-item1 mb-2">
+                          <strong>{t('monitoringPage.sessionInfo.endTime')}:</strong> {session.end_time}
                         </div>
-                        <div className="info-item mb-2">
-                          <strong>Địa điểm:</strong> {session.location || 'Chưa cập nhật'}
+                        <div className="info-item1 mb-2">
+                          <strong>{t('monitoringPage.sessionInfo.location')}:</strong> {session.location || t('monitoringPage.sessionInfo.notUpdated')}
                         </div>
-                        <div className="info-item mb-2">
-                          <strong>Lớp:</strong> {session.students && session.students.length > 0 ? session.students[0].class_name || 'Chưa cập nhật' : 'Chưa cập nhật'}
+                        <div className="info-item1 mb-2">
+                          <strong>{t('monitoringPage.sessionInfo.class')}:</strong> {session.students && session.students.length > 0 ? session.students[0].class_name || t('monitoringPage.sessionInfo.notUpdated') : t('monitoringPage.sessionInfo.notUpdated')}
+                        </div>
+                        <div className="info-item1 mb-2">
+                          <strong>{t('monitoringPage.sessionInfo.group')}:</strong> {session.group_names || t('monitoringPage.sessionInfo.notUpdated')}
                         </div>
                       </div>
                     </div>
@@ -1214,13 +1420,13 @@ const MonitoringPage = () => {
                       <div className="info-section mb-4">
                         <h6 className="fw-bold text-primary mb-3">
                           <i className="fas fa-clock me-2"></i>
-                          Khung giờ điểm danh
+                          {t('monitoringPage.sessionInfo.attendanceWindows')}
                         </h6>
                         
                         {/* Khung giờ hiện tại */}
                         <div className="current-time-section mb-3">
                           <div className="d-flex align-items-center justify-content-between">
-                            <span className="fw-bold text-success">Khung giờ điểm danh hiện tại:</span>
+                            <span className="fw-bold text-success">{t('monitoringPage.sessionInfo.currentWindow')}</span>
                             <span className="badge bg-success">
                               {(() => {
                                 const now = new Date();
@@ -1268,15 +1474,15 @@ const MonitoringPage = () => {
                                 
                                 // Determine current window
                                 if (beforeStart && beforeEnd && now >= beforeStart && now <= beforeEnd) {
-                                  return "Trước buổi học";
+                                  return t('monitoringPage.sessionInfo.before');
                                 } else if (duringStart && duringEnd && now >= duringStart && now <= duringEnd) {
-                                  return "Trong buổi học";
+                                  return t('monitoringPage.sessionInfo.during');
                                 } else if (afterStart && afterEnd && now >= afterStart && now <= afterEnd) {
-                                  return "Sau buổi học";
+                                  return t('monitoringPage.sessionInfo.after');
                                 } else if (now >= sessionStartTime && now < duringStart) {
-                                  return "Đi trễ";
+                                  return t('monitoringPage.sessionInfo.late');
                                 } else {
-                                  return "Ngoài khung giờ";
+                                  return t('monitoringPage.sessionInfo.outsideWindow');
                                 }
                               })()}
                             </span>
@@ -1284,76 +1490,138 @@ const MonitoringPage = () => {
                         </div>
                         
                         <div className="attendance-windows">
-                          {session.monitoring_options?.attendance?.before_session?.enabled && (
-                            <div className="attendance-window mb-2">
-                              <div className="d-flex align-items-center justify-content-between">
-                                <div className="d-flex align-items-center">
-                                  <div className="badge bg-success me-2">Trước</div>
-                                  <span className="small">
-                                    {(() => {
-                                      const sessionDate = new Date(session.date);
-                                      const [startHours, startMinutes] = session.start_time.split(':').map(Number);
-                                      const sessionStartTime = new Date(sessionDate);
-                                      sessionStartTime.setHours(startHours, startMinutes, 0, 0);
-                                      const beforeStart = new Date(sessionStartTime);
-                                      beforeStart.setMinutes(beforeStart.getMinutes() - session.monitoring_options.attendance.before_session.minutes_before);
-                                      return `${beforeStart.getHours().toString().padStart(2, '0')}:${beforeStart.getMinutes().toString().padStart(2, '0')} - ${session.start_time}`;
-                                    })()}
-                                  </span>
+                          {session.monitoring_options?.attendance?.before_session?.enabled && (() => {
+                            const beforeStatus = getAttendanceStatus('before');
+                            return (
+                              <div className={`attendance-window mb-2 ${beforeStatus.hasAttended ? 'attendance-completed' : 'attendance-pending'}`}>
+                                <div className="d-flex align-items-center justify-content-between">
+                                  <div className="d-flex align-items-center">
+                                    <div className={`badge me-2 ${beforeStatus.hasAttended ? 'bg-success' : 'bg-secondary attendance-pending-badge'}`}>
+                                      {beforeStatus.hasAttended ? (
+                                        <>
+                                          <i className="fas fa-check me-1"></i>
+                                          {beforeStatus.isLate ? t('monitoringPage.sessionInfo.lateLabel') : t('monitoringPage.sessionInfo.beforeLabel')}
+                                        </>
+                                      ) : (
+                                        t('monitoringPage.sessionInfo.beforeLabel')
+                                      )}
+                                    </div>
+                                    <span className="small">
+                                      {(() => {
+                                        const sessionDate = new Date(session.date);
+                                        const [startHours, startMinutes] = session.start_time.split(':').map(Number);
+                                        const sessionStartTime = new Date(sessionDate);
+                                        sessionStartTime.setHours(startHours, startMinutes, 0, 0);
+                                        const beforeStart = new Date(sessionStartTime);
+                                        beforeStart.setMinutes(beforeStart.getMinutes() - session.monitoring_options.attendance.before_session.minutes_before);
+                                        return `${beforeStart.getHours().toString().padStart(2, '0')}:${beforeStart.getMinutes().toString().padStart(2, '0')} - ${session.start_time}`;
+                                      })()}
+                                    </span>
+                                  </div>
+                                  {beforeStatus.hasAttended && (
+                                    <div className="attendance-status-icon">
+                                      <i className="fas fa-check-circle text-success"></i>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
-                            </div>
-                          )}
+                            );
+                          })()}
                           
-
-                          
-                          {session.monitoring_options?.attendance?.during_session?.enabled && (
-                            <div className="attendance-window mb-2">
-                              <div className="d-flex align-items-center justify-content-between">
-                                <div className="d-flex align-items-center">
-                                  <div className="badge bg-primary me-2">Trong</div>
-                                  <span className="small">
-                                    {(() => {
-                                      const sessionDate = new Date(session.date);
-                                      const [startHours, startMinutes] = session.start_time.split(':').map(Number);
-                                      const [endHours, endMinutes] = session.end_time.split(':').map(Number);
-                                      const sessionStartTime = new Date(sessionDate);
-                                      sessionStartTime.setHours(startHours, startMinutes, 0, 0);
-                                      const sessionEndTime = new Date(sessionDate);
-                                      sessionEndTime.setHours(endHours, endMinutes, 0, 0);
-                                      if (sessionEndTime < sessionStartTime) {
-                                        sessionEndTime.setDate(sessionEndTime.getDate() + 1);
-                                      }
-                                      const duringStart = new Date(sessionStartTime);
-                                      duringStart.setMinutes(duringStart.getMinutes() + session.monitoring_options.attendance.during_session.minutes_after_start);
-                                      const duringEnd = new Date(sessionEndTime);
-                                      duringEnd.setMinutes(duringEnd.getMinutes() - session.monitoring_options.attendance.during_session.minutes_before_end);
-                                      return `${duringStart.getHours().toString().padStart(2, '0')}:${duringStart.getMinutes().toString().padStart(2, '0')} - ${duringEnd.getHours().toString().padStart(2, '0')}:${duringEnd.getMinutes().toString().padStart(2, '0')}`;
-                                    })()}
-                                  </span>
+                          {session.monitoring_options?.attendance?.during_session?.enabled && (() => {
+                            const duringStatus = getAttendanceStatus('during');
+                            return (
+                              <div className={`attendance-window mb-2 ${duringStatus.hasAttended ? 'attendance-completed' : 'attendance-pending'}`}>
+                                <div className="d-flex align-items-center justify-content-between">
+                                  <div className="d-flex align-items-center">
+                                    <div className={`badge me-2 ${duringStatus.hasAttended ? 'bg-primary' : 'bg-secondary attendance-pending-badge'}`}>
+                                      {duringStatus.hasAttended ? (
+                                        <>
+                                          <i className="fas fa-check me-1"></i>
+                                          {t('monitoringPage.sessionInfo.duringLabel')}
+                                        </>
+                                      ) : (
+                                        t('monitoringPage.sessionInfo.duringLabel')
+                                      )}
+                                    </div>
+                                    <span className="small">
+                                      {(() => {
+                                        const sessionDate = new Date(session.date);
+                                        const [startHours, startMinutes] = session.start_time.split(':').map(Number);
+                                        const [endHours, endMinutes] = session.end_time.split(':').map(Number);
+                                        const sessionStartTime = new Date(sessionDate);
+                                        sessionStartTime.setHours(startHours, startMinutes, 0, 0);
+                                        const sessionEndTime = new Date(sessionDate);
+                                        sessionEndTime.setHours(endHours, endMinutes, 0, 0);
+                                        if (sessionEndTime < sessionStartTime) {
+                                          sessionEndTime.setDate(sessionEndTime.getDate() + 1);
+                                        }
+                                        const duringStart = new Date(sessionStartTime);
+                                        duringStart.setMinutes(duringStart.getMinutes() + session.monitoring_options.attendance.during_session.minutes_after_start);
+                                        const duringEnd = new Date(sessionEndTime);
+                                        duringEnd.setMinutes(duringEnd.getMinutes() - session.monitoring_options.attendance.during_session.minutes_before_end);
+                                        return `${duringStart.getHours().toString().padStart(2, '0')}:${duringStart.getMinutes().toString().padStart(2, '0')} - ${duringEnd.getHours().toString().padStart(2, '0')}:${duringEnd.getMinutes().toString().padStart(2, '0')}`;
+                                      })()}
+                                    </span>
+                                  </div>
+                                  {duringStatus.hasAttended && (
+                                    <div className="attendance-status-icon">
+                                      <i className="fas fa-check-circle text-primary"></i>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
-                            </div>
-                          )}
+                            );
+                          })()}
                           
-                          {session.monitoring_options?.attendance?.after_session?.enabled && (
-                            <div className="attendance-window mb-2">
-                              <div className="d-flex align-items-center justify-content-between">
-                                <div className="d-flex align-items-center">
-                                  <div className="badge bg-info me-2">Sau</div>
-                                  <span className="small">
-                                    {(() => {
-                                      const sessionDate = new Date(session.date);
-                                      const [endHours, endMinutes] = session.end_time.split(':').map(Number);
-                                      const sessionEndTime = new Date(sessionDate);
-                                      sessionEndTime.setHours(endHours, endMinutes, 0, 0);
-                                      const afterStart = new Date(sessionEndTime);
-                                      afterStart.setMinutes(afterStart.getMinutes() + session.monitoring_options.attendance.after_session.minutes_after);
-                                      const afterEnd = new Date(afterStart);
-                                      afterEnd.setMinutes(afterEnd.getMinutes() + session.monitoring_options.attendance.after_session.duration);
-                                      return `${afterStart.getHours().toString().padStart(2, '0')}:${afterStart.getMinutes().toString().padStart(2, '0')} - ${afterEnd.getHours().toString().padStart(2, '0')}:${afterEnd.getMinutes().toString().padStart(2, '0')}`;
-                                    })()}
-                                  </span>
+                          {session.monitoring_options?.attendance?.after_session?.enabled && !isCurrentUserDutyStudent() && (() => {
+                            const afterStatus = getAttendanceStatus('after');
+                            return (
+                              <div className={`attendance-window mb-2 ${afterStatus.hasAttended ? 'attendance-completed' : 'attendance-pending'}`}>
+                                <div className="d-flex align-items-center justify-content-between">
+                                  <div className="d-flex align-items-center">
+                                    <div className={`badge me-2 ${afterStatus.hasAttended ? 'bg-info' : 'bg-secondary attendance-pending-badge'}`}>
+                                      {afterStatus.hasAttended ? (
+                                        <>
+                                          <i className="fas fa-check me-1"></i>
+                                          {t('monitoringPage.sessionInfo.afterLabel')}
+                                        </>
+                                      ) : (
+                                        t('monitoringPage.sessionInfo.afterLabel')
+                                      )}
+                                    </div>
+                                    <span className="small">
+                                      {(() => {
+                                        const sessionDate = new Date(session.date);
+                                        const [endHours, endMinutes] = session.end_time.split(':').map(Number);
+                                        const sessionEndTime = new Date(sessionDate);
+                                        sessionEndTime.setHours(endHours, endMinutes, 0, 0);
+                                        const afterStart = new Date(sessionEndTime);
+                                        afterStart.setMinutes(afterStart.getMinutes() + session.monitoring_options.attendance.after_session.minutes_after);
+                                        const afterEnd = new Date(afterStart);
+                                        afterEnd.setMinutes(afterEnd.getMinutes() + session.monitoring_options.attendance.after_session.duration);
+                                        return `${afterStart.getHours().toString().padStart(2, '0')}:${afterStart.getMinutes().toString().padStart(2, '0')} - ${afterEnd.getHours().toString().padStart(2, '0')}:${afterEnd.getMinutes().toString().padStart(2, '0')}`;
+                                      })()}
+                                    </span>
+                                  </div>
+                                  {afterStatus.hasAttended && (
+                                    <div className="attendance-status-icon">
+                                      <i className="fas fa-check-circle text-info"></i>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                          
+                          {/* Thông báo cho duty student */}
+                          {isCurrentUserDutyStudent() && (
+                            <div className="modern-alert modern-alert-info mb-2">
+                              <div className="d-flex align-items-start">
+                                <i className="fas fa-info-circle mt-1 me-2"></i>
+                                <div>
+                                  <h6 className="fw-bold mb-2">{t('monitoringPage.dutyStudent.title')}</h6>
+                                  <p className="mb-0">{t('monitoringPage.dutyStudent.description')}</p>
                                 </div>
                               </div>
                             </div>
@@ -1363,87 +1631,26 @@ const MonitoringPage = () => {
                     </div>
                   </div>
                   
-                  {/* Danh sách tất cả sinh viên trong lớp */}
-                  <div className="info-section mb-4">
-                    <h6 className="fw-bold text-primary mb-3">
-                      <i className="fas fa-users me-2"></i>
-                      Danh sách {session.class_students ? ` (${session.class_students.length})` : ''} sinh viên trong lớp
-                    </h6>
-                    {(() => {
-                      console.log('Render check - session.class_students:', session.class_students);
-                      console.log('Render check - length:', session.class_students?.length);
-                      return null;
-                    })()}
-                    {session.class_students && session.class_students.length > 0 ? (
-                      <div className="students-grid">
-                        {session.class_students.map((student, index) => (
-                          <div key={index} className="student-card">
-                            <div className="student-avatar">
-                              <i className="fas fa-user"></i>
-                            </div>
-                            <div className="student-info">
-                              <div className="student-name">{student.full_name || student.fullName || student.username}</div>
-                              <div className="student-email">{student.email}</div>
-                              <div className="student-phone">
-                                {student.phone || student.student_code || student.username || 'Chưa cập nhật'}
-                              </div>
-                            </div>
-                            <div className="student-status">
-                              {student.attendance || student.has_attended ? (
-                                <span className="badge bg-success">Đã tham gia</span>
-                              ) : (
-                                <span className="badge bg-secondary">Chưa tham gia</span>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center text-muted p-4">
-                        <div className="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style={{width: '60px', height: '60px'}}>
-                          <i className="fas fa-users fa-2x text-muted"></i>
-                        </div>
-                        <p className="mb-0">Đang tải danh sách sinh viên...</p>
-                        <div className="mt-2 small text-info">
-                          <p>Debug info:</p>
-                          <p>session.class_students: {session.class_students ? 'exists' : 'null'}</p>
-                          <p>Length: {session.class_students?.length || 0}</p>
-                          <p>session.students: {session.students ? 'exists' : 'null'}</p>
-                          <p>session.students length: {session.students?.length || 0}</p>
-                          <p>session.class_id: {session.class_id || 'null'}</p>
-                          <p>session.group_id: {session.group_id || 'null'}</p>
-                          <p>session.group_name: {session.group_name || 'null'}</p>
-                          {session.class_students && session.class_students.length > 0 && (
-                            <div>
-                              <p>Sample student attendance data:</p>
-                              <p>First student: {JSON.stringify(session.class_students[0], null, 2)}</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  
                   {/* Mã QR điểm danh */}
                   {session.shared_qr_code && (
                     <div className="info-section mb-4">
                       <h6 className="fw-bold text-primary mb-3">
                         <i className="fas fa-qrcode me-2"></i>
-                        Mã QR điểm danh
+                        {t('monitoringPage.sessionInfo.qrCode')}
                       </h6>
                       <div className="qr-section">
                         <div className="qr-code-container">
                           <div className="qr-code-placeholder">
                             <i className="fas fa-qrcode fa-3x text-muted"></i>
-                            <div className="mt-2 small text-muted">QR Code sẽ hiển thị ở đây</div>
+                            <div className="mt-2 small text-muted">{t('monitoringPage.sessionInfo.qrCodePlaceholder')}</div>
                           </div>
                         </div>
                         <div className="qr-info">
                           <div className="qr-token">
-                            <strong>Token:</strong> {session.shared_qr_code}
+                            <strong>{t('monitoringPage.sessionInfo.token')}:</strong> {session.shared_qr_code}
                           </div>
                           <div className="qr-url mt-2">
-                            <strong>URL:</strong> 
+                            <strong>{t('monitoringPage.sessionInfo.url')}:</strong> 
                             <code className="ms-2 small">
                               {window.location.origin}/session/{session.id}/attend-shared?token={session.shared_qr_code}
                             </code>
@@ -1463,17 +1670,17 @@ const MonitoringPage = () => {
                         <div>
                           <h6 className="fw-bold mb-2">
                           {isWithinGeofence 
-                            ? 'Bạn đang ở trong khu vực buổi học' 
-                            : 'Cảnh báo: Bạn đang ở ngoài khu vực buổi học!'}
+                            ? t('monitoringPage.geofence.withinArea')
+                            : t('monitoringPage.geofence.outsideArea')}
                           </h6>
                           <p className="mb-2">
                         {isWithinGeofence 
-                          ? `Phạm vi cho phép: ${session.monitoring_options.location.geofence.radius}m` 
-                          : `Vui lòng di chuyển trở lại trong phạm vi ${session.monitoring_options.location.geofence.radius}m của buổi học.`}
+                          ? t('monitoringPage.geofence.allowedRadius', { radius: session.monitoring_options.location.geofence.radius })
+                          : t('monitoringPage.geofence.pleaseReturn', { radius: session.monitoring_options.location.geofence.radius })}
                           </p>
                       {!isWithinGeofence && (
                             <div className="mt-2">
-                          <strong>Cảnh báo:</strong> Nếu bạn tiếp tục ở ngoài khu vực buổi học, hệ thống sẽ tự động kết thúc buổi học của bạn.
+                          <strong>{t('common.error')}:</strong> {t('monitoringPage.geofence.warning')}
                         </div>
                       )}
                         </div>
@@ -1491,37 +1698,63 @@ const MonitoringPage = () => {
                     <div className="rounded-circle bg-grey bg-opacity-20 p-2 me-2">
                       <i className="fas fa-file-upload text-white"></i>
                     </div>
-                    <h5 className="mb-0 fw-bold">Tài liệu và file</h5>
+                    <h5 className="mb-0 fw-bold">{t('monitoringPage.fileUpload.title')}</h5>
                   </div>
                 </div>
                 <div className="card-body">
                   {session.monitoring_options?.file_upload ? (
                     <>
                       <div className="mb-3">
-                        <label className="modern-form-label">Tải lên file (tối đa 50MB)</label>
-                        <input 
-                          type="file" 
-                          className="modern-form-control" 
-                          onChange={handleFileChange}
-                          disabled={uploading}
-                        />
+                        <label className="modern-form-label file-upload-label">{t('monitoringPage.fileUpload.uploadLabel')}</label>
+                        <div className="file-upload-container">
+                          <input 
+                            type="file" 
+                            id="file-upload"
+                            className="file-upload-input" 
+                            onChange={handleFileChange}
+                            disabled={uploading}
+                            accept="*/*"
+                          />
+                          <label htmlFor="file-upload" className="file-upload-label-custom">
+                            <div className="file-upload-icon">
+                              <i className="fas fa-cloud-upload-alt"></i>
+                            </div>
+                            <div className="file-upload-text">
+                              <span className="file-upload-title">
+                                {selectedFile ? selectedFile.name : t('monitoringPage.fileUpload.selectFile')}
+                              </span>
+                              <span className="file-upload-subtitle">
+                                {selectedFile ? t('monitoringPage.fileUpload.selectAnother') : t('monitoringPage.fileUpload.supportedFormats')}
+                              </span>
+                            </div>
+                            {selectedFile && (
+                              <div className="file-upload-remove" onClick={handleFileRemove}>
+                                <i className="fas fa-times"></i>
+                              </div>
+                            )}
+                          </label>
+                        </div>
                       </div>
                       
                       {/* Ghi chú chỉ hiển thị khi có file được chọn */}
                       {selectedFile && (
                         <div className="mb-3">
                           <textarea 
-                            className="modern-form-control" 
+                            className="modern-form-control file-note-textarea" 
                             rows="3"
-                            cols="50"
-                            placeholder="Nhập ghi chú cho file này..."
+                            placeholder={t('monitoringPage.fileUpload.notePlaceholder')}
                             value={fileNote}
                             onChange={handleFileNoteChange}
                             disabled={uploading}
+                            style={{
+                              resize: 'vertical',
+                              minHeight: '80px',
+                              maxHeight: '200px'
+                            }}
                           />
                           <div className="form-text">
                             <i className="fas fa-info-circle me-1"></i>
-                            Ghi chú sẽ hiển thị trong lịch sử hoạt động buổi học
+                            {t('monitoringPage.fileUpload.noteHelp')}
                           </div>
                         </div>
                       )}
@@ -1537,12 +1770,12 @@ const MonitoringPage = () => {
                               <div className="spinner-border spinner-border-sm me-2" role="status">
                                 <span className="visually-hidden">Loading...</span>
                               </div>
-                              Đang tải lên...
+                              {t('monitoringPage.fileUpload.uploading')}
                             </>
                           ) : (
                             <>
                               <i className="fas fa-cloud-upload-alt me-2"></i>
-                              Tải lên file
+                              {t('monitoringPage.fileUpload.uploadButton')}
                             </>
                           )}
                         </button>
@@ -1553,8 +1786,8 @@ const MonitoringPage = () => {
                       <div className="d-flex align-items-start">
                         <i className="fas fa-info-circle mt-1 me-2"></i>
                         <div>
-                          <h6 className="fw-bold mb-2">Tính năng tải lên tệp tin đã bị tắt</h6>
-                          <p className="mb-0">Tính năng tải lên tệp tin đã bị tắt cho buổi học này.</p>
+                          <h6 className="fw-bold mb-2">{t('monitoringPage.fileUpload.disabled.title')}</h6>
+                          <p className="mb-0">{t('monitoringPage.fileUpload.disabled.description')}</p>
                         </div>
                       </div>
                     </div>
@@ -1564,108 +1797,197 @@ const MonitoringPage = () => {
                   <div className="d-flex align-items-center justify-content-between mb-3">
                     <h6 className="fw-bold mb-0">
                       <i className="fas fa-folder-open me-2 text-primary"></i>
-                      File đã tải lên
+                      {t('monitoringPage.fileUpload.uploadedFiles')}
                     </h6>
                     <span className="badge bg-primary bg-opacity-10 text-primary px-3 py-2">
-                      {uploadedFiles.length} file{uploadedFiles.length !== 1 ? 's' : ''}
+                      {uploadedFiles.length === 1 ? t('monitoringPage.fileUpload.filesCount', { count: uploadedFiles.length }) : t('monitoringPage.fileUpload.filesCountPlural', { count: uploadedFiles.length })}
                     </span>
                   </div>
                   
                   {uploadedFiles.length > 0 ? (
                     <div className="file-grid">
-                      {uploadedFiles.map(file => (
-                        <div key={file.id} className={`file-card ${file.is_recalled ? 'file-recalled' : ''}`}>
-                          {/* File header */}
-                          <div className="file-header">
-                          <div className="file-icon">
-                              <i className={`${getFileIcon(file.file_type)} ${file.is_recalled ? 'text-muted' : 'text-white'}`}></i>
-                          </div>
-                          <div className="file-actions">
-                              <button 
-                                className={`btn btn-sm ${file.is_recalled ? 'btn-outline-secondary' : 'btn-outline-primary'}`}
-                              onClick={async () => {
-                                  if (file.is_recalled) {
-                                    toast.warning('File này đã bị thu hồi, không thể tải xuống');
-                                    return;
-                                  }
-                                  
-                                try {
-                                  const token = localStorage.getItem('token');
-                                  const fileUrl = `/api/uploads/${file.file_path.split('/').pop()}`;
-                                  
-                                  const response = await fetch(fileUrl, {
-                                    headers: {
-                                      'x-auth-token': token
-                                    }
-                                  });
-                                  
-                                  if (!response.ok) {
-                                    throw new Error('Không thể tải file');
-                                  }
-                                  
-                                  const blob = await response.blob();
-                                  const blobUrl = URL.createObjectURL(blob);
-                                  
-                                  const link = document.createElement('a');
-                                  link.href = blobUrl;
-                                  link.download = file.file_name || `file-${file.id}`;
-                                  document.body.appendChild(link);
-                                  link.click();
-                                  document.body.removeChild(link);
-                                  
-                                  setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
-                                    toast.success('File đã được tải xuống');
-                                } catch (error) {
-                                  console.error('Lỗi khi tải file:', error);
-                                  toast.error('Không thể tải xuống file. Vui lòng thử lại sau.');
-                                }
-                              }}
-                                title={file.is_recalled ? "File đã bị thu hồi" : "Tải xuống file"}
-                                disabled={file.is_recalled}
-                            >
-                              <i className="fas fa-download"></i>
-                              </button>
-                              
-                              {!file.is_recalled && (
+                      {uploadedFiles.map(file => {
+                        const shouldHideInfo = uploadedFiles.length > 1;
+                        const isInfoVisible = showFileInfo[file.id] || !shouldHideInfo;
+                        
+                        return (
+                          <div 
+                            key={file.id} 
+                            className={`file-card ${file.is_recalled ? 'file-recalled' : ''} ${shouldHideInfo ? 'file-compact' : ''} ${isInfoVisible ? 'file-info-show' : 'file-info-hide'}`}
+                            onMouseEnter={shouldHideInfo ? () => setShowFileInfo(prev => ({...prev, [file.id]: true})) : undefined}
+                            onMouseLeave={shouldHideInfo ? () => setShowFileInfo(prev => ({...prev, [file.id]: false})) : undefined}
+                            onClick={shouldHideInfo ? () => toggleFileInfo(file.id) : undefined}
+                            style={{cursor: shouldHideInfo ? 'pointer' : 'default'}}
+                          >
+                            {/* File header */}
+                            <div className="file-header">
+                            <div className="file-icon">
+                                <i className={`${getFileIcon(file.file_type)} ${file.is_recalled ? 'text-muted' : 'text-white'}`}></i>
+                            </div>
+                            <div className="file-actions">
                                 <button 
-                                  className="btn btn-sm btn-outline-warning"
-                                  onClick={() => handleRecallFile(file.id)}
-                                  title="Thu hồi file"
-                                >
-                                  <i className="fas fa-undo"></i>
+                                  className={`btn btn-sm ${file.is_recalled ? 'btn-outline-secondary' : 'btn-outline-primary'}`}
+                                onClick={async (e) => {
+                                    e.stopPropagation(); // Prevent triggering parent click
+                                    if (file.is_recalled) {
+                                      showAlert(t('monitoringPage.fileUpload.recall.downloadDisabled'), 'warning');
+                                      return;
+                                    }
+                                    
+                                  try {
+                                    const token = localStorage.getItem('token');
+                                    const response = await fetch(`/api/monitoring/file/${file.id}/download`, {
+                                      headers: {
+                                        'x-auth-token': token
+                                      }
+                                    });
+                                    
+                                    // Check if response is ok
+                                    if (!response.ok) {
+                                      // Try to parse error message
+                                      const contentType = response.headers.get('content-type') || '';
+                                      if (contentType.includes('application/json')) {
+                                        const errorData = await response.json();
+                                        showAlert(errorData.message || t('monitoringPage.fileUpload.download.cannotDownload'), 'danger');
+                                      } else {
+                                        showAlert(t('monitoringPage.fileUpload.download.cannotDownloadStatus', { status: response.status }), 'danger');
+                                      }
+                                      return;
+                                    }
+                                    
+                                    // Get blob and download
+                                    const blob = await response.blob();
+                                    const blobUrl = URL.createObjectURL(blob);
+                                    
+                                    const link = document.createElement('a');
+                                    link.href = blobUrl;
+                                    link.download = file.file_name || `file-${file.id}`;
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                    
+                                    setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+                                    showAlert(t('monitoringPage.fileUpload.download.success'), 'success');
+                                  } catch (error) {
+                                    console.error('Lỗi khi tải file:', error);
+                                    showAlert(t('monitoringPage.fileUpload.download.downloadFailed'), 'danger');
+                                  }
+                                }}
+                                  title={file.is_recalled ? t('monitoringPage.fileUpload.recall.recalledTitle') : t('monitoringPage.fileUpload.recall.downloadTitle')}
+                                  disabled={file.is_recalled}
+                              >
+                                <i className="fas fa-download"></i>
                                 </button>
-                              )}
+                                
+                                {!file.is_recalled && file.id && (
+                                  <button 
+                                    className="btn btn-sm btn-outline-warning"
+                                    onClick={(e) => {
+                                      // Prevent default and stop propagation
+                                      if (e) {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                      }
+                                      
+                                      // Get fileId
+                                      const fileId = file?.id;
+                                      if (!fileId) {
+                                        showAlert(t('monitoringPage.fileUpload.recall.fileIdNotFound'), 'danger');
+                                        return;
+                                      }
+                                      
+                                      // Call handler
+                                      handleRecallFile(fileId).catch((error) => {
+                                        // Additional error handling if needed
+                                        if (error && !error.response) {
+                                          showAlert(t('monitoringPage.fileUpload.recall.unexpectedError'), 'danger');
+                                        }
+                                      });
+                                    }}
+                                    title={t('monitoringPage.fileUpload.recall.title')}
+                                    type="button"
+                                  >
+                                    <i className="fas fa-undo"></i>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            
+                            {/* File info - chỉ hiển thị khi cần thiết */}
+                            <div className={`file-info-container ${shouldHideInfo ? 'file-info-hidden' : 'file-info-visible'}`}>
+                              <div className="file-info">
+                                <div className={`file-name ${file.is_recalled ? 'text-muted' : ''}`}>
+                                  {file.file_name}
+                                  {file.is_recalled && (
+                                    <span className="badge bg-secondary ms-2">
+                                      <i className="fas fa-ban me-1"></i>
+                                      {t('monitoringPage.fileUpload.recall.recalled')}
+                                    </span>
+                                  )}
+                                </div>
+                                
+                                <div className="file-meta">
+                                  <span className="file-size">
+                                    <i className="fas fa-weight me-1"></i>
+                                    {formatBytes(file.file_size)}
+                                  </span>
+                                  <span className="file-date">
+                                    <i className="fas fa-clock me-1"></i>
+                                    {new Date(file.uploaded_at).toLocaleDateString()}
+                                  </span>
+                                </div>
+                                
+                                {file.note && (
+                                  <div className="file-note">
+                                    <i className="fas fa-sticky-note me-2"></i>
+                                    {file.note}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
-                          
-                          {/* File info */}
-                          <div className="file-info">
-                            <div className={`file-name ${file.is_recalled ? 'text-muted' : ''}`}>
-                              {file.file_name}
-                              {file.is_recalled && (
-                                <span className="badge bg-secondary ms-2">
-                                  <i className="fas fa-ban me-1"></i>
-                                  Đã thu hồi
-                                </span>
-                              )}
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center text-muted p-4">
+                      <div className="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style={{width: '60px', height: '60px'}}>
+                        <i className="fas fa-file-upload fa-2x text-muted"></i>
+                      </div>
+                      <p className="mb-0">{t('monitoringPage.fileUpload.noFiles')}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Col>
+          </Row>
+          
+          {/* Danh sách tất cả sinh viên trong lớp - Row riêng */}
+          <Row className="mb-4">
+            <Col>
+              <div className="modern-card">
+                <div className="card-header bg-success text-white">
+                  <div className="d-flex align-items-center justify-content-center">
+                    <h5 className="mb-0 fw-bold">{t('monitoringPage.students.title', { count: session.class_students ? session.class_students.length : 0 })}</h5>
+                  </div>
+                </div>
+                <div className="card-body">
+                  {session.class_students && session.class_students.length > 0 ? (
+                    <div className="students-grid">
+                      {session.class_students.map((student, index) => (
+                        <div key={index} className={`student-card ${student.attendance || student.has_attended ? 'student-attended' : ''}`}>
+                          <div className="student-info">
+                            <div className="student-name"> <strong>{student.full_name || student.fullName || student.username}</strong></div>
+                            <div className="student-email">{student.email}</div>
+                            <div className="student-phone">
+                              {student.phone || student.student_code || student.username || t('monitoringPage.sessionInfo.notUpdated')}
                             </div>
-                            
-                            <div className="file-meta">
-                              <span className="file-size">
-                                <i className="fas fa-weight me-1"></i>
-                                {formatBytes(file.file_size)}
-                              </span>
-                              <span className="file-date">
-                                <i className="fas fa-clock me-1"></i>
-                                {new Date(file.uploaded_at).toLocaleDateString()}
-                              </span>
-                            </div>
-                            
-                            {file.note && (
-                              <div className="file-note">
-                                <i className="fas fa-sticky-note me-2"></i>
-                                {file.note}
-                              </div>
+                          </div>
+                          <div className="student-status">
+                            {student.attendance || student.has_attended ? (
+                              <span className="badge bg-success" title={t('monitoringPage.students.attended')}>✓</span>
+                            ) : (
+                              <span className="badge bg-secondary" title={t('monitoringPage.students.notAttended')}>✗</span>
                             )}
                           </div>
                         </div>
@@ -1674,9 +1996,25 @@ const MonitoringPage = () => {
                   ) : (
                     <div className="text-center text-muted p-4">
                       <div className="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style={{width: '60px', height: '60px'}}>
-                        <i className="fas fa-file-upload fa-2x text-muted"></i>
+                        <i className="fas fa-users fa-2x text-muted"></i>
                       </div>
-                      <p className="mb-0">Chưa có file nào được tải lên</p>
+                      <p className="mb-0">{t('monitoringPage.students.loading')}</p>
+                      <div className="mt-2 small text-info">
+                        <p>Debug info:</p>
+                        <p>session.class_students: {session.class_students ? 'exists' : 'null'}</p>
+                        <p>Length: {session.class_students?.length || 0}</p>
+                        <p>session.students: {session.students ? 'exists' : 'null'}</p>
+                        <p>session.students length: {session.students?.length || 0}</p>
+                        <p>session.class_id: {session.class_id || 'null'}</p>
+                        <p>session.group_id: {session.group_id || 'null'}</p>
+                        <p>session.group_name: {session.group_name || 'null'}</p>
+                        {session.class_students && session.class_students.length > 0 && (
+                          <div>
+                            <p>Sample student attendance data:</p>
+                            <p>First student: {JSON.stringify(session.class_students[0], null, 2)}</p>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1739,15 +2077,14 @@ style.textContent = `
     border-left: 4px solid #007bff;
   }
   
-  .info-item {
-    display: flex;
-    align-items: center;
-    padding: 0.25rem 0;
+  .info-item1 {
+    display: block;
+    padding: 0.5rem 0;
   }
   
-  .info-item strong {
-    min-width: 120px;
+  .info-item1 strong {
     color: #495057;
+    margin-right: 0rem;
   }
   
   /* Attendance Windows */
@@ -1759,10 +2096,103 @@ style.textContent = `
   }
   
   .attendance-window {
-    padding: 0.5rem;
+    padding: 0.75rem;
     background: #f8f9fa;
-    border-radius: 4px;
-    border-left: 3px solid #007bff;
+    border-radius: 8px;
+    border-left: 4px solid #007bff;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .attendance-window::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  
+  .attendance-window:hover::before {
+    opacity: 1;
+  }
+  
+  /* Completed attendance styling */
+  .attendance-window.attendance-completed {
+    background: linear-gradient(135deg, #e8f5e8 0%, #f0f9f0 100%);
+    border-left-color: #28a745;
+    box-shadow: 0 2px 8px rgba(40, 167, 69, 0.15);
+    transform: translateY(-1px);
+  }
+  
+  .attendance-window.attendance-completed::before {
+    background: linear-gradient(135deg, rgba(40, 167, 69, 0.1) 0%, rgba(40, 167, 69, 0.05) 100%);
+  }
+  
+  /* Pending attendance styling */
+  .attendance-window.attendance-pending {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-left-color: #6c757d;
+    opacity: 0.7;
+    filter: grayscale(20%);
+  }
+  
+  .attendance-window.attendance-pending .attendance-pending-badge {
+    background: #6c757d !important;
+    color: #fff;
+    opacity: 0.8;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .attendance-window.attendance-pending .attendance-pending-badge::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+    animation: shimmer 2s infinite;
+  }
+  
+  @keyframes shimmer {
+    0% { left: -100%; }
+    100% { left: 100%; }
+  }
+  
+  /* Attendance status icon */
+  .attendance-status-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    animation: pulse 2s infinite;
+  }
+  
+  @keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+  }
+  
+  .attendance-status-icon i {
+    font-size: 14px;
+    animation: bounce 1s ease-in-out;
+  }
+  
+  @keyframes bounce {
+    0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+    40% { transform: translateY(-3px); }
+    60% { transform: translateY(-1px); }
   }
   
   /* Current Time Section */
@@ -1783,7 +2213,7 @@ style.textContent = `
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
     gap: 1rem;
-    max-height: 400px;
+    max-height: 600px;
     overflow-y: auto;
     padding-right: 8px;
   }
@@ -1801,9 +2231,19 @@ style.textContent = `
   }
   
   .student-card:hover {
-    transform: translateY(-2px);
+    transform: translateY(-0px);
     box-shadow: 0 8px 25px rgba(0,0,0,0.15);
     border-color: #007bff;
+  }
+  
+  .student-card.student-attended {
+    background-color: rgba(40, 167, 70, 0.15);
+    border-color: rgba(40, 167, 70, 0.2);
+  }
+  
+  .student-card.student-attended:hover {
+    background-color: rgba(40, 167, 69, 0.19);
+    border-color: rgba(40, 167, 69, 0.3);
   }
   
   .student-avatar {
@@ -1848,7 +2288,7 @@ style.textContent = `
   }
   
   .student-email::before {
-    content: "📧";
+    content: "✉️";
     margin-right: 0.25rem;
     font-size: 0.8rem;
   }
@@ -1864,7 +2304,7 @@ style.textContent = `
   }
   
   .student-phone::before {
-    content: "📱";
+    content: "📞";
     margin-right: 0.25rem;
     font-size: 0.8rem;
   }
@@ -2084,6 +2524,202 @@ style.textContent = `
     box-shadow: none !important;
   }
   
+  /* Compact file card styles */
+  .file-card.file-compact {
+    min-height: auto;
+    padding: 0.75rem;
+  }
+  
+  .file-card.file-compact .file-header {
+    margin-bottom: 0;
+  }
+  
+  /* File info animation */
+  .file-info-container {
+    overflow: hidden;
+    transition: all 0.3s ease-in-out;
+  }
+  
+  .file-card.file-info-hide .file-info-container {
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  
+  .file-card.file-info-show .file-info-container {
+    max-height: 200px;
+    opacity: 1;
+    transform: translateY(0);
+  }
+  
+  .file-card.file-info-show .file-info {
+    animation: slideDownFadeIn 0.3s ease-out;
+  }
+  
+  @keyframes slideDownFadeIn {
+    from { 
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to { 
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  /* File upload responsive */
+  .file-upload-label {
+    display: block;
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+    color: #495057;
+    transition: all 0.2s ease-in-out;
+  }
+  
+  .file-upload-container {
+    position: relative;
+    width: 100%;
+  }
+  
+  .file-upload-input {
+    position: absolute;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+    z-index: 2;
+  }
+  
+  .file-upload-label-custom {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 120px;
+    padding: 1rem;
+    border: 2px dashed #dee2e6;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    cursor: pointer;
+    transition: all 0.3s ease-in-out;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .file-upload-label-custom::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+    transition: left 0.5s;
+  }
+  
+  .file-upload-label-custom:hover {
+    border-color: #007bff;
+    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 123, 255, 0.15);
+  }
+  
+  .file-upload-label-custom:hover::before {
+    left: 100%;
+  }
+  
+  .file-upload-label-custom:active {
+    transform: translateY(0);
+    box-shadow: 0 4px 15px rgba(0, 123, 255, 0.2);
+  }
+  
+  .file-upload-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 60px;
+    height: 60px;
+    background: linear-gradient(135deg, #007bff, #0056b3);
+    border-radius: 50%;
+    color: white;
+    font-size: 24px;
+    margin-right: 1rem;
+    flex-shrink: 0;
+    transition: all 0.3s ease-in-out;
+  }
+  
+  .file-upload-label-custom:hover .file-upload-icon {
+    transform: scale(1.1) rotate(5deg);
+    box-shadow: 0 4px 15px rgba(0, 123, 255, 0.3);
+  }
+  
+  .file-upload-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+  }
+  
+  .file-upload-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 0.25rem;
+    word-break: break-word;
+    transition: all 0.2s ease-in-out;
+  }
+  
+  .file-upload-subtitle {
+    font-size: 14px;
+    color: #6c757d;
+    transition: all 0.2s ease-in-out;
+  }
+  
+  .file-upload-label-custom:hover .file-upload-title {
+    color: #007bff;
+  }
+  
+  .file-upload-label-custom:hover .file-upload-subtitle {
+    color: #495057;
+  }
+  
+  .file-upload-remove {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: #dc3545;
+    border-radius: 50%;
+    color: white;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    flex-shrink: 0;
+  }
+  
+  .file-upload-remove:hover {
+    background: #c82333;
+    transform: scale(1.1);
+  }
+  
+  .file-upload-input:disabled + .file-upload-label-custom {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: #e9ecef;
+  }
+  
+  .file-upload-input:disabled + .file-upload-label-custom:hover {
+    transform: none;
+    box-shadow: none;
+  }
+  
+  /* File note textarea responsive */
+  .file-note-textarea {
+    width: 100%;
+    transition: all 0.2s ease-in-out;
+  }
+  
   /* Responsive */
   @media (max-width: 768px) {
     .file-grid {
@@ -2093,6 +2729,91 @@ style.textContent = `
     .file-meta {
       flex-direction: column;
       gap: 0.25rem;
+    }
+    
+    /* Mobile: disable hover effects, only use click */
+    .file-card.file-compact:hover {
+      transform: none;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    
+    /* Mobile textarea adjustments */
+    .file-note-textarea {
+      min-height: 60px;
+      font-size: 14px;
+    }
+    
+    /* Mobile file upload adjustments */
+    .file-upload-label {
+      font-size: 14px;
+      margin-bottom: 0.5rem;
+    }
+    
+    .file-upload-label-custom {
+      min-height: 100px;
+      padding: 1rem;
+    }
+    
+    .file-upload-icon {
+      width: 50px;
+      height: 50px;
+      font-size: 20px;
+      margin-right: 0.75rem;
+    }
+    
+    .file-upload-title {
+      font-size: 15px;
+    }
+    
+    .file-upload-subtitle {
+      font-size: 13px;
+    }
+  }
+  
+  @media (max-width: 576px) {
+    .file-note-textarea {
+      min-height: 50px;
+      font-size: 13px;
+      padding: 0.5rem;
+    }
+    
+    /* Small mobile file upload adjustments */
+    .file-upload-label {
+      font-size: 13px;
+      margin-bottom: 0.375rem;
+    }
+    
+    .file-upload-label-custom {
+      min-height: 80px;
+      padding: 0.75rem;
+      flex-direction: column;
+      text-align: center;
+    }
+    
+    .file-upload-icon {
+      width: 40px;
+      height: 40px;
+      font-size: 18px;
+      margin-right: 0;
+      margin-bottom: 0.5rem;
+    }
+    
+    .file-upload-text {
+      margin-bottom: 0.5rem;
+    }
+    
+    .file-upload-title {
+      font-size: 14px;
+    }
+    
+    .file-upload-subtitle {
+      font-size: 12px;
+    }
+    
+    .file-upload-remove {
+      width: 28px;
+      height: 28px;
+      font-size: 12px;
     }
   }
 `;

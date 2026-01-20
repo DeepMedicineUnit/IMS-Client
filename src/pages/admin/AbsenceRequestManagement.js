@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Form, Alert, Container, Row, Col, Modal, Badge, Table, Spinner } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthContext';
-import { toast } from 'react-toastify';
+import { useAlert } from '../../contexts/AlertContext';
 import { format } from 'date-fns';
-import '../../styles/calendar.css';
+import Pagination from '../../components/Pagination';
+import usePageTitle from '../../hooks/usePageTitle';
+import '../../styles/user.css';
 import * as XLSX from 'xlsx';
 
 const AbsenceRequestManagement = () => {
+  usePageTitle('Quản lý yêu cầu xin phép vắng học');
+  const { showAlert } = useAlert();
   const { api } = useAuth();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -33,11 +37,6 @@ const AbsenceRequestManagement = () => {
   const [stats, setStats] = useState({});
   const [exporting, setExporting] = useState(false);
   
-  // Notification settings states
-  const [showNotificationModal, setShowNotificationModal] = useState(false);
-  const [notificationEmails, setNotificationEmails] = useState([]);
-  const [newEmail, setNewEmail] = useState({ email: '', name: '' });
-  const [loadingNotifications, setLoadingNotifications] = useState(false);
   
   // Auto-refresh states
   const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
@@ -116,7 +115,6 @@ const AbsenceRequestManagement = () => {
   useEffect(() => {
     fetchAbsenceRequests();
     fetchStats();
-    fetchNotificationSettings();
   }, []);
 
   // Auto-refresh data every 10 seconds
@@ -180,13 +178,13 @@ const AbsenceRequestManagement = () => {
         // Download Excel file
         downloadExcel(allRequests, 'bao-cao-xin-phep-vang-hoc.xlsx');
         
-        toast.success('Xuất báo cáo thành công!');
+        showAlert('Xuất báo cáo thành công!', 'success');
       } else {
-        toast.error('Không thể tải dữ liệu để xuất báo cáo');
+        showAlert('Không thể tải dữ liệu để xuất báo cáo', 'danger');
       }
     } catch (error) {
       console.error('Error exporting report:', error);
-      toast.error('Có lỗi xảy ra khi xuất báo cáo');
+      showAlert('Có lỗi xảy ra khi xuất báo cáo', 'danger');
     } finally {
       setExporting(false);
     }
@@ -206,6 +204,9 @@ const AbsenceRequestManagement = () => {
       'Địa điểm',
       'Loại vắng',
       'Lý do',
+      'Ngày học bù đề xuất',
+      'Ghi chú học bù',
+      'Có bằng chứng',
       'Trạng thái',
       'Người duyệt',
       'Ngày tạo',
@@ -232,12 +233,17 @@ const AbsenceRequestManagement = () => {
         request.student_email || '',
         request.student_phone || '',
         request.session_title || '',
-        request.session_date ? format(new Date(request.session_date), 'dd/MM/yyyy') : '',
+        request.session_date ? (request.session_end_date && request.session_end_date !== request.session_date ? 
+          `${format(new Date(request.session_date), 'dd/MM/yyyy')} - ${format(new Date(request.session_end_date), 'dd/MM/yyyy')}` :
+          format(new Date(request.session_date), 'dd/MM/yyyy')) : '',
         request.start_time || '',
         request.end_time || '',
         request.location || '',
         getRequestTypeText(request.request_type),
         request.reason || '',
+        request.makeup_date ? format(new Date(request.makeup_date), 'dd/MM/yyyy') : '',
+        request.makeup_notes || '',
+        request.evidence_file ? 'Có' : 'Không',
         getStatusText(request.status),
         request.approver_name || '',
         request.created_at ? format(new Date(request.created_at), 'dd/MM/yyyy HH:mm') : '',
@@ -285,6 +291,9 @@ const AbsenceRequestManagement = () => {
       'Địa điểm',
       'Loại vắng',
       'Lý do',
+      'Ngày học bù đề xuất',
+      'Ghi chú học bù',
+      'Có bằng chứng',
       'Trạng thái',
       'Người duyệt',
       'Ngày tạo',
@@ -297,12 +306,17 @@ const AbsenceRequestManagement = () => {
       request.student_email || '',
       request.student_phone || '',
       request.session_title || '',
-      request.session_date ? format(new Date(request.session_date), 'dd/MM/yyyy') : '',
+      request.session_date ? (request.session_end_date && request.session_end_date !== request.session_date ? 
+        `${format(new Date(request.session_date), 'dd/MM/yyyy')} - ${format(new Date(request.session_end_date), 'dd/MM/yyyy')}` :
+        format(new Date(request.session_date), 'dd/MM/yyyy')) : '',
       request.start_time || '',
       request.end_time || '',
       request.location || '',
       getRequestTypeText(request.request_type),
       request.reason || '',
+      request.makeup_date ? format(new Date(request.makeup_date), 'dd/MM/yyyy') : '',
+      request.makeup_notes || '',
+      request.evidence_file ? 'Có' : 'Không',
       getStatusText(request.status),
       request.approver_name || '',
       request.created_at ? format(new Date(request.created_at), 'dd/MM/yyyy HH:mm') : '',
@@ -331,6 +345,9 @@ const AbsenceRequestManagement = () => {
       { wch: 20 },  // Địa điểm
       { wch: 15 },  // Loại vắng
       { wch: 30 },  // Lý do
+      { wch: 15 },  // Ngày học bù đề xuất
+      { wch: 25 },  // Ghi chú học bù
+      { wch: 12 },  // Có bằng chứng
       { wch: 12 },  // Trạng thái
       { wch: 20 },  // Người duyệt
       { wch: 18 },  // Ngày tạo
@@ -407,7 +424,7 @@ const AbsenceRequestManagement = () => {
       console.error('Error processing request:', error);
       const errorMessage = error.response?.data?.message || 'Có lỗi xảy ra khi xử lý yêu cầu';
       setError(errorMessage);
-      toast.error(errorMessage);
+      showAlert(errorMessage, 'danger');
     } finally {
       setSubmitting(false);
     }
@@ -446,73 +463,6 @@ const AbsenceRequestManagement = () => {
     }
   };
 
-  // Fetch notification settings
-  const fetchNotificationSettings = async () => {
-    try {
-      setLoadingNotifications(true);
-      const response = await api.get('/absence-requests/notifications/settings');
-      if (response.data.success) {
-        setNotificationEmails(response.data.data);
-      }
-    } catch (error) {
-      console.error('Error fetching notification settings:', error);
-      toast.error('Lỗi khi tải cài đặt thông báo');
-    } finally {
-      setLoadingNotifications(false);
-    }
-  };
-
-  // Add notification email
-  const addNotificationEmail = async () => {
-    try {
-      if (!newEmail.email || !newEmail.name) {
-        toast.error('Vui lòng điền đầy đủ thông tin');
-        return;
-      }
-
-      const response = await api.post('/absence-requests/notifications/emails', newEmail);
-      if (response.data.success) {
-        // Silent success - no toast notification
-        setNewEmail({ email: '', name: '' });
-        fetchNotificationSettings();
-      }
-    } catch (error) {
-      console.error('Error adding notification email:', error);
-      toast.error(error.response?.data?.message || 'Lỗi khi thêm email nhận thông báo');
-    }
-  };
-
-  // Remove notification email
-  const removeNotificationEmail = async (email) => {
-    try {
-      if (window.confirm(`Bạn có chắc chắn muốn xóa email ${email} khỏi danh sách nhận thông báo?`)) {
-        const response = await api.delete(`/absence-requests/notifications/emails/${email}`);
-        if (response.data.success) {
-          // Silent success - no toast notification
-          fetchNotificationSettings();
-        }
-      }
-    } catch (error) {
-      console.error('Error removing notification email:', error);
-      toast.error('Lỗi khi xóa email nhận thông báo');
-    }
-  };
-
-  // Toggle notification email status
-  const toggleNotificationEmailStatus = async (email, isActive) => {
-    try {
-      const response = await api.put(`/absence-requests/notifications/emails/${email}/status`, {
-        is_active: !isActive
-      });
-      if (response.data.success) {
-        // Silent success - no toast notification
-        fetchNotificationSettings();
-      }
-    } catch (error) {
-      console.error('Error toggling notification email status:', error);
-      toast.error('Lỗi khi cập nhật trạng thái email nhận thông báo');
-    }
-  };
 
   if (loading) {
     return (
@@ -545,14 +495,6 @@ const AbsenceRequestManagement = () => {
             <p className="header-subtitle">Theo dõi và xử lý các yêu cầu xin phép vắng học của sinh viên</p>
           </div>
           <div className="header-actions">
-            <Button 
-              variant="outline-light" 
-              className="create-session-btn me-2"
-              onClick={() => setShowNotificationModal(true)}
-            >
-              <i className="fas fa-cog"></i>
-              Cài đặt thông báo
-            </Button>
             <Button 
               variant="outline-light" 
               className="create-session-btn"
@@ -676,6 +618,8 @@ const AbsenceRequestManagement = () => {
                     <th>Buổi học</th>
                     <th>Loại vắng</th>
                     <th>Lý do</th>
+                    <th>Ngày học bù</th>
+                    <th>Bằng chứng</th>
                     <th>Trạng thái</th>
                     <th>Ngày tạo</th>
                     <th>Thao tác</th>
@@ -710,7 +654,9 @@ const AbsenceRequestManagement = () => {
                         <div>
                           <div className="fw-bold">{request.session_title}</div>
                           <small className="text-muted">
-                            {format(new Date(request.session_date), 'dd/MM/yyyy')} - ({request.start_time} → {request.end_time})
+                            {request.session_end_date && request.session_end_date !== request.session_date ? 
+                              `${format(new Date(request.session_date), 'dd/MM/yyyy')} - ${format(new Date(request.session_end_date), 'dd/MM/yyyy')}` :
+                              format(new Date(request.session_date), 'dd/MM/yyyy')} - ({request.start_time} → {request.end_time})
                           </small>
                           {request.location && (
                             <div>
@@ -736,6 +682,52 @@ const AbsenceRequestManagement = () => {
                         }}>
                           {request.reason}
                         </div>
+                      </td>
+                      <td style={{ width: '150px' }}>
+                        {request.makeup_date ? (
+                          <div>
+                            <div className="fw-bold text-primary">
+                              <i className="fas fa-calendar-plus me-1"></i>
+                              {format(new Date(request.makeup_date), 'dd/MM/yyyy')}
+                            </div>
+                            {request.makeup_notes && (
+                              <small className="text-muted d-block mt-1">
+                                <i className="fas fa-sticky-note me-1"></i>
+                                {request.makeup_notes}
+                              </small>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-muted">
+                            <i className="fas fa-minus me-1"></i>
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ width: '120px' }}>
+                        {request.evidence_file ? (
+                          <div className="d-flex gap-1">
+                            <Button
+                              variant="outline-primary"
+                              size="sm"
+                              onClick={() => window.open(`/api/absence-requests/${request.id}/evidence?view=true`, '_blank')}
+                              title="Xem trực tiếp bằng chứng"
+                            >
+                              <i className="fas fa-eye me-1"></i>
+                            </Button>
+                            <Button
+                              variant="outline-success"
+                              size="sm"
+                              onClick={() => window.open(`/api/absence-requests/${request.id}/evidence`, '_blank')}
+                              title="Tải xuống bằng chứng"
+                            >
+                              <i className="fas fa-download me-1"></i>
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-muted">
+                            <i className="fas fa-times me-1"></i>
+                          </span>
+                        )}
                       </td>
                       <td>{getStatusBadge(request.status)}</td>
                       <td>
@@ -792,36 +784,14 @@ const AbsenceRequestManagement = () => {
 
             {/* Pagination */}
             {pagination.pages > 1 && (
-              <div className="d-flex justify-content-center mt-4">
-                <nav>
-                  <ul className="pagination">
-                    <li className={`page-item ${pagination.page === 1 ? 'disabled' : ''}`}>
-                      <Button
-                        variant="outline-primary"
-                        size="sm"
-                        onClick={() => fetchAbsenceRequests(pagination.page - 1)}
-                        disabled={pagination.page === 1}
-                      >
-                        Trước
-                      </Button>
-                    </li>
-                    <li className="page-item active">
-                      <span className="page-link">
-                        {pagination.page} / {pagination.pages}
-                      </span>
-                    </li>
-                    <li className={`page-item ${pagination.page === pagination.pages ? 'disabled' : ''}`}>
-                      <Button
-                        variant="outline-primary"
-                        size="sm"
-                        onClick={() => fetchAbsenceRequests(pagination.page + 1)}
-                        disabled={pagination.page === pagination.pages}
-                      >
-                        Sau
-                      </Button>
-                    </li>
-                  </ul>
-                </nav>
+              <div className="mt-4">
+                <Pagination
+                  currentPage={pagination.page}
+                  totalPages={pagination.pages}
+                  onPageChange={(page) => fetchAbsenceRequests(page)}
+                  maxVisiblePages={5}
+                  showFirstLast={true}
+                />
               </div>
             )}
 
@@ -849,7 +819,9 @@ const AbsenceRequestManagement = () => {
                     <strong>Buổi học:</strong> {selectedRequest.session_title}
                   </div>
                   <div className="col-md-6">
-                    <strong>Ngày:</strong> {format(new Date(selectedRequest.session_date), 'dd/MM/yyyy')}
+                    <strong>Ngày:</strong> {selectedRequest.session_end_date && selectedRequest.session_end_date !== selectedRequest.session_date ? 
+                      `${format(new Date(selectedRequest.session_date), 'dd/MM/yyyy')} - ${format(new Date(selectedRequest.session_end_date), 'dd/MM/yyyy')}` :
+                      format(new Date(selectedRequest.session_date), 'dd/MM/yyyy')}
                   </div>
                   <div className="col-md-6">
                     <strong>Thời gian:</strong> {selectedRequest.start_time} - {selectedRequest.end_time}
@@ -863,6 +835,45 @@ const AbsenceRequestManagement = () => {
                       {selectedRequest.reason}
                     </div>
                   </div>
+                  {selectedRequest.makeup_date && (
+                    <div className="col-12 mt-2">
+                      <strong>Ngày học bù đề xuất:</strong>
+                      <div className="mt-1 p-2 bg-light rounded border">
+                        <i className="fas fa-calendar-plus me-2 text-primary"></i>
+                        {format(new Date(selectedRequest.makeup_date), 'dd/MM/yyyy')}
+                        {selectedRequest.makeup_notes && (
+                          <div className="mt-2">
+                            <strong>Ghi chú:</strong> {selectedRequest.makeup_notes}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {selectedRequest.evidence_file && (
+                    <div className="col-12 mt-2">
+                      <strong>Bằng chứng đính kèm:</strong>
+                      <div className="mt-1">
+                        <div className="d-flex gap-2">
+                          <Button
+                            variant="outline-primary"
+                            size="sm"
+                            onClick={() => window.open(`/api/absence-requests/${selectedRequest.id}/evidence?view=true`, '_blank')}
+                          >
+                            <i className="fas fa-eye me-1"></i>
+                            Xem trực tiếp
+                          </Button>
+                          <Button
+                            variant="outline-success"
+                            size="sm"
+                            onClick={() => window.open(`/api/absence-requests/${selectedRequest.id}/evidence`, '_blank')}
+                          >
+                            <i className="fas fa-download me-1"></i>
+                            Tải xuống
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -933,121 +944,6 @@ const AbsenceRequestManagement = () => {
         </Modal.Body>
       </Modal>
 
-      {/* Notification Settings Modal */}
-      <Modal show={showNotificationModal} onHide={() => setShowNotificationModal(false)} size="lg">
-        <Modal.Header closeButton>
-          <Modal.Title>
-            <i className="fas fa-bell me-2"></i>
-            Cài đặt thông báo email
-          </Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <div className="mb-4">
-            <h5>Danh sách email nhận thông báo</h5>
-            <p className="text-muted">Khi có yêu cầu xin phép vắng học mới, hệ thống sẽ gửi email thông báo đến các địa chỉ dưới đây.</p>
-            
-            {loadingNotifications ? (
-              <div className="text-center py-3">
-                <Spinner animation="border" size="sm" />
-                <span className="ms-2">Đang tải...</span>
-              </div>
-            ) : (
-              <div className="table-responsive">
-                <Table striped hover>
-                  <thead>
-                    <tr>
-                      <th>Email</th>
-                      <th>Tên</th>
-                      <th>Trạng thái</th>
-                      <th>Thao tác</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {notificationEmails.map((email, index) => (
-                      <tr key={index}>
-                        <td>{email.email}</td>
-                        <td>{email.name}</td>
-                        <td>
-                          <Badge bg={email.is_active ? 'success' : 'secondary'}>
-                            {email.is_active ? 'Hoạt động' : 'Tạm dừng'}
-                          </Badge>
-                        </td>
-                        <td>
-                          <Button
-                            variant="outline-primary"
-                            size="sm"
-                            className="me-2"
-                            onClick={() => toggleNotificationEmailStatus(email.email, email.is_active)}
-                          >
-                            <i className={`fas fa-${email.is_active ? 'pause' : 'play'}`}></i>
-                          </Button>
-                          <Button
-                            variant="outline-danger"
-                            size="sm"
-                            onClick={() => removeNotificationEmail(email.email)}
-                          >
-                            <i className="fas fa-trash"></i>
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                    {notificationEmails.length === 0 && (
-                      <tr>
-                        <td colSpan="4" className="text-center text-muted">
-                          Chưa có email nào được cài đặt
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </Table>
-              </div>
-            )}
-          </div>
-
-          <hr />
-
-          <div>
-            <h5>Thêm email nhận thông báo</h5>
-            <Form onSubmit={(e) => { e.preventDefault(); addNotificationEmail(); }}>
-              <Row>
-                <Col md={6}>
-                  <Form.Group className="mb-3">
-                    <Form.Label>Email</Form.Label>
-                    <Form.Control
-                      type="email"
-                      placeholder="Nhập địa chỉ email"
-                      value={newEmail.email}
-                      onChange={(e) => setNewEmail({ ...newEmail, email: e.target.value })}
-                      required
-                    />
-                  </Form.Group>
-                </Col>
-                <Col md={6}>
-                  <Form.Group className="mb-3">
-                    <Form.Label>Tên</Form.Label>
-                    <Form.Control
-                      type="text"
-                      placeholder="Nhập tên người nhận"
-                      value={newEmail.name}
-                      onChange={(e) => setNewEmail({ ...newEmail, name: e.target.value })}
-                      required
-                    />
-                  </Form.Group>
-                </Col>
-              </Row>
-              <Button type="submit" variant="primary">
-                <i className="fas fa-plus me-2"></i>
-                Thêm email
-              </Button>
-            </Form>
-          </div>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowNotificationModal(false)}>
-            Đóng
-          </Button>
-        </Modal.Footer>
-      </Modal>
     </div>
   );
 };

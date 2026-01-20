@@ -1,0 +1,266 @@
+/* Absence Confirmation Preview - Mobile Responsive Styles */
+
+/* Base styles for desktop */
+.absence-confirmation-preview {
+  font-family: 'Times New Roman', serif;
+  line-height: 1.4;
+}
+
+/* Mobile styles - Tablets and small laptops */
+@media (max-width: 768px) {
+  .absence-confirmation-preview {
+    font-size: 12px !important;
+  }
+  
+  .absence-confirmation-preview .container {
+    max-width: 100% !important;
+    padding: 10px !important;
+    margin: 0 !important;
+  }
+  
+  .absence-confirmation-preview .header {
+    margin-bottom: 15px !important;
+  }
+  
+  .absence-confirmation-preview .university-name {
+    font-size: 14px !important;
+    margin-bottom: 5px !important;
+  }
+  
+  .absence-confirmation-preview .document-title {
+    font-size: 16px !important;
+    margin-top: 5px !important;
+  }
+  
+  .absence-confirmation-preview .info-section h3 {
+    font-size: 14px !important;
+    margin-bottom: 6px !important;
+  }
+  
+  .absence-confirmation-preview .info-label {
+    min-width: 100px !important;
+    font-size: 11px !important;
+  }
+  
+  .absence-confirmation-preview .info-value {
+    font-size: 11px !important;
+  }
+  
+  .absence-confirmation-preview .reason-title {
+    font-size: 11px !important;
+  }
+  
+  .absence-confirmation-preview .reason-text {
+    font-size: 11px !important;
+  }
+  
+  .absence-confirmation-preview .status-title {
+    font-size: 11px !important;
+  }
+  
+  .absence-confirmation-preview .status-text {
+    font-size: 11px !important;
+  }
+  
+  .absence-confirmation-preview .signature-section {
+    margin-top: 15px !important;
+    flex-direction: column !important;
+    gap: 15px !important;
+  }
+  
+  .absence-confirmation-preview .signature-box {
+    width: 100% !important;
+    text-align: center !important;
+  }
+  
+  .absence-confirmation-preview .signature-text {
+    font-size: 11px !important;
+  }
+  
+  .absence-confirmation-preview .footer {
+    position: relative !important;
+    bottom: auto !important;
+    left: auto !important;
+    right: auto !important;
+    margin-top: 20px !important;
+    font-size: 9px !important;
+    padding-top: 10px !important;
+  }
+  
+  .absence-confirmation-preview .document-id {
+    position: relative !important;
+    top: auto !important;
+    right: auto !important;
+    margin-bottom: 10px !important;
+    font-size: 9px !important;
+    text-align: center !important;
+  }
+  
+  .absence-confirmation-preview .security-stamp {
+    position: relative !important;
+    bottom: auto !important;
+    right: auto !important;
+    margin: 10px auto !important;
+    width: 50px !important;
+    height: 50px !important;
+  }
+  
+  .absence-confirmation-preview .security-stamp img {
+    width: 40px !important;
+    height: 40px !important;
+  }
+  
+  .absence-confirmation-preview .qr-placeholder {
+    position: relative !important;
+    bottom: auto !important;
+    left: auto !important;
+    margin: 10px auto !important;
+    width: 40px !important;
+    height: 40px !important;
+  }
+  
+  .absence-confirmation-preview .qr-placeholder img {
+    width: 100% !important;
+    height: 100% !important;
+  }
+  
+  .absence-confirmation-preview .micro-text {
+    position: relative !important;
+    bottom: auto !important;
+    left: auto !important;
+    right: auto !important;
+    margin-top: 15px !important;
+    font-size: 7px !important;
+    text-align: center !important;
+  }
+  
+  .absence-confirmation-preview .watermark {
+    font-size: 60px !important;
+  }
+  
+  .absence-confirmation-preview .badge {
+    font-size: 10px !important;
+    padding: 2px 6px !important;
+  }
+  
+  .absence-confirmation-preview .date-time {
+    font-size: 10px !important;
+  }
+}
+
+/* Mobile styles - Small phones */
+@media (max-width: 480px) {
+  .absence-confirmation-preview {
+    font-size: 11px !important;
+  }
+  
+  .absence-confirmation-preview .container {
+    padding: 8px !important;
+  }
+  
+  .absence-confirmation-preview .university-name {
+    font-size: 13px !important;
+  }
+  
+  .absence-confirmation-preview .document-title {
+    font-size: 15px !important;
+  }
+  
+  .absence-confirmation-preview .info-section h3 {
+    font-size: 13px !important;
+  }
+  
+  .absence-confirmation-preview .info-label {
+    min-width: 90px !important;
+    font-size: 10px !important;
+  }
+  
+  .absence-confirmation-preview .info-value {
+    font-size: 10px !important;
+  }
+  
+  .absence-confirmation-preview .reason-title {
+    font-size: 10px !important;
+  }
+  
+  .absence-confirmation-preview .reason-text {
+    font-size: 10px !important;
+  }
+  
+  .absence-confirmation-preview .status-title {
+    font-size: 10px !important;
+  }
+  
+  .absence-confirmation-preview .status-text {
+    font-size: 10px !important;
+  }
+  
+  .absence-confirmation-preview .signature-text {
+    font-size: 10px !important;
+  }
+  
+  .absence-confirmation-preview .footer {
+    font-size: 8px !important;
+  }
+  
+  .absence-confirmation-preview .document-id {
+    font-size: 8px !important;
+  }
+  
+  .absence-confirmation-preview .micro-text {
+    font-size: 6px !important;
+  }
+  
+  .absence-confirmation-preview .watermark {
+    font-size: 50px !important;
+  }
+  
+  .absence-confirmation-preview .badge {
+    font-size: 9px !important;
+    padding: 1px 4px !important;
+  }
+  
+  .absence-confirmation-preview .date-time {
+    font-size: 9px !important;
+  }
+}
+
+/* Action buttons responsive */
+.mobile-action-buttons {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 10000;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .mobile-action-buttons {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    justify-content: center;
+  }
+  
+  .mobile-action-buttons .btn {
+    font-size: 12px !important;
+    padding: 6px 12px !important;
+    flex: 1;
+    max-width: 120px;
+  }
+}
+
+@media (max-width: 480px) {
+  .mobile-action-buttons {
+    top: 5px;
+    left: 5px;
+    right: 5px;
+  }
+  
+  .mobile-action-buttons .btn {
+    font-size: 11px !important;
+    padding: 5px 10px !important;
+  }
+}
