@@ -119,9 +119,7 @@ const LMSDashboard = () => {
     { to: '/lms/live-class', icon: 'fas fa-video', text: 'Lớp học trực tuyến', color: '#ef4444' },
     { to: '/lms/exams', icon: 'fas fa-clipboard-check', text: 'Kỳ thi', color: '#f59e0b' },
     { to: '/lms/question-bank', icon: 'fas fa-database', text: 'Ngân hàng câu hỏi', color: '#8b5cf6' },
-    { to: '/lms/grades', icon: 'fas fa-chart-line', text: 'Điểm & Báo cáo', color: '#ec4899' },
-    { to: '/lms/integrations', icon: 'fas fa-plug', text: 'Tích hợp', color: '#14b8a6' },
-    { to: '/lms/support-analytics', icon: 'fas fa-headset', text: 'Hỗ trợ & Analytics', color: '#6366f1' }
+    { to: '/lms/grades', icon: 'fas fa-chart-line', text: 'Điểm & Báo cáo', color: '#ec4899' }
   ];
 
   if (loading) {
@@ -233,9 +231,6 @@ const LMSDashboard = () => {
             <Card.Body>
               <div className="d-flex justify-content-between align-items-center mb-3">
                 <h5 className="mb-0">Hoạt động Gần đây</h5>
-                <Link to="/lms/support-analytics" className="text-decoration-none">
-                  <small>Xem tất cả <i className="fas fa-arrow-right"></i></small>
-                </Link>
               </div>
               <div className="activity-timeline">
                 {recentActivities.map((activity, index) => (

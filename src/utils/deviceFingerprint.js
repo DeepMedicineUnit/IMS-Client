@@ -18,7 +18,6 @@ export const getDeviceFingerprint = async () => {
     // Tạo địa chỉ MAC giả lập từ visitor ID
     const macAddress = generateMACFromFingerprint(result.visitorId);
     
-    console.log('Generated MAC address from fingerprint:', macAddress);
     return macAddress;
   } catch (error) {
     console.error('Error getting device fingerprint:', error);

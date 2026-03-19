@@ -132,6 +132,18 @@
   background: var(--cr-gray-50);
 }
 
+/* Khi đóng "Tùy chọn theo dõi": ẩn viền/khung trắng phía dưới card */
+.custom-report-card--filter-collapsed {
+  border-bottom: none;
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
+}
+.custom-report-card--filter-collapsed .custom-report-card-body {
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
 /* Section Labels */
 .custom-report-section-label {
   font-size: 14px;

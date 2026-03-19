@@ -1,8 +1,10 @@
 import React, { createContext, useState, useContext, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
+import api, { getApiBaseURL } from '../utils/api';
 import { getDeviceFingerprint } from '../utils/deviceFingerprint';
 import { trackLogin, trackLogout, initializeAnalytics, trackError } from '../utils/analytics';
+import activityTracker from '../utils/activityTracker';
 
 const AuthContext = createContext();
 
@@ -28,7 +30,8 @@ export function AuthProvider({ children }) {
     // Function to fetch CSRF token
     const fetchCSRFToken = async () => {
         try {
-            const response = await axios.get('/api/csrf-token', {
+            const apiBaseURL = getApiBaseURL();
+            const response = await axios.get(`${apiBaseURL}/csrf-token`, {
                 withCredentials: true
             });
             if (response.data.success && response.data.csrfToken) {
@@ -59,18 +62,8 @@ export function AuthProvider({ children }) {
         return token;
     };
 
-    // Set up axios defaults - use useRef to keep the same instance across renders
-    const apiRef = useRef(
-        axios.create({
-            baseURL: '/api', // This will be proxied to http://localhost:5000/api
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            withCredentials: true // Include cookies in requests
-        })
-    );
-
-    const api = apiRef.current;
+    // Use API instance from utils/api.js which handles baseURL correctly
+    // This ensures consistent API configuration across the app
 
     // Set up interceptors - these need to be set up before useEffect
     // Add token and CSRF token to requests
@@ -339,6 +332,7 @@ export function AuthProvider({ children }) {
                 // Track login event
                 trackLogin('email');
                 initializeAnalytics(response.data.user);
+                activityTracker.trackLogin(response.data.user.username, 'email');
 
                 toast.success('Đăng nhập thành công');
                 return response.data;
@@ -385,6 +379,7 @@ export function AuthProvider({ children }) {
                 // Track Google login event
                 trackLogin('google');
                 initializeAnalytics(response.data.user);
+                activityTracker.trackLogin(response.data.user.username, 'google');
 
                 toast.success('Đăng nhập bằng Google thành công');
                 return response.data;
@@ -408,7 +403,11 @@ export function AuthProvider({ children }) {
             hasLoadedUserRef.current = false; // Reset loaded flag
             
             // Track logout event before logout
+            const username = currentUser?.username;
             trackLogout();
+            if (username) {
+                activityTracker.trackLogout(username);
+            }
 
             // Clear user state FIRST to prevent any auto-login attempts
             setCurrentUser(null);

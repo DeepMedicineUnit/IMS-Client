@@ -177,27 +177,38 @@ const ForgotPassword = () => {
                 
                 <Button 
                   variant="primary" 
-                  type="submit" 
+                  type={success && resendCooldown === 0 ? "button" : "submit"}
                   className="w-100 mt-4" 
-                  disabled={loading}
+                  disabled={loading || (success && resendCooldown > 0)}
+                  onClick={success && resendCooldown === 0 ? resendResetLink : undefined}
                   style={{
                     borderRadius: '25px',
                     padding: '14px 32px',
                     fontWeight: '500',
                     fontSize: '16px',
                     letterSpacing: '-0.01em',
-                    border: 'none',
-                    background: loading ? '#314691' : '#314691',
-                    color: loading ? '#8E8E93' : '#ffffff',
-                    boxShadow: loading ? 'none' : '0 2px 8px rgba(0, 122, 255, 0.2)',
+                    border: success && resendCooldown > 0 ? '1.5px solid #E5E5EA' : 'none',
+                    background: success && resendCooldown > 0 ? 'transparent' : (loading ? '#314691' : '#314691'),
+                    color: success && resendCooldown > 0 ? '#8E8E93' : (loading ? '#8E8E93' : '#ffffff'),
+                    boxShadow: (loading || (success && resendCooldown > 0)) ? 'none' : '0 2px 8px rgba(0, 122, 255, 0.2)',
                     transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                    cursor: loading ? 'not-allowed' : 'pointer'
+                    cursor: (loading || (success && resendCooldown > 0)) ? 'not-allowed' : 'pointer'
                   }}
                 >
                   {loading ? (
                     <>
                       <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
                       Đang xử lý...
+                    </>
+                  ) : success && resendCooldown > 0 ? (
+                    <>
+                      <i className="fas fa-clock me-2"></i>
+                      {`Gửi lại sau (${resendCooldown}s)`}
+                    </>
+                  ) : success && resendCooldown === 0 ? (
+                    <>
+                      <i className="fas fa-redo me-2"></i>
+                      Gửi lại liên kết
                     </>
                   ) : (
                     <>
@@ -214,59 +225,6 @@ const ForgotPassword = () => {
                   </Link>
                 </div>
               </Form>
-              
-              {success && resendCooldown > 0 && (
-                <div className="text-center mt-3">
-                  <Button 
-                    variant="outline-primary" 
-                    type="button" 
-                    className="w-100 mb-2" 
-                    disabled={loading || resendCooldown > 0}
-                    style={{
-                      borderRadius: '25px',
-                      padding: '14px 32px',
-                      fontWeight: '500',
-                      fontSize: '16px',
-                      letterSpacing: '-0.01em',
-                      border: '1.5px solid #E5E5EA',
-                      background: 'transparent',
-                      color: '#8E8E93',
-                      transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                      cursor: 'not-allowed'
-                    }}
-                  >
-                    <i className="fas fa-clock me-2"></i>
-                    {`Gửi lại sau (${resendCooldown}s)`}
-                  </Button>
-                </div>
-              )}
-              
-              {success && resendCooldown === 0 && (
-                <div className="text-center mt-3">
-                  <Button 
-                    variant="outline-primary" 
-                    type="button" 
-                    className="w-100 mb-2" 
-                    disabled={loading}
-                    onClick={resendResetLink}
-                    style={{
-                      borderRadius: '25px',
-                      padding: '14px 32px',
-                      fontWeight: '500',
-                      fontSize: '16px',
-                      letterSpacing: '-0.01em',
-                      border: '1.5px solid #007AFF',
-                      background: loading ? 'transparent' : 'transparent',
-                      color: loading ? '#8E8E93' : '#007AFF',
-                      transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                      cursor: loading ? 'not-allowed' : 'pointer'
-                    }}
-                  >
-                    <i className="fas fa-redo me-2"></i>
-                    Gửi lại liên kết
-                  </Button>
-                </div>
-              )}
               
               {success && (
                 <div className="text-center mt-3">

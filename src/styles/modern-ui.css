@@ -2720,3 +2720,67 @@ button.btn-pagination:disabled {
   }
 }
   
+
+
+/* Modal thông báo từ giám thị - nền mờ, modal giữa màn hình, luôn trên cùng */
+body.proctor-message-modal-open .modal-backdrop {
+  opacity: 0.75 !important;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.proctor-message-modal .modal-dialog {
+  z-index: 1061;
+  max-width: 480px;
+  margin: 1.75rem auto;
+}
+
+.proctor-message-modal .modal-content {
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+.proctor-message-modal-dialog {
+  display: flex;
+  align-items: center;
+  min-height: calc(100vh - 3.5rem);
+}
+
+.proctor-message-modal-body .proctor-message-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+/* Stack: modal cũ đẩy lên trên, modal mới nhất ở dưới; backdrop phía sau, modal nổi trên */
+.proctor-message-stack-wrapper {
+  position: fixed;
+  inset: 0;
+  z-index: 1060;
+  pointer-events: none;
+}
+.proctor-message-stack-wrapper .proctor-message-stack-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: rgba(0, 0, 0, 0.137);
+  backdrop-filter: blur(2px);
+  pointer-events: auto;
+}
+/* Modal cũ index nhỏ (z-index thấp), modal mới nhất index lớn (z-index cao) → mới nhất luôn nổi trên */
+.proctor-message-stack-wrapper .modal {
+  pointer-events: auto;
+  position: relative;
+}
+.proctor-message-stack-wrapper .modal-dialog {
+  margin-left: auto;
+  margin-right: auto;
+  transition: margin-top 0.25s ease;
+}
+.proctor-message-stack-wrapper .proctor-message-modal-index-0 .modal-dialog { margin-top: 8vh; }
+.proctor-message-stack-wrapper .proctor-message-modal-index-1 .modal-dialog { margin-top: 28vh; }
+.proctor-message-stack-wrapper .proctor-message-modal-index-2 .modal-dialog { margin-top: 48vh; }
+.proctor-message-stack-wrapper .proctor-message-modal-index-3 .modal-dialog { margin-top: 68vh; }
+.proctor-message-stack-wrapper .proctor-message-modal-index-4 .modal-dialog { margin-top: 88vh; }
+.proctor-message-stack-wrapper .proctor-message-modal-index-5 .modal-dialog { margin-top: 108vh; }

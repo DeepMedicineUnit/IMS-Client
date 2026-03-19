@@ -579,10 +579,19 @@ const StudentDashboard = () => {
               <button 
                 className="btn-modern"
                 onClick={() => navigate('/student/schedule')}
-                title={t('studentDashboard.schedule')}
+                title="Thời khóa biểu"
                 style={{ backgroundColor: '#256176' }}
               >
                 <i className="fas fa-calendar-alt"></i>
+              </button>
+              
+              <button 
+                className="btn-modern"
+                onClick={() => navigate('/student/performance')}
+                title="Hiệu suất"
+                style={{ backgroundColor: '#10b981' }}
+              >
+                <i className="fas fa-chart-line"></i>
               </button>
               
               <button 

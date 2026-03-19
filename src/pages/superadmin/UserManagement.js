@@ -6,6 +6,7 @@ import Pagination from '../../components/Pagination';
 import * as XLSX from 'xlsx';
 import '../../styles/user.css';
 import usePageTitle from '../../hooks/usePageTitle';
+import { getApiBaseURL, getUploadsBaseURL } from '../../utils/api';
 
 // CSS cho dropdown menu và mobile optimization
 const dropdownStyles = `
@@ -95,13 +96,51 @@ const dropdownStyles = `
     transition: filter 0.2s ease;
   }
 
+  /* Module roles grid: chia đều tối đa 5 cột trên màn hình lớn */
+  .module-roles-grid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+
+  @media (min-width: 576px) {
+    .module-roles-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 768px) {
+    .module-roles-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 992px) {
+    .module-roles-grid {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+  }
+
+  .module-roles-grid-item {
+    min-width: 0;
+  }
+
 `;
+
+const USER_MANAGEMENT_TAB_KEY = 'userManagementActiveTab';
+const VALID_TABS = ['students', 'student-groups', 'face-management', 'staff', 'human-resources', 'excluded'];
 
 const UserManagement = () => {
   const { showAlert } = useAlert();
     const { api, currentUser } = useAuth();
-    // Always start with students tab for better compatibility
-    const [activeTab, setActiveTab] = useState('students');
+    const [activeTab, setActiveTab] = useState(() => {
+        try {
+            const saved = localStorage.getItem(USER_MANAGEMENT_TAB_KEY);
+            return saved && VALID_TABS.includes(saved) ? saved : 'students';
+        } catch {
+            return 'students';
+        }
+    });
     const [users, setUsers] = useState([]);
     const [students, setStudents] = useState([]);
     const [allStudents, setAllStudents] = useState([]); // Tất cả sinh viên không bị filter
@@ -229,6 +268,12 @@ const UserManagement = () => {
     const [userModuleRoles, setUserModuleRoles] = useState({});
     const [selectedUserForModuleRoles, setSelectedUserForModuleRoles] = useState(null);
 
+    // States for tab Nhân sự (human_resources)
+    const [showAddHrModal, setShowAddHrModal] = useState(false);
+    const [addHrCandidateList, setAddHrCandidateList] = useState([]);
+    const [addHrSearch, setAddHrSearch] = useState('');
+    const [addHrLoading, setAddHrLoading] = useState(false);
+
     // States for face management tab
     const [faceUsers, setFaceUsers] = useState([]);
     const [faceUsersLoading, setFaceUsersLoading] = useState(false);
@@ -315,7 +360,17 @@ const UserManagement = () => {
         training: ['admin', 'mod', 'staff', 'view'],
         library: ['admin', 'mod', 'staff', 'view'],
         admission: ['admin', 'mod', 'staff', 'view'],
-        research: ['admin', 'mod', 'staff', 'view']
+        research: ['admin', 'mod', 'staff', 'view'],
+        qualityassurance: ['admin'],           // Quản trị toàn bộ Đảm bảo chất lượng
+        evidence: ['mod', 'staff'],            // Lưu trữ minh chứng
+        qastandard: ['mod', 'staff'],         // Tiêu chuẩn – tiêu chí – chỉ báo – cải tiến
+        qaselfassessment: ['mod', 'staff'],   // Báo cáo tự đánh giá theo tiêu chí
+        qatrainingprogram: ['mod', 'staff'],  // Chương trình đào tạo
+        qakpi: ['mod', 'staff'],              // KPI chất lượng
+        medicalrecords: ['admin', 'mod', 'staff'], // Hồ sơ bệnh án (HSBASV)
+        score_scanning: ['admin', 'mod', 'staff'], // Quản lý Danh sách Điểm (Quét điểm)
+        human_resources: ['user'],            // Quyền xem/sử dụng module Cá nhân
+        receptionist: ['admin', 'staff']      // Lễ tân (bỏ mod): Quản trị viên, Nhân viên
     };
 
     const getStudentStatValue = (student, keys, fallback = 0) => {
@@ -677,14 +732,24 @@ const UserManagement = () => {
     const getModuleIcon = (module) => {
         const icons = {
             personal: 'user',
-            clinical: 'clipboard-check', // Changed icon for attendance/clinical
+            clinical: 'clipboard-check',
             ims: 'tachometer-alt',
             hr: 'briefcase-medical',
             lms: 'graduation-cap',
             training: 'chalkboard-teacher',
             library: 'book-medical',
             admission: 'user-plus',
-            research: 'flask'
+            research: 'flask',
+            qualityassurance: 'clipboard-check',
+            evidence: 'folder-open',
+            qastandard: 'list-check',
+            qaselfassessment: 'file-signature',
+            qatrainingprogram: 'chalkboard-teacher',
+            qakpi: 'chart-line',
+            medicalrecords: 'file-medical',
+            score_scanning: 'clipboard-list',
+            human_resources: 'user-tie',
+            receptionist: 'concierge-bell'
         };
         return icons[module] || 'cog';
     };
@@ -692,21 +757,39 @@ const UserManagement = () => {
     const getModuleName = (module) => {
         const names = {
             personal: 'Cá nhân',
-            clinical: 'Điểm danh', // Display as "Điểm danh" instead of "Clinical"
+            human_resources: 'Nhân sự (Cá nhân)',
+            clinical: 'Điểm danh',
             ims: 'IMS',
             hr: 'HR',
             lms: 'LMS',
             training: 'Training',
             library: 'Library',
             admission: 'Admission',
-            research: 'Research'
+            research: 'Research',
+            qualityassurance: 'Đảm bảo chất lượng (admin)',
+            evidence: 'Lưu trữ minh chứng',
+            qastandard: 'Tiêu chuẩn, tiêu chí, cải tiến',
+            qaselfassessment: 'Tự đánh giá theo tiêu chí',
+            qatrainingprogram: 'Chương trình đào tạo',
+            qakpi: 'KPI chất lượng',
+            medicalrecords: 'Hồ sơ bệnh án (HSBASV)',
+            score_scanning: 'Quản lý Danh sách Điểm (Quét điểm)',
+            receptionist: 'Lễ tân'
         };
         return names[module] || module;
     };
 
-    // Format module role for display (e.g., "clinical_admin" -> "Quản trị viên Điểm danh")
+    // Format module role for display (e.g., "clinical_admin" -> "Quản trị viên Điểm danh", "meeting_staff" -> "Nhân viên Lễ tân")
     const formatModuleRole = (roleKey) => {
-        const [module, roleType] = roleKey.split('_');
+        if (roleKey === 'human_resources' || roleKey === 'human_resources_user') {
+            return 'Nhân sự (Cá nhân)';
+        }
+        if (roleKey === 'meeting_staff') {
+            return 'Nhân viên Lễ tân';
+        }
+        const parts = roleKey.split('_');
+        const roleType = parts[parts.length - 1];
+        const module = parts.length > 1 ? parts.slice(0, -1).join('_') : roleKey;
 
         // Map role types to Vietnamese
         const roleTypeMap = {
@@ -714,19 +797,30 @@ const UserManagement = () => {
             'admin': 'Quản trị viên',
             'mod': 'Quản lý',
             'staff': 'Nhân viên',
-            'view': 'Chỉ xem'
+            'view': 'Chỉ xem',
+            'user': 'Truy cập'
         };
 
-        // Map modules to Vietnamese names
+        // Map modules to Vietnamese names (for formatModuleRole display)
         const moduleNameMap = {
             'admission': 'Tuyển sinh',
-            'clinical': 'Điểm danh', // Display as "Điểm danh" instead of "Lâm sàng"
+            'clinical': 'Điểm danh',
             'hr': 'Hành chính',
             'ims': 'Hệ thống',
             'library': 'Thư viện',
             'lms': 'LMS',
             'research': 'TTNC',
-            'training': 'Phòng đào tạo'
+            'training': 'Phòng đào tạo',
+            'qualityassurance': 'Đảm bảo chất lượng',
+            'evidence': 'Lưu trữ minh chứng',
+            'qastandard': 'Tiêu chuẩn, tiêu chí, cải tiến',
+            'qaselfassessment': 'Tự đánh giá theo tiêu chí',
+            'qatrainingprogram': 'Chương trình đào tạo',
+            'qakpi': 'KPI chất lượng',
+            'medicalrecords': 'Hồ sơ bệnh án',
+            'score_scanning': 'Quét điểm',
+            'human_resources': 'Nhân sự (Cá nhân)',
+            'receptionist': 'Lễ tân'
         };
 
         // Special handling for lms_qa - display as standalone role name
@@ -760,7 +854,7 @@ const UserManagement = () => {
         let dataToPaginate = [];
         if (activeTab === 'students') {
             dataToPaginate = students;
-        } else if (activeTab === 'staff') {
+        } else if (activeTab === 'staff' || activeTab === 'human-resources' || activeTab === 'excluded') {
             dataToPaginate = users;
         } else if (activeTab === 'student-groups') {
             dataToPaginate = studentGroups;
@@ -1311,6 +1405,25 @@ const UserManagement = () => {
             } else if (activeTab === 'staff') {
                 // Tab nhân viên: loại trừ role student (chỉ lấy staff, admin, superadmin)
                 url += `&excludeRole=student`;
+            } else if (activeTab === 'human-resources') {
+                // Tab Nhân sự: chỉ lấy user có quyền human_resources (module Cá nhân)
+                url += `&human_resources=1`;
+            } else if (activeTab === 'excluded') {
+                // Tab Người dùng bị loại trừ: dùng API riêng
+                try {
+                    const res = await api.get('/users/excluded-management');
+                    if (res.data && res.data.success) {
+                        setUsers(res.data.data || []);
+                    } else {
+                        setError(res.data?.message || 'Lỗi khi tải danh sách.');
+                    }
+                } catch (e) {
+                    console.error(e);
+                    setError('Không thể tải danh sách người dùng bị loại trừ.');
+                    setUsers([]);
+                }
+                setLoading(false);
+                return;
             }
 
             if (debouncedSearchTerm) {
@@ -1383,6 +1496,9 @@ const UserManagement = () => {
 
     const handleTabChange = (tab) => {
         setActiveTab(tab);
+        try {
+            localStorage.setItem(USER_MANAGEMENT_TAB_KEY, tab);
+        } catch (_) {}
         setSearchTerm('');
         setClassFilter('');
         setFacultyFilter('');
@@ -1420,6 +1536,17 @@ const UserManagement = () => {
             } else if (tab === 'staff') {
                 // Tab nhân viên: loại trừ role student (chỉ lấy staff, admin, superadmin)
                 url += `&excludeRole=student`;
+            } else if (tab === 'human-resources') {
+                url += `&human_resources=1`;
+            } else if (tab === 'excluded') {
+                const res = await api.get('/users/excluded-management');
+                if (res.data && res.data.success) {
+                    setUsers(res.data.data || []);
+                } else {
+                    setError(res.data?.message || 'Không thể tải danh sách.');
+                }
+                setLoading(false);
+                return;
             }
 
             if (debouncedSearchTerm) {
@@ -1458,7 +1585,11 @@ const UserManagement = () => {
             const response = await api.get(url);
 
             if (response.data.success) {
-                setUsers(response.data.data);
+                if (tab === 'students') {
+                    setStudents(response.data.data || []);
+                } else {
+                    setUsers(response.data.data || []);
+                }
             } else {
                 setError('Không thể tải danh sách người dùng');
             }
@@ -1712,11 +1843,19 @@ const UserManagement = () => {
         });
     };
 
-    // Handle student row click to show details
-    const handleStudentRowClick = (student) => {
+    // Handle student row click to show details (refetch user để có display_password mới nhất, kể cả sau khi SV đổi mật khẩu qua ForgotPassword/Profile)
+    const handleStudentRowClick = async (student) => {
         setSelectedStudent(student);
         setShowDetailModal(true);
         fetchStudentStatistics(student?.id);
+        try {
+            const res = await api.get(`/users/${student?.id}`);
+            if (res.data?.success && res.data?.data) {
+                setSelectedStudent(prev => prev?.id === res.data.data.id ? { ...prev, ...res.data.data } : prev);
+            }
+        } catch (_) {
+            // Giữ dữ liệu từ list nếu refetch lỗi
+        }
     };
 
     const statMetricMap = {
@@ -1804,6 +1943,150 @@ const UserManagement = () => {
         } catch (error) {
             console.error('Error approving user:', error);
             setError(error.response?.data?.message || 'Không thể phê duyệt người dùng. Vui lòng thử lại sau.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Nhân sự: mở modal Thêm vào Nhân sự và load danh sách user chưa có quyền
+    const openAddHrModal = async () => {
+        setShowAddHrModal(true);
+        setAddHrSearch('');
+        setAddHrLoading(true);
+        try {
+            const res = await api.get('/users?page=1&limit=999999&excludeRole=student');
+            const allStaff = res.data?.data || [];
+            const currentHrIds = (users || []).map(u => u.id);
+            const candidates = allStaff.filter(u => !currentHrIds.includes(u.id));
+            setAddHrCandidateList(candidates);
+        } catch (e) {
+            console.error(e);
+            showAlert('Không tải được danh sách người dùng', 'danger');
+            setAddHrCandidateList([]);
+        } finally {
+            setAddHrLoading(false);
+        }
+    };
+
+    const handleAddToHumanResources = async (userId) => {
+        try {
+            setAddHrLoading(true);
+            await api.post(`/users/${userId}/human-resources`);
+            showAlert('Đã cấp quyền Nhân sự (module Cá nhân)', 'success');
+            setAddHrCandidateList(prev => prev.filter(u => u.id !== userId));
+            fetchUsersWithTab('human-resources');
+        } catch (e) {
+            showAlert(e.response?.data?.message || 'Không thể cấp quyền Nhân sự', 'danger');
+        } finally {
+            setAddHrLoading(false);
+        }
+    };
+
+    const handleRemoveHumanResources = async (e, user) => {
+        e.stopPropagation();
+        if (!window.confirm(`Gỡ quyền Nhân sự (module Cá nhân) khỏi "${user.full_name}"?`)) return;
+        try {
+            setLoading(true);
+            await api.delete(`/users/${user.id}/human-resources`);
+            showAlert('Đã gỡ quyền Nhân sự', 'success');
+            fetchUsersWithTab('human-resources');
+        } catch (err) {
+            showAlert(err.response?.data?.message || 'Không thể gỡ quyền', 'danger');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleExcludedMR = async (e, user, add) => {
+        e.stopPropagation();
+        try {
+            setLoading(true);
+            if (add) {
+                await api.post(`/users/${user.id}/excluded/medical-records`);
+                showAlert('Đã thêm vào danh sách loại trừ Hồ sơ bệnh án', 'success');
+            } else {
+                await api.delete(`/users/${user.id}/excluded/medical-records`);
+                showAlert('Đã gỡ khỏi danh sách loại trừ Hồ sơ bệnh án', 'success');
+            }
+            fetchUsersWithTab('excluded');
+        } catch (err) {
+            showAlert(err.response?.data?.message || 'Lỗi thao tác', 'danger');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleExcludedQA = async (e, user, add) => {
+        e.stopPropagation();
+        try {
+            setLoading(true);
+            if (add) {
+                await api.post(`/users/${user.id}/excluded/quality-assurance`);
+                showAlert('Đã thêm vào danh sách loại trừ Đảm bảo chất lượng', 'success');
+            } else {
+                await api.delete(`/users/${user.id}/excluded/quality-assurance`);
+                showAlert('Đã gỡ khỏi danh sách loại trừ Đảm bảo chất lượng', 'success');
+            }
+            fetchUsersWithTab('excluded');
+        } catch (err) {
+            showAlert(err.response?.data?.message || 'Lỗi thao tác', 'danger');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleExcludedSS = async (e, user, add) => {
+        e.stopPropagation();
+        try {
+            setLoading(true);
+            if (add) {
+                await api.post(`/users/${user.id}/excluded/score-scanning`);
+                showAlert('Đã thêm vào danh sách loại trừ Quét điểm', 'success');
+            } else {
+                await api.delete(`/users/${user.id}/excluded/score-scanning`);
+                showAlert('Đã gỡ khỏi danh sách loại trừ Quét điểm', 'success');
+            }
+            fetchUsersWithTab('excluded');
+        } catch (err) {
+            showAlert(err.response?.data?.message || 'Lỗi thao tác', 'danger');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleExcludedLMS = async (e, user, add) => {
+        e.stopPropagation();
+        try {
+            setLoading(true);
+            if (add) {
+                await api.post(`/users/${user.id}/excluded/lms`);
+                showAlert('Đã thêm vào danh sách loại trừ LMS', 'success');
+            } else {
+                await api.delete(`/users/${user.id}/excluded/lms`);
+                showAlert('Đã gỡ khỏi danh sách loại trừ LMS', 'success');
+            }
+            fetchUsersWithTab('excluded');
+        } catch (err) {
+            showAlert(err.response?.data?.message || 'Lỗi thao tác', 'danger');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleExcludedReceptionist = async (e, user, add) => {
+        e.stopPropagation();
+        try {
+            setLoading(true);
+            if (add) {
+                await api.post(`/users/${user.id}/excluded/receptionist`);
+                showAlert('Đã thêm vào danh sách loại trừ Lễ tân', 'success');
+            } else {
+                await api.delete(`/users/${user.id}/excluded/receptionist`);
+                showAlert('Đã gỡ khỏi danh sách loại trừ Lễ tân', 'success');
+            }
+            fetchUsersWithTab('excluded');
+        } catch (err) {
+            showAlert(err.response?.data?.message || 'Lỗi thao tác', 'danger');
         } finally {
             setLoading(false);
         }
@@ -2012,7 +2295,7 @@ const UserManagement = () => {
             // Use SSE endpoint for progress updates with fetch API
             const token = localStorage.getItem('token');
             // Use the same base URL as the api object (from AuthContext)
-            const baseURL = '/api';
+            const baseURL = getApiBaseURL();
             
             // Get CSRF token first
             let csrfToken = null;
@@ -2844,11 +3127,13 @@ const UserManagement = () => {
                 const existingRoles = freshUser.module_roles || [];
                 const rolesState = {};
 
-                // Parse existing roles into state object
+                // Parse existing roles into state (API: human_resources, meeting_staff -> state: human_resources_user, receptionist_staff)
                 Object.keys(moduleRolesConfig).forEach(module => {
                     moduleRolesConfig[module].forEach(roleType => {
                         const roleKey = `${module}_${roleType}`;
-                        rolesState[roleKey] = existingRoles.includes(roleKey);
+                        const isHumanResourcesUser = (module === 'human_resources' && roleType === 'user');
+                        const isReceptionistStaff = (roleKey === 'receptionist_staff');
+                        rolesState[roleKey] = isHumanResourcesUser ? existingRoles.includes('human_resources') : isReceptionistStaff ? existingRoles.includes('meeting_staff') : existingRoles.includes(roleKey);
                     });
                 });
 
@@ -2861,7 +3146,9 @@ const UserManagement = () => {
                 Object.keys(moduleRolesConfig).forEach(module => {
                     moduleRolesConfig[module].forEach(roleType => {
                         const roleKey = `${module}_${roleType}`;
-                        rolesState[roleKey] = existingRoles.includes(roleKey);
+                        const isHumanResourcesUser = (module === 'human_resources' && roleType === 'user');
+                        const isReceptionistStaff = (roleKey === 'receptionist_staff');
+                        rolesState[roleKey] = isHumanResourcesUser ? existingRoles.includes('human_resources') : isReceptionistStaff ? existingRoles.includes('meeting_staff') : existingRoles.includes(roleKey);
                     });
                 });
                 setUserModuleRoles(rolesState);
@@ -2875,7 +3162,9 @@ const UserManagement = () => {
             Object.keys(moduleRolesConfig).forEach(module => {
                 moduleRolesConfig[module].forEach(roleType => {
                     const roleKey = `${module}_${roleType}`;
-                    rolesState[roleKey] = existingRoles.includes(roleKey);
+                    const isHumanResourcesUser = (module === 'human_resources' && roleType === 'user');
+                    const isReceptionistStaff = (roleKey === 'receptionist_staff');
+                    rolesState[roleKey] = isHumanResourcesUser ? existingRoles.includes('human_resources') : isReceptionistStaff ? existingRoles.includes('meeting_staff') : existingRoles.includes(roleKey);
                 });
             });
             setUserModuleRoles(rolesState);
@@ -2926,11 +3215,13 @@ const UserManagement = () => {
         try {
             setLoading(true);
 
-            // Build array of selected roles
+            // Build array of selected roles (human_resources_user -> human_resources; receptionist_staff -> meeting_staff)
             const selectedRoles = [];
             Object.keys(userModuleRoles).forEach(roleKey => {
                 if (userModuleRoles[roleKey]) {
-                    selectedRoles.push(roleKey);
+                    if (roleKey === 'human_resources_user') selectedRoles.push('human_resources');
+                    else if (roleKey === 'receptionist_staff') selectedRoles.push('meeting_staff');
+                    else selectedRoles.push(roleKey);
                 }
             });
 
@@ -2950,12 +3241,14 @@ const UserManagement = () => {
                     };
                     setSelectedUserForModuleRoles(updatedUser);
 
-                    // Update userModuleRoles state to reflect saved values
+                    // Update userModuleRoles state (API: human_resources, meeting_staff -> state: human_resources_user, receptionist_staff)
                     const rolesState = {};
                     Object.keys(moduleRolesConfig).forEach(module => {
                         moduleRolesConfig[module].forEach(roleType => {
                             const roleKey = `${module}_${roleType}`;
-                            rolesState[roleKey] = response.data.data.module_roles.includes(roleKey);
+                            const isHumanResourcesUser = (module === 'human_resources' && roleType === 'user');
+                            const isReceptionistStaff = (roleKey === 'receptionist_staff');
+                            rolesState[roleKey] = isHumanResourcesUser ? response.data.data.module_roles.includes('human_resources') : isReceptionistStaff ? response.data.data.module_roles.includes('meeting_staff') : response.data.data.module_roles.includes(roleKey);
                         });
                     });
                     setUserModuleRoles(rolesState);
@@ -4040,7 +4333,7 @@ const UserManagement = () => {
                                                     <img
                                                         src={user.face_sample_image.startsWith('http') 
                                                             ? user.face_sample_image 
-                                                            : `${window.location.origin}${user.face_sample_image}`}
+                                                            : `${getUploadsBaseURL()}${user.face_sample_image}`}
                                                         alt="Face Sample"
                                                         onClick={(e) => {
                                                             e.stopPropagation();
@@ -5219,6 +5512,7 @@ const UserManagement = () => {
                                     <th className="mobile-essential">Họ và tên</th>
                                     <th className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>Email</th>
                                     <th className="mobile-essential">Vai trò</th>
+                                    <th className={currentIsMobile ? "mobile-hide" : ""}>Quyền module</th>
                                     <th className="mobile-essential">Trạng thái</th>
                                     <th className="mobile-essential">Thao tác</th>
                                 </tr>
@@ -5228,7 +5522,14 @@ const UserManagement = () => {
                                     users
                                         .slice((pagination.page - 1) * pagination.limit, pagination.page * pagination.limit)
                                         .map((user, index) => (
-                                            <tr key={user.id}>
+                                            <tr
+                                                key={user.id}
+                                                onClick={() => handleEditUser(user)}
+                                                role="button"
+                                                tabIndex={0}
+                                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleEditUser(user); } }}
+                                                style={{ cursor: 'pointer' }}
+                                            >
                                                 <td className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>
                                                     {index + 1}
                                                 </td>
@@ -5255,6 +5556,33 @@ const UserManagement = () => {
                                                                 user.role === 'staff' ? 'Nhân viên' : user.role}
                                                     </Badge>
                                                 </td>
+                                                <td
+                                                    className={currentIsMobile ? "mobile-hide" : ""}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (user.role !== 'superadmin') handleOpenModuleRolesModal(user);
+                                                    }}
+                                                    onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && user.role !== 'superadmin') { e.preventDefault(); e.stopPropagation(); handleOpenModuleRolesModal(user); } }}
+                                                    role={user.role !== 'superadmin' ? 'button' : undefined}
+                                                    tabIndex={user.role !== 'superadmin' ? 0 : undefined}
+                                                    style={{ cursor: user.role !== 'superadmin' ? 'pointer' : 'default' }}
+                                                >
+                                                    {user.module_roles && user.module_roles.length > 0 ? (
+                                                        <div className="d-flex flex-wrap gap-1">
+                                                            {user.module_roles.map((roleKey, idx) => {
+                                                                const roleType = roleKey.split('_')[1];
+                                                                const badgeColor = roleType === 'admin' ? 'primary' : roleType === 'mod' ? 'warning' : 'info';
+                                                                return (
+                                                                    <Badge key={idx} bg={badgeColor} className="p-1 small">
+                                                                        {formatModuleRole(roleKey)}
+                                                                    </Badge>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-muted small">—</span>
+                                                    )}
+                                                </td>
                                                 <td className="mobile-essential">
                                                     {user.approved ? (
                                                         <Badge bg="success" className="status-badge-mobile">Đã duyệt</Badge>
@@ -5262,48 +5590,39 @@ const UserManagement = () => {
                                                         <Badge bg="warning" className="status-badge-mobile">Chờ duyệt</Badge>
                                                     )}
                                                 </td>
-                                                <td className="mobile-essential">
-                                                    <div className="action-buttons">
-                                                        <Dropdown className="action-dropdown">
-                                                            <Dropdown.Toggle variant="light" size="sm" className="btn-icon" id={`dropdown-${user.id}`} disabled={user.role === 'superadmin'}>
-                                                                <i className="fas fa-ellipsis-v"></i>
-                                                            </Dropdown.Toggle>
-                                                            <Dropdown.Menu popperConfig={{ strategy: 'fixed' }}>
-                                                                <Dropdown.Item
-                                                                    onClick={() => handleEditUser(user)}
-                                                                    disabled={user.role === 'superadmin'}
-                                                                >
-                                                                    <i className="fas fa-edit me-2 text-primary"></i>Chỉnh sửa
-                                                                </Dropdown.Item>
-                                                                <Dropdown.Item
-                                                                    onClick={() => handleOpenModuleRolesModal(user)}
-                                                                    disabled={user.role === 'superadmin'}
-                                                                >
-                                                                    <i className="fas fa-shield-alt me-2 text-info"></i>Quản lý quyền module
-                                                                </Dropdown.Item>
-                                                                <Dropdown.Item
-                                                                    onClick={() => {
-                                                                        setUserToDelete(user);
-                                                                        setShowDeleteModal(true);
-                                                                    }}
-                                                                    disabled={user.role === 'superadmin'}
-                                                                >
-                                                                    <i className="fas fa-trash me-2 text-danger"></i>Xóa
-                                                                </Dropdown.Item>
-                                                                {!user.approved && (
-                                                                    <Dropdown.Item onClick={() => handleApproveUser(user.id)}>
-                                                                        <i className="fas fa-check me-2 text-success"></i>Duyệt
-                                                                    </Dropdown.Item>
-                                                                )}
-                                                            </Dropdown.Menu>
-                                                        </Dropdown>
+                                                <td className="mobile-essential" onClick={(e) => e.stopPropagation()}>
+                                                    <div className="d-flex align-items-center gap-1 justify-content-start">
+                                                        {!user.approved && (
+                                                            <Button
+                                                                variant="light"
+                                                                size="sm"
+                                                                className="btn-icon text-success"
+                                                                onClick={() => handleApproveUser(user.id)}
+                                                                title="Duyệt"
+                                                            >
+                                                                <i className="fas fa-check"></i>
+                                                            </Button>
+                                                        )}
+                                                        <Button
+                                                            variant="light"
+                                                            size="sm"
+                                                            className="btn-icon text-danger"
+                                                            onClick={() => {
+                                                                setUserToDelete(user);
+                                                                setShowDeleteModal(true);
+                                                            }}
+                                                            disabled={user.role === 'superadmin'}
+                                                            title="Xóa"
+                                                        >
+                                                            <i className="fas fa-trash"></i>
+                                                        </Button>
                                                     </div>
                                                 </td>
                                             </tr>
                                         ))
                                 ) : (
                                     <tr>
-                                        <td colSpan="7" className="text-center">
+                                        <td colSpan="8" className="text-center">
                                             {loading ? (
                                                 <Spinner animation="border" size="sm" />
                                             ) : (
@@ -5330,6 +5649,266 @@ const UserManagement = () => {
                     )}
                 </div>
 
+            </>
+        );
+    };
+
+    // Tab Nhân sự - thiết kế y hệt tab Danh sách người dùng, thêm nút "Gỡ khỏi Nhân sự"
+    const renderHumanResourcesTab = () => {
+        const currentIsMobile = window.innerWidth <= 768;
+        return (
+            <>
+                <div className="session-list-controls">
+                    <div className="search-controls">
+                        <div className="search-input">
+                            <input
+                                type="text"
+                                placeholder="Tìm kiếm người dùng..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="search-input"
+                            />
+                        </div>
+                    </div>
+                </div>
+                <div className="session-table-container">
+                    <div className="table-responsive-mobile">
+                        <table className="session-table staff-table">
+                            <thead>
+                                <tr>
+                                    <th className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>#</th>
+                                    <th className="mobile-essential">Tên đăng nhập</th>
+                                    <th className="mobile-essential">Họ và tên</th>
+                                    <th className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>Email</th>
+                                    <th className="mobile-essential">Vai trò</th>
+                                    <th className={currentIsMobile ? "mobile-hide" : ""}>Quyền module</th>
+                                    <th className="mobile-essential">Trạng thái</th>
+                                    <th className="mobile-essential">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {users.length > 0 ? (
+                                    users
+                                        .slice((pagination.page - 1) * pagination.limit, pagination.page * pagination.limit)
+                                        .map((user, index) => (
+                                            <tr
+                                                key={user.id}
+                                                onClick={() => handleEditUser(user)}
+                                                role="button"
+                                                tabIndex={0}
+                                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleEditUser(user); } }}
+                                                style={{ cursor: 'pointer' }}
+                                            >
+                                                <td className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>{index + 1}</td>
+                                                <td className="mobile-essential">
+                                                    <div className="user-info-mobile">
+                                                        <div className="user-username">{user.username}</div>
+                                                        {currentIsMobile && <div className="user-email-mobile">{user.email}</div>}
+                                                    </div>
+                                                </td>
+                                                <td className="mobile-essential">{user.full_name}</td>
+                                                <td className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>{!currentIsMobile && user.email}</td>
+                                                <td className="mobile-essential">
+                                                    <Badge bg={user.role === 'superadmin' ? 'danger' : user.role === 'admin' ? 'warning' : user.role === 'staff' ? 'info' : 'secondary'} className="role-badge">
+                                                        {user.role === 'superadmin' ? 'Super Admin' : user.role === 'admin' ? 'Quản trị viên' : user.role === 'staff' ? 'Nhân viên' : user.role}
+                                                    </Badge>
+                                                </td>
+                                                <td className={currentIsMobile ? "mobile-hide" : ""}>
+                                                    {user.module_roles && user.module_roles.length > 0 ? (
+                                                        <div className="d-flex flex-wrap gap-1">
+                                                            {user.module_roles.map((roleKey, idx) => {
+                                                                const roleType = roleKey.split('_')[1];
+                                                                const badgeColor = roleType === 'admin' ? 'primary' : roleType === 'mod' ? 'warning' : 'info';
+                                                                return <Badge key={idx} bg={badgeColor} className="p-1 small">{formatModuleRole(roleKey)}</Badge>;
+                                                            })}
+                                                        </div>
+                                                    ) : <span className="text-muted small">—</span>}
+                                                </td>
+                                                <td className="mobile-essential">
+                                                    {user.approved ? <Badge bg="success" className="status-badge-mobile">Đã duyệt</Badge> : <Badge bg="warning" className="status-badge-mobile">Chờ duyệt</Badge>}
+                                                </td>
+                                                <td className="mobile-essential" onClick={(e) => e.stopPropagation()}>
+                                                    <div className="d-flex align-items-center gap-1 justify-content-start">
+                                                        {!user.approved && (
+                                                            <Button variant="light" size="sm" className="btn-icon text-success" onClick={() => handleApproveUser(user.id)} title="Duyệt">
+                                                                <i className="fas fa-check"></i>
+                                                            </Button>
+                                                        )}
+                                                        <Button variant="light" size="sm" className="btn-icon text-warning" onClick={(e) => handleRemoveHumanResources(e, user)} title="Gỡ khỏi Nhân sự">
+                                                            <i className="fas fa-user-minus"></i>
+                                                        </Button>
+                                                        <Button variant="light" size="sm" className="btn-icon text-danger" onClick={() => { setUserToDelete(user); setShowDeleteModal(true); }} disabled={user.role === 'superadmin'} title="Xóa">
+                                                            <i className="fas fa-trash"></i>
+                                                        </Button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))
+                                ) : (
+                                    <tr>
+                                        <td colSpan="8" className="text-center">
+                                            {loading ? <Spinner animation="border" size="sm" /> : 'Không có người dùng nào trong Nhân sự'}
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                    {users.length > 0 && pagination.totalPages > 1 && (
+                        <div className="mt-3">
+                            <Pagination currentPage={pagination.page} totalPages={pagination.totalPages} onPageChange={(page) => setPagination(prev => ({ ...prev, page }))} maxVisiblePages={5} showFirstLast={true} />
+                        </div>
+                    )}
+                </div>
+            </>
+        );
+    };
+
+    const renderExcludedTab = () => {
+        const currentIsMobile = window.innerWidth <= 768;
+        return (
+            <>
+                <div className="session-list-controls">
+                    <div className="search-controls">
+                        <div className="search-input">
+                            <input
+                                type="text"
+                                placeholder="Tìm kiếm người dùng..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="search-input"
+                            />
+                        </div>
+                    </div>
+                </div>
+                <div className="session-table-container">
+                    <div className="table-responsive-mobile">
+                        <table className="session-table staff-table">
+                            <thead>
+                                <tr>
+                                    <th className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>#</th>
+                                    <th className="mobile-essential">Tên đăng nhập</th>
+                                    <th className="mobile-essential">Họ và tên</th>
+                                    <th className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>Email</th>
+                                    <th className="mobile-essential">Vai trò</th>
+                                    <th className={currentIsMobile ? "mobile-hide" : ""}>Quyền module</th>
+                                    <th className="mobile-essential">Loại trừ</th>
+                                    <th className="mobile-essential">Trạng thái</th>
+                                    <th className="mobile-essential">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {(() => {
+                                    const filtered = !searchTerm.trim() ? users : users.filter(u => [u.username, u.full_name, u.email].some(s => (s || '').toLowerCase().includes(searchTerm.toLowerCase())));
+                                    const totalPagesExcluded = Math.ceil(filtered.length / pagination.limit);
+                                    const paged = filtered.slice((pagination.page - 1) * pagination.limit, pagination.page * pagination.limit);
+                                    return users.length > 0 ? (
+                                        paged.map((user, index) => (
+                                            <tr
+                                                key={user.id}
+                                                onClick={() => handleEditUser(user)}
+                                                role="button"
+                                                tabIndex={0}
+                                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleEditUser(user); } }}
+                                                style={{ cursor: 'pointer' }}
+                                            >
+                                                <td className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>{(pagination.page - 1) * pagination.limit + index + 1}</td>
+                                                <td className="mobile-essential">
+                                                    <div className="user-info-mobile">
+                                                        <div className="user-username">{user.username}</div>
+                                                        {currentIsMobile && <div className="user-email-mobile">{user.email}</div>}
+                                                    </div>
+                                                </td>
+                                                <td className="mobile-essential">{user.full_name}</td>
+                                                <td className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>{!currentIsMobile && user.email}</td>
+                                                <td className="mobile-essential">
+                                                    <Badge bg={user.role === 'superadmin' ? 'danger' : user.role === 'admin' ? 'warning' : user.role === 'staff' ? 'info' : 'secondary'} className="role-badge">
+                                                        {user.role === 'superadmin' ? 'Super Admin' : user.role === 'admin' ? 'Quản trị viên' : user.role === 'staff' ? 'Nhân viên' : user.role}
+                                                    </Badge>
+                                                </td>
+                                                <td className={currentIsMobile ? "mobile-hide" : ""}>
+                                                    {user.module_roles && user.module_roles.length > 0 ? (
+                                                        <div className="d-flex flex-wrap gap-1">
+                                                            {user.module_roles.map((roleKey, idx) => {
+                                                                const roleType = (roleKey.split('_')[1]) || '';
+                                                                const badgeColor = roleType === 'admin' ? 'primary' : roleType === 'mod' ? 'warning' : 'info';
+                                                                return <Badge key={idx} bg={badgeColor} className="p-1 small">{formatModuleRole(roleKey)}</Badge>;
+                                                            })}
+                                                        </div>
+                                                    ) : <span className="text-muted small">—</span>}
+                                                </td>
+                                                <td className="mobile-essential" onClick={(e) => e.stopPropagation()}>
+                                                    <div className="d-flex flex-wrap gap-1 align-items-center">
+                                                        <span className="me-1 small">HSBA:</span>
+                                                        {user.excluded_medical_records ? (
+                                                            <Button size="sm" variant="outline-success" className="py-0 px-1 small" onClick={(e) => handleExcludedMR(e, user, false)} title="Gỡ khỏi loại trừ Hồ sơ bệnh án">Gỡ</Button>
+                                                        ) : (
+                                                            <Button size="sm" variant="outline-secondary" className="py-0 px-1 small" onClick={(e) => handleExcludedMR(e, user, true)} title="Thêm vào loại trừ Hồ sơ bệnh án">Thêm</Button>
+                                                        )}
+                                                        <span className="ms-2 me-1 small">ĐBCL:</span>
+                                                        {user.excluded_quality_assurance ? (
+                                                            <Button size="sm" variant="outline-success" className="py-0 px-1 small" onClick={(e) => handleExcludedQA(e, user, false)} title="Gỡ khỏi loại trừ Đảm bảo chất lượng">Gỡ</Button>
+                                                        ) : (
+                                                            <Button size="sm" variant="outline-secondary" className="py-0 px-1 small" onClick={(e) => handleExcludedQA(e, user, true)} title="Thêm vào loại trừ Đảm bảo chất lượng">Thêm</Button>
+                                                        )}
+                                                        <span className="ms-2 me-1 small">Quét điểm:</span>
+                                                        {user.excluded_score_scanning ? (
+                                                            <Button size="sm" variant="outline-success" className="py-0 px-1 small" onClick={(e) => handleExcludedSS(e, user, false)} title="Gỡ khỏi loại trừ Quét điểm">Gỡ</Button>
+                                                        ) : (
+                                                            <Button size="sm" variant="outline-secondary" className="py-0 px-1 small" onClick={(e) => handleExcludedSS(e, user, true)} title="Thêm vào loại trừ Quét điểm">Thêm</Button>
+                                                        )}
+                                                        <span className="ms-2 me-1 small">LMS:</span>
+                                                        {user.excluded_lms ? (
+                                                            <Button size="sm" variant="outline-success" className="py-0 px-1 small" onClick={(e) => handleExcludedLMS(e, user, false)} title="Gỡ khỏi loại trừ LMS">Gỡ</Button>
+                                                        ) : (
+                                                            <Button size="sm" variant="outline-secondary" className="py-0 px-1 small" onClick={(e) => handleExcludedLMS(e, user, true)} title="Thêm vào loại trừ LMS">Thêm</Button>
+                                                        )}
+                                                        <span className="ms-2 me-1 small">Lễ tân:</span>
+                                                        {user.excluded_receptionist ? (
+                                                            <Button size="sm" variant="outline-success" className="py-0 px-1 small" onClick={(e) => handleExcludedReceptionist(e, user, false)} title="Gỡ khỏi loại trừ Lễ tân">Gỡ</Button>
+                                                        ) : (
+                                                            <Button size="sm" variant="outline-secondary" className="py-0 px-1 small" onClick={(e) => handleExcludedReceptionist(e, user, true)} title="Thêm vào loại trừ Lễ tân">Thêm</Button>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="mobile-essential">
+                                                    {user.approved ? <Badge bg="success" className="status-badge-mobile">Đã duyệt</Badge> : <Badge bg="warning" className="status-badge-mobile">Chờ duyệt</Badge>}
+                                                </td>
+                                                <td className="mobile-essential" onClick={(e) => e.stopPropagation()}>
+                                                    <div className="d-flex align-items-center gap-1 justify-content-start">
+                                                        {!user.approved && (
+                                                            <Button variant="light" size="sm" className="btn-icon text-success" onClick={() => handleApproveUser(user.id)} title="Duyệt">
+                                                                <i className="fas fa-check"></i>
+                                                            </Button>
+                                                        )}
+                                                        <Button variant="light" size="sm" className="btn-icon text-danger" onClick={() => { setUserToDelete(user); setShowDeleteModal(true); }} disabled={user.role === 'superadmin'} title="Xóa">
+                                                            <i className="fas fa-trash"></i>
+                                                        </Button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))
+                                    ) : (
+                                        <tr>
+                                            <td colSpan="9" className="text-center">
+                                                {loading ? <Spinner animation="border" size="sm" /> : 'Không có người dùng nào'}
+                                            </td>
+                                        </tr>
+                                    );
+                                })()}
+                            </tbody>
+                        </table>
+                    </div>
+                    {users.length > 0 && (() => {
+                        const filtered = !searchTerm.trim() ? users : users.filter(u => [u.username, u.full_name, u.email].some(s => (s || '').toLowerCase().includes(searchTerm.toLowerCase())));
+                        const totalPagesExcluded = Math.ceil(filtered.length / pagination.limit);
+                        return totalPagesExcluded > 1 ? (
+                            <div className="mt-3">
+                                <Pagination currentPage={Math.min(pagination.page, totalPagesExcluded)} totalPages={totalPagesExcluded} onPageChange={(page) => setPagination(prev => ({ ...prev, page }))} maxVisiblePages={5} showFirstLast={true} />
+                            </div>
+                        ) : null;
+                    })()}
+                </div>
             </>
         );
     };
@@ -5416,6 +5995,24 @@ const UserManagement = () => {
                                     Thêm nhóm mới
                                 </Button>
                             </>
+                        ) : activeTab === 'human-resources' ? (
+                            <>
+                                <Button variant="outline-light" className="create-session-btn" onClick={openAddHrModal}>
+                                    <i className="fas fa-user-plus"></i>
+                                    Thêm vào Nhân sự
+                                </Button>
+                                <Button variant="outline-light" className="create-session-btn" onClick={handleExportUsers}>
+                                    <i className="fas fa-file-export"></i>
+                                    Xuất Excel
+                                </Button>
+                            </>
+                        ) : activeTab === 'excluded' ? (
+                            <>
+                                <Button variant="outline-light" className="create-session-btn" onClick={handleExportUsers}>
+                                    <i className="fas fa-file-export"></i>
+                                    Xuất Excel
+                                </Button>
+                            </>
                         ) : (
                             <>
                                 <Button
@@ -5489,6 +6086,28 @@ const UserManagement = () => {
                             </span>
                         }>
                             {renderStaffTab()}
+                        </Tab>
+                    )}
+                    {/* Tab Nhân sự - quản lý người dùng có quyền module Cá nhân */}
+                    {currentUser?.role === 'superadmin' && (
+                        <Tab eventKey="human-resources" title={
+                            <span className="tab-title">
+                                <i className="fas fa-user-tie"></i>
+                                Nhân sự
+                            </span>
+                        }>
+                            {renderHumanResourcesTab()}
+                        </Tab>
+                    )}
+                    {/* Tab Người dùng bị loại trừ (HSBA, ĐBCL, Quét điểm) */}
+                    {currentUser?.role === 'superadmin' && (
+                        <Tab eventKey="excluded" title={
+                            <span className="tab-title">
+                                <i className="fas fa-user-slash"></i>
+                                Người dùng bị loại trừ
+                            </span>
+                        }>
+                            {renderExcludedTab()}
                         </Tab>
                     )}
                 </Tabs>
@@ -6759,6 +7378,83 @@ const UserManagement = () => {
                 </Modal.Body>
             </Modal>
 
+            {/* Modal Thêm vào Nhân sự */}
+            <Modal show={showAddHrModal} onHide={() => setShowAddHrModal(false)} size="lg" className="student-detail-modal">
+                <Modal.Header closeButton className="student-detail-header">
+                    <Modal.Title className="student-detail-title">
+                        <div className="student-avatar"><i className="fas fa-user-tie"></i></div>
+                        <div>
+                            <h4 className="mb-0">Thêm vào Nhân sự</h4>
+                            <p className="mb-0 student-subtitle">Cấp quyền module Cá nhân cho người dùng</p>
+                        </div>
+                    </Modal.Title>
+                </Modal.Header>
+                <Modal.Body className="student-detail-body">
+                    <div className="student-detail-container">
+                        <Form.Group className="mb-3">
+                            <Form.Control
+                                type="text"
+                                placeholder="Tìm theo tên, email, tên đăng nhập..."
+                                value={addHrSearch}
+                                onChange={(e) => setAddHrSearch(e.target.value)}
+                                className="form-control-modern"
+                            />
+                        </Form.Group>
+                        {addHrLoading ? (
+                            <div className="text-center py-4"><Spinner animation="border" /> Đang tải...</div>
+                        ) : (
+                            <div className="table-responsive">
+                                <Table bordered hover size="sm">
+                                    <thead><tr><th>#</th><th>Tên đăng nhập</th><th>Họ và tên</th><th>Email</th><th>Vai trò</th><th>Quyền module</th><th></th></tr></thead>
+                                    <tbody>
+                                        {addHrCandidateList
+                                            .filter(u => !addHrSearch.trim() || [u.username, u.full_name, u.email].some(s => (s || '').toLowerCase().includes(addHrSearch.toLowerCase())))
+                                            .slice(0, 50)
+                                            .map((u, i) => (
+                                                <tr key={u.id}>
+                                                    <td>{i + 1}</td>
+                                                    <td>{u.username}</td>
+                                                    <td>{u.full_name}</td>
+                                                    <td>{u.email}</td>
+                                                    <td><Badge bg={u.role === 'admin' ? 'warning' : 'info'}>{u.role === 'admin' ? 'Quản trị viên' : 'Nhân viên'}</Badge></td>
+                                                    <td>
+                                                        {u.module_roles && u.module_roles.length > 0 ? (
+                                                            <div className="d-flex flex-wrap gap-1">
+                                                                {u.module_roles.map((roleKey, idx) => {
+                                                                    const roleType = (roleKey.split('_')[1]) || '';
+                                                                    const badgeColor = roleType === 'admin' ? 'primary' : roleType === 'mod' ? 'warning' : 'info';
+                                                                    return (
+                                                                        <Badge key={idx} bg={badgeColor} className="p-1 small">
+                                                                            {formatModuleRole(roleKey)}
+                                                                        </Badge>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-muted small">—</span>
+                                                        )}
+                                                    </td>
+                                                    <td>
+                                                        <Button size="sm" variant="primary" onClick={() => handleAddToHumanResources(u.id)} disabled={addHrLoading}>
+                                                            <i className="fas fa-plus me-1"></i>
+                                                        </Button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                    </tbody>
+                                </Table>
+                                {addHrCandidateList.filter(u => !addHrSearch.trim() || [u.username, u.full_name, u.email].some(s => (s || '').toLowerCase().includes(addHrSearch.toLowerCase()))).length === 0 && (
+                                    <p className="text-muted text-center">Không có người dùng nào để thêm (hoặc đã có trong Nhân sự).</p>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </Modal.Body>
+                <Modal.Footer className="student-detail-footer">
+                    <Button variant="outline-secondary" onClick={() => setShowAddHrModal(false)}>Đóng</Button>
+                </Modal.Footer>
+            </Modal>
+
             {/* Delete Confirmation Modal */}
             <Modal show={showDeleteModal} onHide={() => setShowDeleteModal(false)} size="lg" className="student-detail-modal">
                 <Modal.Header closeButton className="student-detail-header">
@@ -7709,6 +8405,12 @@ const UserManagement = () => {
                                     type="password"
                                     value={passwordConfirm}
                                     onChange={(e) => setPasswordConfirm(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            confirmPasswordAction();
+                                        }
+                                    }}
                                     placeholder="Nhập mật khẩu để xác thực"
                                     className="form-control-modern"
                                     autoFocus
@@ -8336,9 +9038,9 @@ const UserManagement = () => {
                             </div>
                         </Alert>
 
-                        <div className="row">
+                        <div className="module-roles-grid">
                             {Object.keys(moduleRolesConfig).map(module => (
-                                <Col md={3} key={module} className="mb-2">
+                                <div key={module} className="module-roles-grid-item">
                                     <div className="session-card">
                                         <div className="card-header-modern">
                                             <div className="header-icon">
@@ -8363,6 +9065,7 @@ const UserManagement = () => {
                                                                     {roleType === 'mod' && '(Quyền điều hành)'}
                                                                     {roleType === 'staff' && '(Quyền nhân viên)'}
                                                                     {roleType === 'view' && '(Chỉ xem)'}
+                                                                    {roleType === 'user' && '(Truy cập module Cá nhân)'}
                                                                 </small>
                                                             </span>
                                                         }
@@ -8374,7 +9077,7 @@ const UserManagement = () => {
                                             })}
                                         </div>
                                     </div>
-                                </Col>
+                                </div>
                             ))}
                         </div>
 
@@ -8392,9 +9095,11 @@ const UserManagement = () => {
                                         return <p className="text-muted mb-0">Chưa chọn quyền nào</p>;
                                     }
 
-                                    // Format roles for display with module name and role type
+                                    // Format roles for display with module name and role type (module có thể nhiều phần: score_scanning_admin -> module=score_scanning, roleType=admin)
                                     const formattedRoles = selectedRoles.map(roleKey => {
-                                        const [module, roleType] = roleKey.split('_');
+                                        const parts = roleKey.split('_');
+                                        const roleType = parts[parts.length - 1];
+                                        const module = parts.length > 1 ? parts.slice(0, -1).join('_') : roleKey;
                                         return {
                                             display: formatModuleRole(roleKey),
                                             module: module,
@@ -8532,7 +9237,7 @@ const UserManagement = () => {
                                                 <img
                                                     src={selectedUserForUpdate.face_sample_image.startsWith('http') 
                                                         ? selectedUserForUpdate.face_sample_image 
-                                                        : `${window.location.origin}${selectedUserForUpdate.face_sample_image}`}
+                                                        : `${getUploadsBaseURL()}${selectedUserForUpdate.face_sample_image}`}
                                                     alt="Face Sample"
                                                     style={{
                                                         width: '150px',
@@ -8676,7 +9381,7 @@ const UserManagement = () => {
                                                 <img
                                                     src={selectedUserForUpdate.face_sample_image.startsWith('http') 
                                                         ? selectedUserForUpdate.face_sample_image 
-                                                        : `${window.location.origin}${selectedUserForUpdate.face_sample_image}`}
+                                                        : `${getUploadsBaseURL()}${selectedUserForUpdate.face_sample_image}`}
                                                     alt="Face Sample"
                                                     style={{
                                                         width: '150px',
@@ -9149,7 +9854,7 @@ const UserManagement = () => {
                         <img
                             src={selectedFaceImage.startsWith('http') 
                                 ? selectedFaceImage 
-                                : `${window.location.origin}${selectedFaceImage}`}
+                                : `${getUploadsBaseURL()}${selectedFaceImage}`}
                             alt="Face Sample - Full Size"
                             style={{
                                 maxWidth: '100%',
@@ -9463,7 +10168,7 @@ const UserManagement = () => {
                                                     <img
                                                         src={selectedFaceUser.face_sample_image.startsWith('http') 
                                                             ? selectedFaceUser.face_sample_image 
-                                                            : `${window.location.origin}${selectedFaceUser.face_sample_image}`}
+                                                            : `${getUploadsBaseURL()}${selectedFaceUser.face_sample_image}`}
                                                         alt="Face Sample"
                                                         onClick={() => {
                                                             setSelectedFaceImage(selectedFaceUser.face_sample_image);

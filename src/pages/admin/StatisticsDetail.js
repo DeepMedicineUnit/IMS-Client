@@ -52,7 +52,10 @@ const StatisticsDetail = () => {
     
     switch (filter) {
       case 'today':
-        return { startDate: toLocalDateString(today), endDate: null };
+        return { 
+          startDate: toLocalDateString(today), 
+          endDate: toLocalDateString(today) // Set endDate to same day for "Hôm nay"
+        };
       case '2days':
         const twoDaysAgo = new Date(today);
         twoDaysAgo.setDate(twoDaysAgo.getDate() - 1);

@@ -9,6 +9,7 @@
   border-bottom: 1px solid #e5e7eb;
   display: flex;
   align-items: center;
+  z-index: 1000;
   justify-content: space-between;
   padding: 0 24px;
   z-index: 1000;
@@ -2119,4 +2120,454 @@ body.logout-modal-open .vertical-navbar {
   will-change: transform;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Incidents Banner (sự cố module) - màu cam để phân biệt với emergency */
+.incidents-banner {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3) !important;
+}
+
+.dark-mode .incidents-banner {
+  background: linear-gradient(135deg, #b45309 0%, #92400e 100%) !important;
+}
+
+/* Emergency Banner Styles */
+.emergency-banner {
+  position: fixed;
+  top: 0;
+  left: 110px;
+  right: 0;
+  background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+  color: white;
+  z-index: 1001;
+  box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+  animation: slideDown 0.3s ease-out;
+  transition: left 0.3s ease;
+  min-height: 44px;
+  max-height: 44px;
+  overflow: hidden;
+}
+
+body.no-ims-rail .emergency-banner {
+  left: 70px;
+}
+
+.vertical-navbar.expanded ~ .top-header + .emergency-banner {
+  left: 300px;
+}
+
+body.no-ims-rail .vertical-navbar.expanded ~ .top-header + .emergency-banner {
+  left: 250px;
+}
+
+.emergency-banner-content {
+  display: flex;
+  align-items: center;
+  padding: 10px 24px 10px 32px;
+  gap: 12px;
+  height: 44px;
+  box-sizing: border-box;
+}
+
+.emergency-banner-icon {
+  font-size: 20px;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.emergency-banner-text {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.emergency-banner-text strong {
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.emergency-banner-view-all {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 6px 16px;
+  border-radius: 0.375rem;
+  transition: all 0.2s;
+  white-space: nowrap;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.emergency-banner-view-all:hover {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
+  color: white;
+  text-decoration: none;
+}
+
+.emergency-banner-view-all i {
+  font-size: 12px;
+}
+
+.emergency-banner-close {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.emergency-banner-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* Adjust top-header position when emergency banner is visible */
+body.has-emergency-banner .top-header {
+  top: 44px !important;
+}
+
+body.has-emergency-banner .main-content-with-header {
+  margin-top: 104px;
+}
+
+/* Ensure emergency banner doesn't cover TopHeader */
+.emergency-banner {
+  z-index: 1001;
+}
+
+.top-header {
+  z-index: 1000;
+}
+
+/* Fallback for browsers supporting :has() */
+body:has(.emergency-banner) .top-header {
+  top: 44px !important;
+}
+
+body:has(.emergency-banner) .main-content-with-header {
+  margin-top: 104px;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .emergency-banner {
+    left: 0 !important;
+    right: 0;
+    font-size: 12px;
+    min-height: 40px;
+    max-height: 40px;
+    z-index: 1001;
+    width: 100%;
+  }
+  
+  body.no-ims-rail .emergency-banner {
+    left: 0 !important;
+  }
+  
+  .vertical-navbar.expanded ~ .top-header + .emergency-banner,
+  body.no-ims-rail .vertical-navbar.expanded ~ .top-header + .emergency-banner {
+    left: 0 !important;
+  }
+  
+  .emergency-banner-content {
+    padding: 8px 12px 8px 12px; /* padding-left: 12px để content đẩy sang trái, mobile-toggle sẽ đè lên trên */
+    gap: 8px;
+    height: 40px;
+  }
+  
+  .emergency-banner-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  
+  .emergency-banner-text {
+    font-size: 11px;
+    line-height: 1.3;
+    flex: 1;
+    min-width: 0;
+  }
+  
+  .emergency-banner-text strong {
+    margin-right: 4px;
+  }
+  
+  .emergency-banner-text .mx-2 {
+    margin-left: 4px;
+    margin-right: 4px;
+  }
+  
+  /* Hide "Xem tất cả" text on mobile, keep only arrow icon */
+  .emergency-banner-view-all {
+    padding: 0;
+    font-size: 0;
+    min-width: auto;
+    width: auto;
+    height: auto;
+    background: transparent !important;
+    border: none !important;
+    justify-content: center;
+    align-items: center;
+  }
+  
+  .emergency-banner-view-all:hover {
+    background: transparent !important;
+    border: none !important;
+  }
+  
+  .emergency-banner-view-all i {
+    font-size: 18px;
+    margin: 0;
+    color: white;
+  }
+  
+  .emergency-banner-close {
+    font-size: 18px;
+    padding: 4px 6px;
+    flex-shrink: 0;
+  }
+  
+  /* Adjust top-header position on mobile when banner is visible */
+  body.has-emergency-banner .top-header {
+    top: 40px !important;
+  }
+  
+  body.has-emergency-banner .main-content-with-header {
+    margin-top: 100px;
+  }
+  
+  body:has(.emergency-banner) .top-header {
+    top: 40px !important;
+  }
+  
+  body:has(.emergency-banner) .main-content-with-header {
+    margin-top: 100px;
+  }
+}
+
+/* Tablet responsive */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .emergency-banner {
+    left: 0 !important;
+    right: 0;
+    font-size: 13px;
+    min-height: 42px;
+    max-height: 42px;
+    z-index: 1001;
+    width: 100%;
+  }
+  
+  body.no-ims-rail .emergency-banner {
+    left: 0 !important;
+  }
+  
+  .vertical-navbar.expanded ~ .top-header + .emergency-banner,
+  body.no-ims-rail .vertical-navbar.expanded ~ .top-header + .emergency-banner {
+    left: 0 !important;
+  }
+  
+  .emergency-banner-content {
+    padding: 10px 20px 10px 20px;
+    gap: 10px;
+    height: 42px;
+  }
+  
+  .emergency-banner-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  
+  .emergency-banner-text {
+    font-size: 12px;
+    line-height: 1.4;
+    flex: 1;
+    min-width: 0;
+  }
+  
+  .emergency-banner-text strong {
+    margin-right: 6px;
+  }
+  
+  .emergency-banner-text .mx-2 {
+    margin-left: 6px;
+    margin-right: 6px;
+  }
+  
+  .emergency-banner-view-all {
+    padding: 6px 14px;
+    font-size: 12px;
+    min-width: auto;
+  }
+  
+  .emergency-banner-view-all i {
+    font-size: 13px;
+  }
+  
+  .emergency-banner-close {
+    font-size: 19px;
+    padding: 4px 7px;
+    flex-shrink: 0;
+  }
+  
+  /* Adjust top-header position on tablet when banner is visible */
+  body.has-emergency-banner .top-header {
+    top: 42px !important;
+  }
+  
+  body.has-emergency-banner .main-content-with-header {
+    margin-top: 102px;
+  }
+  
+  body:has(.emergency-banner) .top-header {
+    top: 42px !important;
+  }
+  
+  body:has(.emergency-banner) .main-content-with-header {
+    margin-top: 102px;
+  }
+}
+
+/* Extra small mobile devices */
+@media (max-width: 480px) {
+  .emergency-banner {
+    left: 0 !important;
+    right: 0;
+    min-height: 38px;
+    max-height: 38px;
+    width: 100%;
+  }
+  
+  body.no-ims-rail .emergency-banner {
+    left: 0 !important;
+  }
+  
+  .vertical-navbar.expanded ~ .top-header + .emergency-banner,
+  body.no-ims-rail .vertical-navbar.expanded ~ .top-header + .emergency-banner {
+    left: 0 !important;
+  }
+  
+  .emergency-banner-content {
+    padding: 6px 10px 6px 10px; /* padding-left: 10px để content đẩy sang trái, mobile-toggle sẽ đè lên trên */
+    gap: 6px;
+    height: 38px;
+  }
+  
+  .emergency-banner-icon {
+    font-size: 14px;
+  }
+  
+  .emergency-banner-text {
+    font-size: 12px;
+  }
+  
+  .emergency-banner-view-all {
+    padding: 0;
+    min-width: auto;
+    width: auto;
+    height: auto;
+    background: transparent !important;
+    border: none !important;
+  }
+  
+  .emergency-banner-view-all:hover {
+    background: transparent !important;
+    border: none !important;
+  }
+  
+  .emergency-banner-view-all i {
+    font-size: 16px;
+    color: white;
+  }
+  
+  .emergency-banner-close {
+    font-size: 16px;
+    padding: 3px 5px;
+  }
+  
+  body.has-emergency-banner .top-header {
+    top: 38px !important;
+  }
+  
+  body.has-emergency-banner .main-content-with-header {
+    margin-top: 98px;
+  }
+  
+  body:has(.emergency-banner) .top-header {
+    top: 38px !important;
+  }
+  
+  body:has(.emergency-banner) .main-content-with-header {
+    margin-top: 98px;
+  }
+}
+
+/* Announcement Page Layout - No Navbar but keep left spacing */
+body.announcement-page .top-header {
+  left: 0 !important;
+}
+
+body.announcement-page .emergency-banner {
+  left: 0 !important;
+}
+
+body.announcement-page .main-content-with-header {
+  margin-left: 0 !important;
+}
+
+.announcement-page-layout {
+  margin-left: 0 !important;
+  padding-left: 2rem !important;
+  padding-right: 2rem !important;
+}
+
+@media (max-width: 768px) {
+  .announcement-page-layout {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+}
+
+@media (max-width: 576px) {
+  .announcement-page-layout {
+    padding-left: 0.5rem !important;
+    padding-right: 0.5rem !important;
+  }
+}
+
+@media (max-width: 400px) {
+  .announcement-page-layout {
+    padding-left: 0.375rem !important;
+    padding-right: 0.375rem !important;
+  }
 }

@@ -3,7 +3,7 @@ import { Card, Row, Col, Button, Alert, Badge, Modal, Form, ProgressBar, Table, 
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAlert } from '../../contexts/AlertContext';
-import api, { refreshCSRFToken } from '../../utils/api';
+import api, { refreshCSRFToken, getSocketUrl } from '../../utils/api';
 import { CheckCircle, Camera, User } from 'lucide-react';
 import FaceVerificationModal from '../../components/FaceVerificationModal';
 import io from 'socket.io-client';
@@ -27,6 +27,9 @@ const StudentExams = () => {
   const [passwordError, setPasswordError] = useState('');
   const [requiresPassword, setRequiresPassword] = useState(false);
   const [webcamModalError, setWebcamModalError] = useState('');
+  const [mediaReady, setMediaReady] = useState(false); // Webcam + mic ready before start
+  const [mediaChecking, setMediaChecking] = useState(false);
+  const [mediaCheckError, setMediaCheckError] = useState('');
   const [currentAttempt, setCurrentAttempt] = useState(null);
   const [answers, setAnswers] = useState({});
   const [answerTimestamps, setAnswerTimestamps] = useState({}); // Lưu timestamp khi chọn đáp án
@@ -48,11 +51,13 @@ const StudentExams = () => {
   const [isWebcamRecording, setIsWebcamRecording] = useState(false);
   const timerRef = useRef(null);
   const videoRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const chunksRef = useRef([]);
-  const chunkIntervalRef = useRef(null);
+  const snapshotIntervalRef = useRef(null); // Chụp ảnh webcam mỗi 0.2s gửi server
+  const canvasSnapshotRef = useRef(null); // Canvas ẩn để chụp frame
+  const currentPageRef = useRef(1); // Trang câu hỏi hiện tại (để gửi kèm snapshot)
   const attemptIdRef = useRef(null); // Store attempt_id for timer callback
   const socketRef = useRef(null); // Socket.io connection for ban events
+  const preflightMediaStreamRef = useRef(null); // Stream dùng để test webcam+mic trong modal
+  const mediaHealthIntervalRef = useRef(null); // Interval kiểm tra định kỳ webcam + mic trong khi thi
 
   // Face verification states (simplified - most logic moved to FaceVerificationModal component)
   const [showFaceVerificationModal, setShowFaceVerificationModal] = useState(false);
@@ -63,6 +68,12 @@ const StudentExams = () => {
   const warningAlertRef = useRef(null); // Ref for warning alert to detect outside clicks
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false); // Show confirm OK button
   const examActionsRef = useRef(null); // Ref for exam actions container to detect outside clicks
+
+  // Proctor message: hàng đợi tin nhắn (cũ → mới), modal cũ đẩy lên, mới nhất ở dưới
+  const [proctorMessageQueue, setProctorMessageQueue] = useState([]);
+  const showProctorMessageModal = proctorMessageQueue.length > 0;
+  const proctorStackRef = useRef(null);
+  const [proctorStackContainer, setProctorStackContainer] = useState(null);
 
   // Cheating detection refs
   const tabSwitchCountRef = useRef(0);
@@ -184,11 +195,9 @@ const StudentExams = () => {
     const token = urlParams.get('token');
     
     if (fromApp && examId && attemptId && token) {
-      console.log('[STUDENT EXAMS] Opened from IMS EXAM PCTU app, loading exam...');
       // Store token if provided
       if (token && token !== localStorage.getItem('token')) {
         localStorage.setItem('token', token);
-        console.log('[STUDENT EXAMS] Token stored from URL');
       }
       
       // Load exam data and start exam
@@ -227,6 +236,11 @@ const StudentExams = () => {
     };
   }, [showBacktrackWarning]);
 
+  // Đồng bộ currentPage vào ref để gửi kèm snapshot webcam
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
+
   // Cleanup socket connection on unmount or when exam ends
   useEffect(() => {
     return () => {
@@ -236,6 +250,13 @@ const StudentExams = () => {
       }
     };
   }, []);
+
+  // Nền mờ khi mở modal thông báo giám thị
+  useEffect(() => {
+    if (showProctorMessageModal) document.body.classList.add('proctor-message-modal-open');
+    else document.body.classList.remove('proctor-message-modal-open');
+    return () => document.body.classList.remove('proctor-message-modal-open');
+  }, [showProctorMessageModal]);
 
   // Disconnect socket when exam ends
   useEffect(() => {
@@ -371,7 +392,6 @@ const StudentExams = () => {
       const element = document.documentElement;
       if (element.requestFullscreen) {
         element.requestFullscreen().catch(err => {
-          console.log('Fullscreen request denied or failed:', err);
         });
       } else if (element.webkitRequestFullscreen) {
         element.webkitRequestFullscreen();
@@ -394,24 +414,19 @@ const StudentExams = () => {
 
       if (document.exitFullscreen) {
         document.exitFullscreen().catch(err => {
-          console.log('Exit fullscreen failed:', err);
         });
       } else if (document.webkitExitFullscreen) {
         document.webkitExitFullscreen().catch(err => {
-          console.log('Exit fullscreen failed:', err);
         });
       } else if (document.mozCancelFullScreen) {
         document.mozCancelFullScreen().catch(err => {
-          console.log('Exit fullscreen failed:', err);
         });
       } else if (document.msExitFullscreen) {
         document.msExitFullscreen().catch(err => {
-          console.log('Exit fullscreen failed:', err);
         });
       }
     } catch (error) {
       // Silently handle errors - document might not be active or not in fullscreen
-      console.log('Exit fullscreen error (ignored):', error.message);
     }
   };
 
@@ -515,7 +530,6 @@ const StudentExams = () => {
   // Load exam when opened from IMS EXAM PCTU app
   const loadExamFromApp = async (examId, attemptId) => {
     try {
-      console.log('[LOAD EXAM FROM APP] Loading exam:', { examId, attemptId });
       
       // Fetch exam list directly to get exam data
       const response = await api.get('/lms/exams/student');
@@ -536,7 +550,6 @@ const StudentExams = () => {
       // Find the exam from fetched list
       const exam = finalExams.find(e => e.exam_id == examId) || finalExams.find(e => e.exam_id === examId);
       if (exam) {
-        console.log('[LOAD EXAM FROM APP] Found exam:', exam);
         setSelectedExam(exam);
         
         // Start exam attempt again (it will resume if already started)
@@ -626,6 +639,33 @@ const StudentExams = () => {
   };
 
   const handleStartExam = async (exam) => {
+    // Chặn bắt đầu làm bài nếu chưa mở hoặc đã đóng
+    try {
+      const now = new Date();
+      const start = exam.available_from ? new Date(exam.available_from) :
+        (exam.scheduled_start ? new Date(exam.scheduled_start) : null);
+      const end = exam.available_until ? new Date(exam.available_until) :
+        (exam.scheduled_end ? new Date(exam.scheduled_end) : null);
+      const isApproved = exam.is_approved === 1 || exam.is_approved === true;
+
+      if (!isApproved) {
+        showAlertMessage(t('studentExams.status.notApproved'), 'warning');
+        return;
+      }
+
+      if (start && now < start) {
+        showAlertMessage(t('studentExams.status.notOpened'), 'warning');
+        return;
+      }
+
+      if (end && now > end) {
+        showAlertMessage(t('studentExams.status.closed'), 'warning');
+        return;
+      }
+    } catch (e) {
+      console.error('Error validating exam time before start:', e);
+    }
+
     // Get regulation setting first
     try {
       const regulationResponse = await api.get('/lms/exam-regulation');
@@ -721,6 +761,57 @@ const StudentExams = () => {
       setImsExamPctuFiles([]);
     } finally {
       setLoadingFiles(false);
+    }
+  };
+
+  const handleDownloadImsExamClient = async (file) => {
+    if (!file?.downloadUrl) {
+      showAlert(t('studentExams.errors.downloadError'), 'danger');
+      return;
+    }
+
+    // downloadUrl từ server là /api/system/... nhưng axios baseURL đã có /api → tránh /api/api
+    const downloadPath = file.downloadUrl.replace(/^\/api\/?/, '') || file.downloadUrl;
+
+    try {
+      const response = await api.rawGet(downloadPath, {
+        responseType: 'blob',
+        timeout: 300000
+      });
+
+      const contentType = String(response.headers?.['content-type'] || '').toLowerCase();
+      const blob = response.data;
+
+      // Guard against downloading HTML/JSON error pages as ".exe"
+      if (contentType.includes('application/json') || contentType.includes('text/html')) {
+        let serverMessage = t('studentExams.errors.downloadError');
+        try {
+          const text = await blob.text();
+          const parsed = JSON.parse(text);
+          serverMessage = parsed?.message || parsed?.error || serverMessage;
+        } catch {
+          // Keep generic message if response is not valid JSON.
+        }
+        throw new Error(serverMessage);
+      }
+
+      // If server provided expected size, ensure downloaded payload is not truncated.
+      if (Number.isFinite(file.size) && file.size > 0 && blob.size < file.size * 0.9) {
+        throw new Error(t('studentExams.errors.downloadError'));
+      }
+
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = file.name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+      showAlert(t('studentExams.success.fileDownloading'), 'success');
+    } catch (error) {
+      console.error('Lỗi khi tải file:', error);
+      showAlert(error.message || t('studentExams.errors.downloadError'), 'danger');
     }
   };
 
@@ -846,7 +937,6 @@ const StudentExams = () => {
 
   // Face verification functions and effects removed - now handled by FaceVerificationModal component
 
-  // Check if IMS EXAM PCTU is running (with retry logic)
   // Function to detect if Developer Tools is open
   const detectDeveloperTools = () => {
     let devToolsOpen = false;
@@ -868,7 +958,6 @@ const StudentExams = () => {
           devToolsOpen = true;
         }
       });
-      console.log('%c', element);
       console.clear(); // Clear the detection log
     } catch (e) {
       // Ignore errors
@@ -891,137 +980,41 @@ const StudentExams = () => {
     return devToolsOpen;
   };
   
-  const checkIMSExamPCTURunning = async (retries = 3, delay = 500) => {
-    console.log(`[IMS EXAM PCTU CHECK] Starting health check (retries: ${retries}, delay: ${delay}ms)...`);
-    
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      console.log(`[IMS EXAM PCTU CHECK] Attempt ${attempt}/${retries}...`);
-      
-      try {
-        // IMS EXAM PCTU runs a local HTTP server on port 8765
-        // Use a timeout to avoid hanging if server is not running
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => {
-          console.log(`[IMS EXAM PCTU CHECK] Attempt ${attempt}: Timeout reached, aborting request...`);
-          controller.abort();
-        }, 2000); // 2 seconds timeout per attempt
-
-        try {
-          console.log(`[IMS EXAM PCTU CHECK] Attempt ${attempt}: Sending fetch request to http://localhost:8765/health`);
-          const response = await fetch('http://localhost:8765/health', {
-            method: 'GET',
-            signal: controller.signal,
-            cache: 'no-cache',
-            mode: 'cors' // Explicitly allow CORS
-          });
-          clearTimeout(timeoutId);
-          
-          console.log(`[IMS EXAM PCTU CHECK] Attempt ${attempt}: Response received:`, {
-            status: response.status,
-            statusText: response.statusText,
-            ok: response.ok,
-            headers: Object.fromEntries(response.headers.entries())
-          });
-          
-          if (!response.ok) {
-            console.warn(`[IMS EXAM PCTU CHECK] Attempt ${attempt}: HTTP error:`, response.status, response.statusText);
-            if (attempt < retries) {
-              console.log(`[IMS EXAM PCTU CHECK] Attempt ${attempt}: Retrying after ${delay}ms...`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-              continue;
-            }
-            return false;
-          }
-          
-          // Check response body
-          console.log(`[IMS EXAM PCTU CHECK] Attempt ${attempt}: Parsing response body...`);
-          const data = await response.json();
-          console.log(`[IMS EXAM PCTU CHECK] Attempt ${attempt}: Response data:`, JSON.stringify(data, null, 2));
-          console.log(`[IMS EXAM PCTU CHECK] Attempt ${attempt}: Checking conditions:`, {
-            hasData: !!data,
-            hasSuccess: data?.success !== undefined,
-            successValue: data?.success,
-            hasName: data?.name !== undefined,
-            nameValue: data?.name,
-            hasStatus: data?.status !== undefined,
-            statusValue: data?.status,
-            condition1: data?.success === true,
-            condition2: data?.name === 'IMS EXAM PCTU' && data?.status === 'running'
-          });
-          
-          // Only accept IMS EXAM PCTU response:
-          // 1. Must have success: true OR
-          // 2. Must have name: 'IMS EXAM PCTU' AND status: 'running' OR
-          // 3. Must have status: 'running' AND platform: 'win32'/'darwin'/'linux' (fallback for compatibility)
-          // This prevents false positives from other services on port 8765
-          const isValidResponse = data && (
-            data.success === true || 
-            (data.name === 'IMS EXAM PCTU' && data.status === 'running') ||
-            (data.status === 'running' && data.platform && ['win32', 'darwin', 'linux'].includes(data.platform) && data.version)
-          );
-          
-          if (isValidResponse) {
-            console.log(`[IMS EXAM PCTU CHECK] ✅ Attempt ${attempt}: Health check PASSED:`, {
-              name: data.name || 'IMS EXAM PCTU',
-              version: data.version || 'unknown',
-              status: data.status || 'unknown'
-            });
-            return true;
-          }
-          
-          console.warn(`[IMS EXAM PCTU CHECK] ❌ Attempt ${attempt}: Health check FAILED - invalid response format or not IMS EXAM PCTU:`, data);
-          if (attempt < retries) {
-            console.log(`[IMS EXAM PCTU CHECK] Attempt ${attempt}: Retrying after ${delay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            continue;
-          }
-          return false;
-        } catch (error) {
-          clearTimeout(timeoutId);
-          console.error(`[IMS EXAM PCTU CHECK] ❌ Attempt ${attempt}: Fetch error:`, {
-            name: error.name,
-            message: error.message
-          });
-          if (error.name === 'AbortError') {
-            // Timeout - server not responding
-            console.warn(`[IMS EXAM PCTU CHECK] ❌ Attempt ${attempt}: Request timeout - server not responding`);
-            if (attempt < retries) {
-              console.log(`[IMS EXAM PCTU CHECK] Attempt ${attempt}: Retrying after ${delay}ms...`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-              continue;
-            }
-            return false;
-          }
-          // Other errors (network, CORS, etc.)
-          console.warn(`[IMS EXAM PCTU CHECK] ❌ Attempt ${attempt}: Network/CORS error:`, error.message);
-          if (attempt < retries) {
-            console.log(`[IMS EXAM PCTU CHECK] Attempt ${attempt}: Retrying after ${delay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            continue;
-          }
-          return false;
-        }
-      } catch (error) {
-        console.error(`[IMS EXAM PCTU CHECK] ❌ Attempt ${attempt}: Outer exception:`, {
-          name: error.name,
-          message: error.message
-        });
-        if (attempt < retries) {
-          console.log(`[IMS EXAM PCTU CHECK] Attempt ${attempt}: Retrying after ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-        return false;
-      }
-    }
-    
-    console.warn('[IMS EXAM PCTU CHECK] ❌ All attempts failed');
-    return false;
-  };
-
   // Confirm start exam (check face verification if required)
   const confirmStartExam = async () => {
     try {
+      // Nếu kỳ thi yêu cầu webcam, bắt buộc phải bật sẵn webcam + mic trước
+      const webcamRequired = selectedExam?.webcam_required === true || selectedExam?.webcam_required === 1;
+      if (webcamRequired && !mediaReady) {
+        showAlertMessage(t('studentExams.errors.mediaNotReady', 'Vui lòng bấm \"Bật webcam và mic\" trước khi bắt đầu làm bài.'), 'warning');
+        return;
+      }
+
+      // Double-check trạng thái trước khi thật sự bắt đầu làm bài
+      if (selectedExam) {
+        const now = new Date();
+        const start = selectedExam.available_from ? new Date(selectedExam.available_from) :
+          (selectedExam.scheduled_start ? new Date(selectedExam.scheduled_start) : null);
+        const end = selectedExam.available_until ? new Date(selectedExam.available_until) :
+          (selectedExam.scheduled_end ? new Date(selectedExam.scheduled_end) : null);
+        const isApproved = selectedExam.is_approved === 1 || selectedExam.is_approved === true;
+
+        if (!isApproved) {
+          showAlertMessage(t('studentExams.status.notApproved'), 'warning');
+          return;
+        }
+
+        if (start && now < start) {
+          showAlertMessage(t('studentExams.status.notOpened'), 'warning');
+          return;
+        }
+
+        if (end && now > end) {
+          showAlertMessage(t('studentExams.status.closed'), 'warning');
+          return;
+        }
+      }
+
       // Stop auto-refresh when starting exam
       stopAutoRefresh();
 
@@ -1029,36 +1022,25 @@ const StudentExams = () => {
       setPasswordError('');
 
       // Check if Developer Tools is open
-      console.log('[EXAM START] Checking for Developer Tools...');
       if (detectDeveloperTools()) {
         console.warn('[EXAM START] ❌ Developer Tools is open, blocking exam start');
         showAlert(t('studentExams.errors.devToolsOpen'), 'danger');
         return;
       }
-      console.log('[EXAM START] ✅ Developer Tools check passed');
 
-      // Check if IMS EXAM PCTU is required
-      if (selectedExam?.ims_exam_pctu_required === true || selectedExam?.ims_exam_pctu_required === 1) {
-        const isRunning = await checkIMSExamPCTURunning();
-        if (!isRunning) {
-          showAlert(t('studentExams.errors.imsExamPctuRequired'), 'warning');
-          return;
-        }
-      }
-
-      // Check if webcam is required
+      // Check if webcam is required: verify cả camera và mic trước khi cho bắt đầu
       if (selectedExam?.webcam_required === true || selectedExam?.webcam_required === 1) {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
             video: { width: 640, height: 480 },
-            audio: false
+            audio: true
           });
           // Stop the stream immediately, we'll start it again after exam starts
           stream.getTracks().forEach(track => track.stop());
           setWebcamModalError(''); // Clear webcam error if successful
         } catch (error) {
           setWebcamModalError(t('studentExams.errors.webcamError'));
-          return; // Don't proceed if webcam is denied
+          return; // Don't proceed if webcam/mic is denied
         }
       }
 
@@ -1071,7 +1053,6 @@ const StudentExams = () => {
           if (statusResponse.data.success) {
             // If user is exempt, skip face verification
             if (statusResponse.data.exempt) {
-              console.log('User is exempt from face verification, proceeding directly');
               // Set exempt status for proceedWithExamStart
               const exemptResult = {
                 exempt: true,
@@ -1143,7 +1124,6 @@ const StudentExams = () => {
       // If attemptIdOverride is provided, we're resuming an existing attempt
       // But we still need to call the API to get full attempt data
       if (attemptIdOverride && examToUse) {
-        console.log('[EXAM START] Resuming existing attempt from app:', attemptIdOverride);
         // Still call start exam endpoint - it will resume the attempt and return full data
         // Skip IMS EXAM PCTU and safety checks since we're already in the app
         // Skip face verification since it was already done
@@ -1151,8 +1131,7 @@ const StudentExams = () => {
         try {
           const resumeResponse = await api.post(`/lms/exams/${examToUse.exam_id}/attempts`, {
             password: examPassword || null,
-            faceVerificationStatus: 'verified', // Assume verified since we're resuming
-            ims_exam_pctu_running: true // Assume running since we're in the app
+            faceVerificationStatus: 'verified' // Assume verified since we're resuming
           });
           
           if (resumeResponse.data.success) {
@@ -1160,7 +1139,6 @@ const StudentExams = () => {
             // Continue with normal exam loading flow below
             // This will set up the exam state, questions, answers, timer, etc.
             // We'll handle this after the IMS EXAM PCTU check section
-            console.log('[EXAM START] Successfully resumed attempt:', attemptData);
             
             // Set exam state
             setSelectedExam(examToUse);
@@ -1186,7 +1164,6 @@ const StudentExams = () => {
             // Set current page - use saved page if resuming, otherwise start at page 1
             if (attemptData.isResumed && attemptData.currentPage) {
               setCurrentPage(attemptData.currentPage);
-              console.log(`📄 Resuming at page ${attemptData.currentPage}`);
             } else {
               setCurrentPage(1);
             }
@@ -1200,9 +1177,6 @@ const StudentExams = () => {
               const initialTimestamps = {};
               
               if (attemptData.isResumed && attemptData.savedAnswers) {
-                console.log('🔄 Resuming exam - savedAnswers:', attemptData.savedAnswers);
-                console.log('🔄 Resuming exam - savedAnswerTimestamps:', attemptData.savedAnswerTimestamps);
-                
                 attemptData.questions.forEach(q => {
                   const savedAnswer = attemptData.savedAnswers[q.question_id];
                   
@@ -1294,17 +1268,25 @@ const StudentExams = () => {
               }
             }
 
-            // Start cheating detection
-            startCheatingDetection(attemptData);
+            // Start cheating detection chỉ khi kỳ thi bật proctoring (ghi log gian lận)
+            const proctoringOn = attemptData.exam?.proctoring_enabled === true || attemptData.exam?.proctoring_enabled === 1;
+            if (proctoringOn) {
+              startCheatingDetection(attemptData);
+            }
 
             // Connect to socket.io
             if (attemptData.attempt_id) {
-              const socket = io(process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000');
+              const socket = io(getSocketUrl());
               socketRef.current = socket;
               socket.emit('exam:join_attempt', attemptData.attempt_id);
               socket.on('exam:banned', () => {
-                showAlertMessage(t('studentExams.success.banned'), 'danger');
-                submitExamWithId(attemptData.attempt_id);
+                handleExamBanned(attemptData.attempt_id);
+              });
+              socket.on('exam:proctor_message', (data) => {
+                const msg = (data && data.message) ? String(data.message).trim() : '';
+                if (msg) {
+                  setProctorMessageQueue((prev) => [...prev, { id: Date.now(), message: msg }]);
+                }
               });
             }
             
@@ -1343,204 +1325,16 @@ const StudentExams = () => {
         }
       }
 
-      // Check if IMS EXAM PCTU is required and running
-      let imsExamPCTURunning = false;
-      if (examToUse?.ims_exam_pctu_required === true || examToUse?.ims_exam_pctu_required === 1) {
-        console.log('[EXAM START] IMS EXAM PCTU is required, checking if running...');
-        imsExamPCTURunning = await checkIMSExamPCTURunning();
-        console.log('[EXAM START] IMS EXAM PCTU check result:', imsExamPCTURunning);
-        
-        if (!imsExamPCTURunning) {
-          console.warn('[EXAM START] ❌ IMS EXAM PCTU not running, blocking exam start');
-          showAlert(t('studentExams.errors.imsExamPctuRequired'), 'warning');
-          return;
-        }
-        
-        // Perform safety check before starting exam
-        console.log('[EXAM START] Performing safety check...');
-        try {
-          const safetyResponse = await fetch('http://localhost:8765/safety-status', {
-            method: 'GET',
-            cache: 'no-cache',
-            mode: 'cors'
-          });
-          
-          if (safetyResponse.ok) {
-            const safetyData = await safetyResponse.json();
-            console.log('[EXAM START] Safety check result:', safetyData);
-            
-            if (!safetyData.safe && safetyData.issues && safetyData.issues.length > 0) {
-              // Build error message from issues
-              const errorMessages = safetyData.issues.map(issue => 
-                `${issue.title}: ${issue.description}\n${t('common.action', 'Hành động')}: ${issue.action}`
-              ).join('\n\n');
-              
-              console.warn('[EXAM START] ❌ Safety check failed:', safetyData.issues);
-              showAlert(
-                t('studentExams.warnings.safetyIssues', { issues: errorMessages }),
-                'danger'
-              );
-              return; // Block exam start
-            }
-            
-            console.log('[EXAM START] ✅ Safety check passed');
-          } else {
-            console.warn('[EXAM START] ⚠️ Safety check endpoint returned error:', safetyResponse.status);
-            // If can't check, block exam start for safety
-            showAlert(
-              t('studentExams.warnings.cannotCheckSafety'),
-              'warning'
-            );
-            return;
-          }
-        } catch (error) {
-          console.warn('[EXAM START] ⚠️ Error performing safety check:', error);
-          // If can't check, block exam start for safety
-          showAlert(
-            t('studentExams.warnings.cannotCheckSafety'),
-            'warning'
-          );
-          return;
-        }
-        
-        // Trigger system lock in IMS EXAM PCTU app and load keyboard blocking script
-        console.log('[EXAM START] Activating system lock in IMS EXAM PCTU...');
-        try {
-          const lockResponse = await fetch('http://localhost:8765/start-exam', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({})
-          });
-          console.log('[EXAM START] System lock activation response:', {
-            status: lockResponse.status,
-            ok: lockResponse.ok
-          });
-          const lockData = await lockResponse.json();
-          console.log('[EXAM START] System lock activation data:', lockData);
-          
-          // Load and inject keyboard blocking script
-          try {
-            const scriptResponse = await fetch('http://localhost:8765/keyboard-block-script');
-            if (scriptResponse.ok) {
-              const scriptCode = await scriptResponse.text();
-              
-              // Create script element and inject it
-              const scriptElement = document.createElement('script');
-              scriptElement.id = 'ims-exam-pctu-keyboard-block';
-              scriptElement.textContent = scriptCode;
-              
-              // Remove existing script if any
-              const existingScript = document.getElementById('ims-exam-pctu-keyboard-block');
-              if (existingScript) {
-                existingScript.remove();
-              }
-              
-              // Inject script into document
-              (document.head || document.documentElement).appendChild(scriptElement);
-              
-              // Store cleanup function reference if available
-              try {
-                // The script returns a cleanup function, try to capture it
-                const scriptResult = eval(scriptCode); // eslint-disable-line no-eval
-                if (typeof scriptResult === 'function') {
-                  window.imsExamPCTUCleanup = scriptResult;
-                }
-              } catch (e) {
-                // Script is IIFE, cleanup function not directly accessible
-                // Will be handled when removing script element
-                console.debug('Script cleanup function not accessible (this is normal for IIFE)');
-              }
-              
-              console.log('[EXAM START] ✅ Keyboard blocking script loaded and injected');
-            } else {
-              console.warn('[EXAM START] ⚠️ Could not load keyboard blocking script:', scriptResponse.status);
-            }
-          } catch (scriptError) {
-            console.warn('[EXAM START] ⚠️ Error loading keyboard blocking script:', scriptError);
-            // Continue anyway - keyboard blocking is not critical
-          }
-        } catch (error) {
-          console.error('[EXAM START] ❌ Error activating system lock in IMS EXAM PCTU:', error);
-          // Continue anyway - the app might still be running
-        }
-      } else {
-        console.log('[EXAM START] IMS EXAM PCTU is not required for this exam');
-      }
-
       const response = await api.post(`/lms/exams/${examToUse.exam_id}/attempts`, {
         password: examPassword || null,
         faceVerificationStatus: faceVerificationStatus,
-        faceVerificationData: verificationResult,
-        ims_exam_pctu_running: imsExamPCTURunning
+        faceVerificationData: verificationResult
       });
 
       if (response.data.success) {
         const attemptData = response.data.data;
         const attemptId = attemptData?.attempt_id || null;
         
-        // If IMS EXAM PCTU is required, open exam in app instead of browser
-        if (examToUse?.ims_exam_pctu_required === true || examToUse?.ims_exam_pctu_required === 1) {
-          console.log('[EXAM START] IMS EXAM PCTU required - opening exam in app...');
-          
-          try {
-            // Get auth token
-            const token = localStorage.getItem('token');
-            const serverUrl = window.location.origin;
-            
-            // Call IMS EXAM PCTU app to open exam window
-            const openExamResponse = await fetch('http://localhost:8765/open-exam', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                examId: examToUse.exam_id,
-                attemptId: attemptId,
-                token: token,
-                serverUrl: serverUrl
-              })
-            });
-            
-            if (openExamResponse.ok) {
-              const openExamData = await openExamResponse.json();
-              console.log('[EXAM START] Exam opened in IMS EXAM PCTU app:', openExamData);
-              
-              // Show success message
-              showAlert(t('studentExams.success.examOpenedInApp'), 'success');
-              
-              // Try to focus on the exam window (if possible)
-              // Note: Browser cannot directly focus on desktop app window,
-              // but the Electron app will handle focusing when window is created
-              // Give a small delay for window to be created
-              setTimeout(() => {
-                // Try to trigger focus via IPC if available (not possible from browser)
-                // The Electron app will handle focus automatically when window is created
-                console.log('[EXAM START] Exam window should be focused by IMS EXAM PCTU app');
-              }, 500);
-              
-              // Close modal
-              setShowStartModal(false);
-              setExamPassword('');
-              setPasswordError('');
-              setRequiresPassword(false);
-              
-              // Don't set exam state here - exam will run in app
-              return;
-            } else {
-              console.error('[EXAM START] Failed to open exam in app:', openExamResponse.status);
-              showAlert(t('studentExams.errors.cannotOpenInApp'), 'danger');
-              return;
-            }
-          } catch (error) {
-            console.error('[EXAM START] Error opening exam in app:', error);
-            showAlert(t('studentExams.errors.errorOpenInApp'), 'danger');
-            return;
-          }
-        }
-        
-        // If IMS EXAM PCTU is not required, proceed with normal browser exam
         // Set selectedExam if not already set
         if (!selectedExam && examToUse) {
           setSelectedExam(examToUse);
@@ -1568,7 +1362,6 @@ const StudentExams = () => {
         // Set current page - use saved page if resuming, otherwise start at page 1
         if (attemptData.isResumed && attemptData.currentPage) {
           setCurrentPage(attemptData.currentPage);
-          console.log(`📄 Resuming at page ${attemptData.currentPage}`);
         } else {
           setCurrentPage(1); // Reset to first page for new attempt
         }
@@ -1583,8 +1376,6 @@ const StudentExams = () => {
           
           if (attemptData.isResumed && attemptData.savedAnswers) {
             // Resume: Load saved answers
-            console.log('🔄 Resuming exam - savedAnswers:', attemptData.savedAnswers);
-            console.log('🔄 Resuming exam - savedAnswerTimestamps:', attemptData.savedAnswerTimestamps);
             
             attemptData.questions.forEach(q => {
               const savedAnswer = attemptData.savedAnswers[q.question_id];
@@ -1617,7 +1408,6 @@ const StudentExams = () => {
                   initialAnswers[q.question_id] = savedAnswer;
                 }
                 
-                console.log(`✅ Loaded saved answer for question ${q.question_id}:`, initialAnswers[q.question_id]);
               } else {
                 // Initialize empty if no saved answer
                 if (q.question_type === 'mcq' || q.question_type === 'multiple_choice') {
@@ -1697,45 +1487,35 @@ const StudentExams = () => {
           }
         }
 
-        // Start cheating detection tracking - Pass attemptData directly since state update is async
-        startCheatingDetection(attemptData);
+        // Start cheating detection chỉ khi kỳ thi bật proctoring (ghi log gian lận)
+        const proctoringOn = attemptData.exam?.proctoring_enabled === true || attemptData.exam?.proctoring_enabled === 1;
+        if (proctoringOn) {
+          startCheatingDetection(attemptData);
+        }
 
         // Connect to socket.io and join attempt room for ban events
         if (attemptData.attempt_id) {
-          const socket = io(process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000');
+          const socket = io(getSocketUrl());
           socketRef.current = socket;
 
           // Join attempt room
           socket.emit('exam:join_attempt', attemptData.attempt_id);
 
           // Listen for ban event
-          socket.on('exam:banned', (data) => {
-            console.log('🚫 Received ban event:', data);
-            showAlertMessage(t('studentExams.success.bannedMessage'), 'danger');
-            
-            // Stop timer
-            if (timerRef.current) {
-              clearInterval(timerRef.current);
-              timerRef.current = null;
-            }
+          socket.on('exam:banned', () => {
+            handleExamBanned(attemptData.attempt_id);
+          });
 
-            // Stop webcam recording
-            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-              mediaRecorderRef.current.stop();
+          // Listen for proctor message (chat thông báo trực tiếp) - thêm vào hàng đợi, tin mới nhất hiển thị modal
+          socket.on('exam:proctor_message', (data) => {
+            const msg = (data && data.message) ? String(data.message).trim() : '';
+            if (msg) {
+              setProctorMessageQueue((prev) => [...prev, { id: Date.now(), message: msg }]);
             }
-            if (webcamStream) {
-              webcamStream.getTracks().forEach(track => track.stop());
-            }
-
-            // Redirect to exams list after a short delay
-            setTimeout(() => {
-              navigate('/lms/exams/student');
-            }, 2000);
           });
 
           // Clean up on disconnect
           socket.on('disconnect', () => {
-            console.log('Socket disconnected');
           });
         }
       }
@@ -1769,51 +1549,110 @@ const StudentExams = () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 480 },
-        audio: false
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
       });
 
       setWebcamStream(stream);
       setWebcamError(null);
+
+      // Nếu kỳ thi yêu cầu webcam, giám sát trạng thái track để cấm thi ngay khi thiết bị bị tắt
+      const enforceMediaDuringExam = selectedExam?.webcam_required === true || selectedExam?.webcam_required === 1;
+      if (enforceMediaDuringExam) {
+        const effectiveAttemptId = attemptId || currentAttempt?.attempt_id || attemptIdRef.current;
+        const handleTrackStopped = () => {
+          if (!effectiveAttemptId) return;
+          // Log gian lận + cấm thi giống giám thị bấm nút Cấm thi
+          autoBanDueToMedia(effectiveAttemptId);
+        };
+        stream.getTracks().forEach(track => {
+          track.onended = handleTrackStopped;
+          track.oninactive = handleTrackStopped;
+          track.onmute = handleTrackStopped;
+        });
+
+        // Thiết lập interval kiểm tra định kỳ webcam + mic mỗi 5 giây
+        if (mediaHealthIntervalRef.current) {
+          clearInterval(mediaHealthIntervalRef.current);
+        }
+        mediaHealthIntervalRef.current = setInterval(() => {
+          try {
+            const s = webcamStream || stream;
+            if (!s) return;
+            const videoTracks = s.getVideoTracks();
+            const audioTracks = s.getAudioTracks();
+
+            const videoOk = videoTracks.length > 0 && videoTracks.some(t => t.readyState === 'live' && !t.muted);
+            const audioOk = audioTracks.length > 0 && audioTracks.some(t => t.readyState === 'live' && !t.muted);
+
+            // Nếu bất kỳ track nào không còn hoạt động, coi như mất media
+            if (!videoOk || !audioOk) {
+              if (mediaHealthIntervalRef.current) {
+                clearInterval(mediaHealthIntervalRef.current);
+                mediaHealthIntervalRef.current = null;
+              }
+              if (effectiveAttemptId) {
+                autoBanDueToMedia(effectiveAttemptId);
+              }
+            }
+          } catch (err) {
+            console.error('Error in media health check:', err);
+          }
+        }, 5000);
+      }
 
       // Display video
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
 
-      // Start recording
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'video/webm;codecs=vp8'
-      });
-
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          chunksRef.current.push(event.data);
-          // Upload chunk to server
-          uploadVideoChunk(attemptId, event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        // Upload final video
-        if (chunksRef.current.length > 0) {
-          const blob = new Blob(chunksRef.current, { type: 'video/webm' });
-          await uploadFinalVideo(attemptId, blob);
-        }
-      };
-
-      // Start recording and create chunks every 10 seconds
-      mediaRecorder.start();
       setIsWebcamRecording(true);
 
-      // Create chunks every 10 seconds
-      chunkIntervalRef.current = setInterval(() => {
-        if (mediaRecorder.state === 'recording') {
-          mediaRecorder.requestData();
+      // Chụp ảnh mỗi 0.2s gửi lên server (Live Webcam + ghép ảnh)
+      const captureAndUploadSnapshot = () => {
+        const video = videoRef.current;
+        if (!video || video.readyState < 2) return;
+        if (!(video.videoWidth > 0 && video.videoHeight > 0)) return;
+        if (!canvasSnapshotRef.current) {
+          canvasSnapshotRef.current = document.createElement('canvas');
         }
-      }, 10000);
+        const canvas = canvasSnapshotRef.current;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0);
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) return;
+            const formData = new FormData();
+            formData.append('image', blob, `snapshot_${Date.now()}.jpg`);
+            formData.append('question_order', String(currentPageRef.current));
+            api.post(`/lms/attempts/${attemptId}/webcam-snapshot`, formData)
+              .then(() => {})
+              .catch((err) => console.warn('Webcam snapshot upload failed:', err?.response?.data || err.message));
+          },
+          'image/jpeg',
+          0.6
+        );
+      };
+      const startSnapshotInterval = () => {
+        captureAndUploadSnapshot();
+        if (snapshotIntervalRef.current) clearInterval(snapshotIntervalRef.current);
+        snapshotIntervalRef.current = setInterval(captureAndUploadSnapshot, 200);
+      };
+      if (videoRef.current) {
+        const v = videoRef.current;
+        if (v.videoWidth > 0) {
+          startSnapshotInterval();
+        } else {
+          v.addEventListener('loadeddata', () => setTimeout(startSnapshotInterval, 800), { once: true });
+        }
+      } else {
+        setTimeout(startSnapshotInterval, 1500);
+      }
 
     } catch (error) {
       console.error('Error starting webcam:', error);
@@ -1824,56 +1663,24 @@ const StudentExams = () => {
         setIsWebcamRecording(false);
         return; // Don't block exam
       }
+      // Kỳ thi bắt buộc webcam/mic: không mở được = cấm thi ngay, không cho làm bài
+      const examRequiresWebcam = selectedExam?.webcam_required === true || selectedExam?.webcam_required === 1;
+      if (examRequiresWebcam && attemptId) {
+        setWebcamError(t('studentExams.errors.webcamError'));
+        showAlertMessage(t('studentExams.errors.webcamStartError'), 'danger');
+        handleExamBanned(attemptId);
+        return;
+      }
       setWebcamError(t('studentExams.errors.webcamError'));
       showAlertMessage(t('studentExams.errors.webcamStartError'), 'danger');
     }
   };
 
-  const uploadVideoChunk = async (attemptId, chunk) => {
-    try {
-      const formData = new FormData();
-      formData.append('chunk', chunk, `chunk_${Date.now()}.webm`);
-      formData.append('attempt_id', attemptId);
-      formData.append('chunk_index', chunksRef.current.length - 1);
-      formData.append('total_chunks', '0'); // We don't know total chunks in advance
-
-      await api.post(`/lms/attempts/${attemptId}/webcam-chunk`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-    } catch (error) {
-      console.error('Error uploading video chunk:', error);
-    }
-  };
-
-  const uploadFinalVideo = async (attemptId, blob) => {
-    try {
-      const formData = new FormData();
-      formData.append('video', blob, `video_${attemptId}.webm`);
-      formData.append('attempt_id', attemptId);
-
-      await api.post(`/lms/attempts/${attemptId}/webcam-final`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-    } catch (error) {
-      console.error('Error uploading final video:', error);
-    }
-  };
-
   const stopWebcamRecording = () => {
-    // Clear chunk interval
-    if (chunkIntervalRef.current) {
-      clearInterval(chunkIntervalRef.current);
-      chunkIntervalRef.current = null;
-    }
-
-    // Stop media recorder
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current = null;
+    // Clear snapshot interval (chụp ảnh 0.2s)
+    if (snapshotIntervalRef.current) {
+      clearInterval(snapshotIntervalRef.current);
+      snapshotIntervalRef.current = null;
     }
 
     // Stop webcam stream
@@ -1930,116 +1737,6 @@ const StudentExams = () => {
           lastUpdateTime = now;
           const attemptId = attemptIdRef.current;
           if (attemptId) {
-            // Check safety status if IMS EXAM PCTU is required (every update interval)
-            const examId = selectedExam?.id;
-            if (examId && (selectedExam?.ims_exam_pctu_required === true || selectedExam?.ims_exam_pctu_required === 1)) {
-              // Check safety status in background (don't block time update)
-              // Use a flag to prevent multiple simultaneous checks
-              if (!window.safetyCheckInProgress) {
-                window.safetyCheckInProgress = true;
-                
-                // Create AbortController for timeout
-                const abortController = new AbortController();
-                let timeoutId = setTimeout(() => abortController.abort(), 3000);
-                
-                fetch('http://localhost:8765/safety-status', {
-                  method: 'GET',
-                  cache: 'no-cache',
-                  mode: 'cors',
-                  signal: abortController.signal
-                })
-                .then(safetyResponse => {
-                  if (timeoutId) {
-                    clearTimeout(timeoutId);
-                    timeoutId = null;
-                  }
-                  if (safetyResponse.ok) {
-                    return safetyResponse.json();
-                  }
-                  return null;
-                })
-                .then(safetyData => {
-                  if (timeoutId) {
-                    clearTimeout(timeoutId);
-                    timeoutId = null;
-                  }
-                  window.safetyCheckInProgress = false;
-                  
-                  if (safetyData && !safetyData.safe && safetyData.issues && safetyData.issues.length > 0) {
-                    console.warn('[EXAM SAFETY CHECK] ❌ Unsafe conditions detected during exam:', safetyData.issues);
-                    
-                    // Set flag to prevent other checks from triggering
-                    window.examKickedOutDueToSafety = true;
-                    
-                    // Build error message
-                    const errorMessages = safetyData.issues.map(issue => 
-                      `${issue.title}: ${issue.description}`
-                    ).join('\n\n');
-                    
-                    // Stop timer immediately
-                    if (timerRef.current) {
-                      clearInterval(timerRef.current);
-                      timerRef.current = null;
-                    }
-                    
-                    // Stop cheating detection
-                    stopCheatingDetection();
-                    
-                    // Stop webcam recording
-                    stopWebcamRecording();
-                    
-                    // Show alert message with safety warning (NOT the IMS EXAM PCTU not running message)
-                    showAlertMessage(
-                      t('studentExams.warnings.safetyIssuesDuringExam', { issues: errorMessages }),
-                      'danger'
-                    );
-                    
-                    // Exit exam - clear all exam state
-                    setCurrentAttempt(null);
-                    attemptIdRef.current = null;
-                    setAnswers({});
-                    setAnswerTimestamps({});
-                    answersRef.current = {};
-                    answerTimestampsRef.current = {};
-                    setExamQuestions([]);
-                    setShowResults(false);
-                    setResults(null);
-                    setCurrentPage(1);
-                    
-                    // Stop exam in IMS EXAM PCTU
-                    fetch('http://localhost:8765/stop-exam', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({})
-                    }).catch(err => console.error('Error stopping exam in IMS EXAM PCTU:', err));
-                    
-                    // Refresh exam list
-                    fetchExams();
-                    
-                    // Restart auto-refresh
-                    setTimeout(() => {
-                      const intervalId = setInterval(() => {
-                        fetchExams();
-                      }, 30000);
-                      return () => clearInterval(intervalId);
-                    }, 1000);
-                  }
-                })
-                .catch(error => {
-                  if (timeoutId) {
-                    clearTimeout(timeoutId);
-                    timeoutId = null;
-                  }
-                  window.safetyCheckInProgress = false;
-                  // Only log if not aborted (timeout)
-                  if (error.name !== 'AbortError' && error.name !== 'TimeoutError') {
-                    console.warn('[EXAM SAFETY CHECK] Error checking safety status:', error);
-                  }
-                  // Don't kick out on network errors, just log
-                });
-              }
-            }
-            
             // Update time_remaining_seconds in background (don't wait for response)
             api.put(`/lms/attempts/${attemptId}/time-remaining`, {
               timeRemainingSeconds: newTime
@@ -2048,7 +1745,6 @@ const StudentExams = () => {
               
               // Don't kick out if already kicked out due to safety issues
               if (window.examKickedOutDueToSafety) {
-                console.log('[UPDATE TIME] Skipping kick out - already kicked out due to safety issues');
                 return;
               }
               
@@ -2088,19 +1784,6 @@ const StudentExams = () => {
                 setResults(null);
                 setCurrentPage(1);
                 
-                // Stop exam window in IMS EXAM PCTU if required (don't await in catch callback)
-                if (selectedExam?.ims_exam_pctu_required === true || selectedExam?.ims_exam_pctu_required === 1) {
-                  fetch('http://localhost:8765/stop-exam', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({})
-                  }).catch(err => {
-                    console.error('Error stopping exam window in IMS EXAM PCTU:', err);
-                  });
-                }
-                
                 // Refresh exam list to show updated status
                 fetchExams();
                 
@@ -2120,7 +1803,6 @@ const StudentExams = () => {
 
   const handleAutoSubmitWithId = async (attemptId) => {
     if (isSubmitting) {
-      console.log('Auto-submit already in progress, skipping...');
       return;
     }
     if (!attemptId) {
@@ -2128,7 +1810,6 @@ const StudentExams = () => {
       return;
     }
     
-    console.log('Auto-submitting exam due to time limit...', { attemptId });
     setIsSubmitting(true);
     
     // Show notification to user
@@ -2343,6 +2024,112 @@ const StudentExams = () => {
     setShowBacktrackWarning(false);
   };
 
+  // Tự động log gian lận + cấm thi khi mất webcam/mic trong lúc làm bài
+  const autoBanDueToMedia = async (attemptId) => {
+    if (!attemptId) return;
+    try {
+      await api.post(`/lms/attempts/${attemptId}/cheating-logs`, {
+        event_type: 'media_disconnected',
+        severity: 'high',
+        description: 'Webcam hoặc microphone bị tắt / mất kết nối trong khi đang làm bài thi.'
+      });
+    } catch (err) {
+      console.error('Error logging media disconnect cheating event:', err?.response?.data || err.message);
+    } finally {
+      // Dù ghi log thành công hay không, vẫn xử lý cấm thi nội bộ trên client (KHÔNG nộp bài)
+      handleExamBanned(attemptId);
+    }
+  };
+
+  // Pre-exam media check: ensure webcam + mic can be accessed
+  const handlePreflightMediaCheck = async () => {
+    try {
+      setMediaCheckError('');
+      setMediaChecking(true);
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setMediaCheckError(t('studentExams.errors.mediaNotSupported', 'Trình duyệt không hỗ trợ truy cập webcam/mic. Vui lòng sử dụng trình duyệt khác.'));
+        setMediaReady(false);
+        return;
+      }
+
+      // Yêu cầu cả video và audio để đảm bảo webcam + mic hoạt động
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 },
+        audio: true
+      });
+
+      // Lưu stream test để có thể dừng khi đóng modal / bắt đầu thi
+      if (preflightMediaStreamRef.current) {
+        preflightMediaStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      preflightMediaStreamRef.current = stream;
+
+      setMediaReady(true);
+      setMediaCheckError('');
+    } catch (error) {
+      console.error('Preflight media check failed:', error);
+      setMediaReady(false);
+      setMediaCheckError(t('studentExams.errors.mediaCheckFailed', 'Không thể bật webcam hoặc micro. Vui lòng kiểm tra quyền truy cập thiết bị.'));
+    } finally {
+      setMediaChecking(false);
+    }
+  };
+
+  // Handle exam banned event (kick student out, KHÔNG nộp bài)
+  const handleExamBanned = async (attemptId) => {
+    // Show banned message
+    showAlertMessage(t('studentExams.success.bannedMessage'), 'danger');
+
+    // Stop timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    // Stop webcam stream và dừng chụp ảnh
+    if (snapshotIntervalRef.current) {
+      clearInterval(snapshotIntervalRef.current);
+      snapshotIntervalRef.current = null;
+    }
+    if (webcamStream) {
+      webcamStream.getTracks().forEach(track => track.stop());
+    }
+
+    // Ngắt kết nối socket
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
+    }
+
+    // Dừng cheating detection
+    stopCheatingDetection();
+
+    // Dừng interval kiểm tra sức khỏe media nếu đang chạy
+    if (mediaHealthIntervalRef.current) {
+      clearInterval(mediaHealthIntervalRef.current);
+      mediaHealthIntervalRef.current = null;
+    }
+
+    // Xóa state bài thi để thoát khỏi giao diện thi và hiển thị lại danh sách kỳ thi (không nộp bài)
+    setCurrentAttempt(null);
+    setSelectedExam(null);
+    setExamQuestions([]);
+    setAnswers({});
+    setAnswerTimestamps({});
+    setShowResults(false);
+    setCurrentPage(1);
+    answersRef.current = {};
+    answerTimestampsRef.current = {};
+    timeRemainingRef.current = 0;
+    attemptIdRef.current = null;
+
+    // Điều hướng về danh sách kỳ thi (cùng route để re-mount hoặc re-render danh sách)
+    setTimeout(() => {
+      navigate('/student/exams', { replace: true });
+    }, 1500);
+  };
+
   const submitExamWithId = async (attemptId) => {
     try {
       if (!attemptId) {
@@ -2368,37 +2155,21 @@ const StudentExams = () => {
         ? answerTimestampsRef.current
         : answerTimestamps;
 
-      console.log('Submitting exam with answers:', {
-        attemptId,
-        answersCount: Object.keys(latestAnswers).length,
-        answersKeys: Object.keys(latestAnswers),
-        hasTimestamps: Object.keys(latestAnswerTimestamps).length > 0
-      });
-
-      // Check if IMS EXAM PCTU is required and running before submitting
-      let imsExamPCTURunning = false;
-      if (selectedExam?.ims_exam_pctu_required === true || selectedExam?.ims_exam_pctu_required === 1) {
-        imsExamPCTURunning = await checkIMSExamPCTURunning();
-        if (!imsExamPCTURunning) {
-          showAlertMessage(t('studentExams.errors.imsExamPctuNotRunning'), 'warning');
-          return;
-        }
-      }
-
       const response = await api.post(`/lms/attempts/${attemptId}/submit`, {
         answers: latestAnswers,
-        answerTimestamps: latestAnswerTimestamps, // Gửi timestamp khi chọn đáp án
-        ims_exam_pctu_running: imsExamPCTURunning
+        answerTimestamps: latestAnswerTimestamps // Gửi timestamp khi chọn đáp án
       });
 
       if (response.data.success) {
+        // Ngừng giám sát webcam/mic ngay sau khi nộp bài thành công để tránh bị coi là "cấm thi"
+        // khi đang xem trang kết quả (interval hoặc track.onended vẫn chạy nếu không dừng).
+        if (mediaHealthIntervalRef.current) {
+          clearInterval(mediaHealthIntervalRef.current);
+          mediaHealthIntervalRef.current = null;
+        }
+        stopWebcamRecording();
+
         const resultData = response.data.data;
-        console.log('[EXAM SUBMIT] Result data from submit:', {
-          score: resultData.score,
-          total_points: resultData.total_points,
-          percentage: resultData.percentage,
-          passed: resultData.passed
-        });
         // Calculate passed if not provided by backend (fallback)
         if (resultData.passed === undefined && resultData.percentage !== undefined && selectedExam?.passing_score !== undefined) {
           resultData.passed = resultData.percentage >= selectedExam.passing_score;
@@ -2441,23 +2212,13 @@ const StudentExams = () => {
         // This is important because score might be recalculated or updated after submission
         try {
           const resultsResponse = await api.get(`/lms/attempts/${attemptId}/results`);
-          console.log('[EXAM SUBMIT] Results response from database:', resultsResponse.data);
           if (resultsResponse.data.success) {
             // Merge attempt data (including score, total_points, percentage) from database
             if (resultsResponse.data.data.attempt) {
               const attemptData = resultsResponse.data.data.attempt;
-              console.log('[EXAM SUBMIT] Attempt data from database:', {
-                score: attemptData.score,
-                total_points: attemptData.total_points,
-                percentage: attemptData.percentage,
-                passed: attemptData.passed
-              });
               // Always use database values if they exist (they are the source of truth)
               if (attemptData.score !== null && attemptData.score !== undefined) {
                 resultData.score = parseFloat(attemptData.score);
-                console.log('[EXAM SUBMIT] ✅ Updated score from database:', resultData.score);
-              } else {
-                console.warn('[EXAM SUBMIT] ⚠️ Score is null/undefined in database, keeping submit response score:', resultData.score);
               }
               if (attemptData.total_points !== null && attemptData.total_points !== undefined) {
                 resultData.total_points = parseFloat(attemptData.total_points);
@@ -2485,12 +2246,6 @@ const StudentExams = () => {
           resultData.show_results_after = showResultsAfterConfig;
         }
         
-        console.log('[EXAM SUBMIT] Final resultData before setting state:', {
-          score: resultData.score,
-          total_points: resultData.total_points,
-          percentage: resultData.percentage,
-          passed: resultData.passed
-        });
 
         // Ensure selectedExam has the latest total_points from exams list
         // This is important because total_points is calculated from blueprint in getStudentExams
@@ -2514,7 +2269,6 @@ const StudentExams = () => {
                 ...prev,
                 total_points: updatedExam.total_points
               }));
-              console.log('[EXAM SUBMIT] ✅ Updated selectedExam.total_points from exams list:', updatedExam.total_points);
             }
             
             setExams(finalExams);
@@ -2533,92 +2287,6 @@ const StudentExams = () => {
         // Restart auto-refresh after exam submission
         startAutoRefresh();
         
-        // Notify IMS EXAM PCTU app that exam has been submitted (if exam was taken in app)
-        // This will disable fullscreen/kiosk and show countdown
-        const urlParams = new URLSearchParams(window.location.search);
-        const fromApp = urlParams.get('fromApp') === 'true' || urlParams.get('inApp') === 'true';
-        
-        if (fromApp && (selectedExam?.ims_exam_pctu_required === true || selectedExam?.ims_exam_pctu_required === 1)) {
-          try {
-            // Notify Electron app that exam has been submitted
-            await fetch('http://localhost:8765/exam-submitted', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                examId: selectedExam?.exam_id,
-                attemptId: attemptId
-              })
-            });
-            console.log('[EXAM SUBMIT] ✅ Notified IMS EXAM PCTU app about exam submission');
-          } catch (error) {
-            console.warn('[EXAM SUBMIT] Could not notify IMS EXAM PCTU app (may not be running):', error);
-            // Ignore error - app might already be closed or not running
-          }
-        }
-        
-        // Stop exam window in IMS EXAM PCTU if required and remove keyboard blocking script
-        if (selectedExam?.ims_exam_pctu_required === true || selectedExam?.ims_exam_pctu_required === 1) {
-          try {
-            await fetch('http://localhost:8765/stop-exam', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({})
-            });
-            
-            // Remove keyboard blocking script
-            const scriptElement = document.getElementById('ims-exam-pctu-keyboard-block');
-            if (scriptElement) {
-              // Try to call cleanup function if available
-              try {
-                if (window.imsExamPCTUCleanup) {
-                  window.imsExamPCTUCleanup();
-                  delete window.imsExamPCTUCleanup;
-                }
-              } catch (e) {
-                console.warn('Error calling cleanup function:', e);
-              }
-              scriptElement.remove();
-              
-              // Also remove DevTools warning if present
-              const devToolsWarning = document.getElementById('ims-exam-pctu-devtools-warning');
-              if (devToolsWarning) {
-                devToolsWarning.remove();
-              }
-              
-              console.log('[EXAM SUBMIT] ✅ Keyboard blocking script removed');
-            }
-          } catch (error) {
-            console.error('Error stopping exam window in IMS EXAM PCTU:', error);
-            // Ignore error - app might already be closed
-          }
-        } else {
-          // Remove keyboard blocking script even if IMS EXAM PCTU is not required
-          const scriptElement = document.getElementById('ims-exam-pctu-keyboard-block');
-          if (scriptElement) {
-            // Try to call cleanup function if available
-            try {
-              if (window.imsExamPCTUCleanup) {
-                window.imsExamPCTUCleanup();
-                delete window.imsExamPCTUCleanup;
-              }
-            } catch (e) {
-              console.warn('Error calling cleanup function:', e);
-            }
-            scriptElement.remove();
-            
-            // Also remove DevTools warning if present
-            const devToolsWarning = document.getElementById('ims-exam-pctu-devtools-warning');
-            if (devToolsWarning) {
-              devToolsWarning.remove();
-            }
-            
-            console.log('[EXAM SUBMIT] ✅ Keyboard blocking script removed');
-          }
-        }
       }
     } catch (error) {
       console.error('Error submitting exam:', error);
@@ -2670,9 +2338,7 @@ const StudentExams = () => {
       // For other events, queue and batch send
       if (sendImmediately || severity === 'high') {
         try {
-          console.log('🚨 Sending cheating log immediately:', eventType, logData);
           await api.post(`/lms/attempts/${currentAttempt.attempt_id}/cheating-logs`, logData);
-          console.log('✅ Cheating log sent successfully:', eventType);
         } catch (error) {
           console.error('❌ Error sending cheating log immediately:', error);
           // If immediate send fails, add to queue for retry
@@ -2707,13 +2373,10 @@ const StudentExams = () => {
     const logsToSend = [...cheatingLogQueueRef.current];
     cheatingLogQueueRef.current = [];
 
-    console.log(`📤 Processing cheating log queue: ${logsToSend.length} logs`);
 
     for (const logData of logsToSend) {
       try {
-        console.log('📤 Sending queued cheating log:', logData.event_type);
         const response = await api.post(`/lms/attempts/${attempt.attempt_id}/cheating-logs`, logData);
-        console.log('✅ Queued cheating log sent successfully:', logData.event_type, response.data);
       } catch (error) {
         console.error('❌ Error sending queued cheating log:', logData.event_type, error);
         // Re-queue failed logs
@@ -2727,17 +2390,9 @@ const StudentExams = () => {
     const attempt = attemptDataParam || currentAttempt;
 
     if (!attempt || !attempt.attempt_id || isTrackingActiveRef.current) {
-      console.log('⚠️ Cannot start cheating detection:', {
-        hasAttempt: !!attempt,
-        attemptId: attempt?.attempt_id,
-        isTrackingActive: isTrackingActiveRef.current,
-        attemptDataParam: !!attemptDataParam,
-        currentAttempt: !!currentAttempt
-      });
       return;
     }
 
-    console.log('🚀 Starting cheating detection for attempt:', attempt.attempt_id);
 
     // Store attempt reference for event handlers
     const attemptRef = attempt;
@@ -2766,9 +2421,7 @@ const StudentExams = () => {
         // For other events, queue and batch send
         if (sendImmediately || severity === 'high') {
           try {
-            console.log('🚨 Sending cheating log immediately:', eventType, logData);
             const response = await api.post(`/lms/attempts/${attemptRef.attempt_id}/cheating-logs`, logData);
-            console.log('✅ Cheating log sent successfully:', eventType, response.data);
           } catch (error) {
             // Check if it's a CSRF error (403) - api.js should handle retry automatically
             if (error.response?.status === 403) {
@@ -2836,7 +2489,6 @@ const StudentExams = () => {
 
     const handleVisibilityChange = () => {
       if (!isTrackingActiveRef.current) {
-        console.log('⚠️ Visibility change detected but tracking is not active');
         return;
       }
 
@@ -2844,22 +2496,11 @@ const StudentExams = () => {
       const isHidden = document.hidden;
       const visibilityState = document.visibilityState;
 
-      console.log('👁️ Visibility change:', {
-        hidden: isHidden,
-        visibilityState: visibilityState,
-        attemptId: attemptRef?.attempt_id
-      });
-
       if (isHidden) {
         // Tab bị ẩn - user chuyển tab
         // Lưu thời điểm tab bị ẩn để tính thời gian khi tab được hiển thị lại
         lastVisibilityChangeRef.current = now;
         tabSwitchCountRef.current += 1;
-
-        console.log('🔴 Tab hidden - Tab switch detected:', {
-          switchCount: tabSwitchCountRef.current,
-          attemptId: attemptRef?.attempt_id
-        });
 
         // Hiển thị thông báo phát hiện gian lận
         showAlert(t('studentExams.warnings.cheatingTabSwitch'), 'danger', t('studentExams.warnings.cheatingTabSwitch'));
@@ -2882,12 +2523,6 @@ const StudentExams = () => {
 
         // Chỉ log nếu có thời gian ẩn hợp lệ (lớn hơn 0)
         if (hiddenDuration > 0) {
-          console.log('🟢 Tab visible - User returned to tab after:', {
-            duration: Math.round(hiddenDuration / 1000),
-            seconds: Math.round(hiddenDuration / 1000),
-            attemptId: attemptRef?.attempt_id
-          });
-
           // Hiển thị thông báo phát hiện gian lận
           showAlert(t('studentExams.warnings.cheatingReturned', { seconds: Math.round(hiddenDuration / 1000) }), 'danger', t('studentExams.warnings.cheatingReturned', { seconds: Math.round(hiddenDuration / 1000) }));
 
@@ -2917,7 +2552,6 @@ const StudentExams = () => {
       // Save time remaining immediately when window loses focus (in case of crash)
       saveTimeRemaining();
 
-      console.log('🔴 Window blur - Window lost focus');
 
       // Hiển thị thông báo phát hiện gian lận
       showAlert(t('studentExams.warnings.cheatingWindowBlur'), 'danger', t('studentExams.warnings.cheatingWindowBlur'));
@@ -2936,8 +2570,6 @@ const StudentExams = () => {
 
     const handleWindowFocus = () => {
       if (!isTrackingActiveRef.current) return;
-
-      console.log('🟢 Window focus - Window gained focus');
 
       logCheatingEventWithAttempt(
         'window_focus',
@@ -3121,6 +2753,7 @@ const StudentExams = () => {
     // No need to fetch again here to avoid infinite loop
 
     return (
+      <>
       <div className="container-fluid exam-container">
         {/* Exam Header */}
         <div className="exam-header">
@@ -3523,6 +3156,49 @@ const StudentExams = () => {
           )}
         </div>
       </div>
+      {/* Stack modal: cũ đẩy lên trên, mới nhất ở dưới */}
+      {showProctorMessageModal && (
+        <div
+          ref={(el) => { proctorStackRef.current = el; if (el) setProctorStackContainer(el); }}
+          className="proctor-message-stack-wrapper"
+        >
+          <div className="proctor-message-stack-backdrop" />
+          {proctorStackContainer && proctorMessageQueue.map((item, index) => {
+            const indexClass = `proctor-message-modal-index-${Math.min(index, 5)}`;
+            return (
+              <Modal
+                key={item.id}
+                show
+                backdrop={false}
+                centered
+                container={proctorStackContainer}
+                className={`proctor-message-modal ${indexClass}`}
+                dialogClassName="proctor-message-modal-dialog"
+                contentClassName="proctor-message-modal-content"
+                style={{ zIndex: index + 1 }}
+              >
+                <Modal.Header className="proctor-message-modal-header border-0 pb-0">
+                  <Modal.Title className="d-flex align-items-center">
+                    {t('studentExams.proctorMessage', 'Thông báo từ giám thị')}
+                    {proctorMessageQueue.length > 1 && (
+                      <Badge bg="secondary" className="ms-2">{index + 1}/{proctorMessageQueue.length}</Badge>
+                    )}
+                  </Modal.Title>
+                </Modal.Header>
+                <Modal.Body className="proctor-message-modal-body pt-2">
+                  <div className="proctor-message-text">{item.message}</div>
+                </Modal.Body>
+                <Modal.Footer className="proctor-message-modal-footer border-0 pt-0">
+                  <Button variant="primary" onClick={() => setProctorMessageQueue((prev) => prev.filter((_, i) => i !== index))} className="px-4">
+                    <i className="fas fa-check me-2"></i>Đã đọc
+                  </Button>
+                </Modal.Footer>
+              </Modal>
+            );
+          })}
+        </div>
+      )}
+      </>
     );
   }
 
@@ -3589,13 +3265,7 @@ const StudentExams = () => {
     }
     
     // Debug: Log results data
-    console.log('[EXAM RESULTS] Results data:', {
-      score: results.score,
-      total_points: results.total_points,
-      percentage: results.percentage,
-      selectedExam_total_points: selectedExam?.total_points,
-      selectedExam_exam_id: selectedExam?.exam_id
-    });
+    
     
     const score = parseFloat(results.score || 0);
     
@@ -3606,19 +3276,15 @@ const StudentExams = () => {
     let totalPoints = 0;
     if (selectedExam && selectedExam.total_points && parseFloat(selectedExam.total_points) > 0) {
       totalPoints = parseFloat(selectedExam.total_points);
-      console.log('[EXAM RESULTS] ✅ Using total_points from selectedExam:', totalPoints);
     } else if (results.total_points && parseFloat(results.total_points) > 0) {
       totalPoints = parseFloat(results.total_points);
-      console.log('[EXAM RESULTS] ⚠️ Using total_points from results (selectedExam not available or 0):', totalPoints);
     } else {
       // Last resort: try to find exam from exams list
       const examFromList = exams.find(exam => exam.exam_id === selectedExam?.exam_id);
       if (examFromList && examFromList.total_points && parseFloat(examFromList.total_points) > 0) {
         totalPoints = parseFloat(examFromList.total_points);
-        console.log('[EXAM RESULTS] ✅ Using total_points from exams list:', totalPoints);
       } else {
         totalPoints = 0;
-        console.warn('[EXAM RESULTS] ⚠️ Could not find valid total_points, using 0');
       }
     }
 
@@ -4076,21 +3742,22 @@ const StudentExams = () => {
         </Card>
       ) : (
         <div className="session-table-container">
-          <table className="session-table">
-            <thead>
-              <tr>
-                <th>{t('studentExams.tableHeaders.name')}</th>
-                <th>{t('studentExams.tableHeaders.type')}</th>
-                <th>{t('studentExams.tableHeaders.timeRange')}</th>
-                <th>{t('studentExams.tableHeaders.duration')}</th>
-                <th>{t('studentExams.tableHeaders.score')}</th>
-                <th>{t('studentExams.tableHeaders.completed')}</th>
-                <th>{t('studentExams.tableHeaders.status')}</th>
-                <th>{t('studentExams.tableHeaders.actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {exams.map((exam) => {
+          <div className="table-responsive-mobile">
+            <table className="session-table">
+              <thead>
+                <tr>
+                  <th className="mobile-essential">{t('studentExams.tableHeaders.name')}</th>
+                  <th className="mobile-essential">{t('studentExams.tableHeaders.type')}</th>
+                  <th className="mobile-essential">{t('studentExams.tableHeaders.timeRange')}</th>
+                  <th className="mobile-essential">{t('studentExams.tableHeaders.duration')}</th>
+                  <th className="mobile-essential">{t('studentExams.tableHeaders.score')}</th>
+                  <th className="mobile-essential">{t('studentExams.tableHeaders.completed')}</th>
+                  <th className="mobile-essential">{t('studentExams.tableHeaders.status')}</th>
+                  <th className="mobile-essential">{t('studentExams.tableHeaders.actions')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {exams.map((exam) => {
                 // Kiểm tra nếu exam đang mở (badge success) để thêm class animation
                 const now = new Date();
                 const start = exam.available_from ? new Date(exam.available_from) :
@@ -4101,17 +3768,19 @@ const StudentExams = () => {
                 const isLive = isApproved && start && now >= start && (!end || now <= end);
                 // Kiểm tra xem kỳ thi đã kết thúc chưa
                 const isExamEnded = end && now > end;
+                // Kiểm tra kỳ thi chưa mở
+                const isNotOpened = start && now < start;
 
                 return (
                   <tr key={exam.exam_id} className={isLive ? 'live-exam-row' : ''}>
-                    <td>
+                    <td className="mobile-essential">
                       <strong>{exam.exam_title}</strong>
                       {exam.exam_description && (
                         <div className="text-muted small">{exam.exam_description}</div>
                       )}
                     </td>
-                    <td>{getTypeBadge(exam.exam_type)}</td>
-                    <td>
+                    <td className="mobile-essential">{getTypeBadge(exam.exam_type)}</td>
+                    <td className="mobile-essential">
                       {exam.available_from ? (
                         <div>
                           <div>
@@ -4141,8 +3810,8 @@ const StudentExams = () => {
                         <span className="text-muted">-</span>
                       )}
                     </td>
-                    <td>{t('studentExams.examInfo.minutes', { minutes: exam.duration_minutes || 0 })}</td>
-                    <td>
+                    <td className="mobile-essential">{exam.duration_minutes ?? 0} {t('studentExams.examInfo.minutes')}</td>
+                    <td className="mobile-essential">
                       {exam.best_score !== null && exam.best_score !== undefined ? (
                         (() => {
                           // Calculate percentage: (best_score / total_points) * 100
@@ -4163,7 +3832,7 @@ const StudentExams = () => {
                         <span className="text-muted">{t('studentExams.completed.notCompleted')}</span>
                       )}
                     </td>
-                    <td>
+                    <td className="mobile-essential">
                       {exam.time_spent_seconds !== null && exam.time_spent_seconds !== undefined ? (
                         <div>
                           <strong>{formatTimeSpent(exam.time_spent_seconds)}</strong>
@@ -4183,12 +3852,12 @@ const StudentExams = () => {
                         </span>
                       )}
                     </td>
-                    <td>{getStatusBadge(exam)}</td>
-                    <td>
+                    <td className="mobile-essential">{getStatusBadge(exam)}</td>
+                    <td className="mobile-essential">
                       <button
                         className="shimmer-button group"
                         onClick={() => handleStartExam(exam)}
-                        disabled={!exam.is_approved || isExamEnded}
+                        disabled={!exam.is_approved || isExamEnded || isNotOpened}
                         style={{
                           '--spread': '90deg',
                           '--shimmer-color': '#ffffff',
@@ -4225,6 +3894,7 @@ const StudentExams = () => {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -4235,6 +3905,13 @@ const StudentExams = () => {
         setPasswordError('');
         setRequiresPassword(false);
         setWebcamModalError('');
+        setMediaReady(false);
+        setMediaCheckError('');
+        setMediaChecking(false);
+        if (preflightMediaStreamRef.current) {
+          preflightMediaStreamRef.current.getTracks().forEach(track => track.stop());
+          preflightMediaStreamRef.current = null;
+        }
         // Restart auto-refresh when closing modal without starting exam
         if (!currentAttempt) {
           startAutoRefresh();
@@ -4253,72 +3930,7 @@ const StudentExams = () => {
         </Modal.Header>
         <Modal.Body className="student-detail-body">
           <div className="student-detail-container">
-            {/* Exam Information Card */}
-            <div className="session-card mb-4">
-              <div className="card-header-modern">
-                <div className="header-icon">
-                  <i className="fas fa-info-circle"></i>
-                </div>
-                <h6 className="mb-0">{t('studentExams.startModal.examInfoTitle')}</h6>
-              </div>
-
-
-
-              <div className="card-body-modern">
-                <div className="info-item">
-                  <div className="info-label">
-                    <i className="fas fa-clock me-2"></i>
-                    {t('studentExams.examInfo.duration')}
-                  </div>
-                  <div className="info-value">
-                    <Badge bg="primary" className="fs-6">
-                      {t('studentExams.examInfo.minutes', { minutes: selectedExam?.duration_minutes || 0 })}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="info-item">
-                  <div className="info-label">
-                    <i className="fas fa-star me-2"></i>
-                    {t('studentExams.examInfo.totalPoints')}
-                  </div>
-                  <div className="info-value">
-                    <Badge bg="success" className="fs-6">
-                      {t('studentExams.examInfo.points', { points: formatNumber(selectedExam?.total_points || 0) })}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="info-item">
-                  <div className="info-label">
-                    <i className="fas fa-check-circle me-2"></i>
-                    {t('studentExams.examInfo.passingScore')}
-                  </div>
-                  <div className="info-value">
-                    <Badge bg="warning" className="fs-6">
-                      {Math.round(selectedExam?.passing_score || 0)}{t('studentExams.examInfo.percent')}
-                    </Badge>
-                  </div>
-                </div>
-                {selectedExam?.exam_type && (
-                  <div className="info-item">
-                    <div className="info-label">
-                      <i className="fas fa-tag me-2"></i>
-                      {t('studentExams.examInfo.examType')}
-                    </div>
-                    <div className="info-value">
-                      <Badge bg="info" className="fs-6">
-                        {selectedExam.exam_type === 'midterm' ? t('studentExams.types.midterm') :
-                          selectedExam.exam_type === 'final' ? t('studentExams.types.final') :
-                            selectedExam.exam_type === 'quiz' ? t('studentExams.types.quiz') :
-                              selectedExam.exam_type === 'assignment' ? t('studentExams.types.practice') :
-                                selectedExam.exam_type}
-                      </Badge>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Webcam error - show separately from password */}
+            {/* Webcam error - full width above 2 columns */}
             {webcamModalError && (
               <Alert variant="danger" className="mb-4">
                 <div className="d-flex align-items-center">
@@ -4329,6 +3941,138 @@ const StudentExams = () => {
                 </div>
               </Alert>
             )}
+
+            {/* Thông tin kỳ thi | Webcam & Mic — 2 cột 1 hàng */}
+            <Row className="g-3 mb-4">
+              {/* Cột 1: Thông tin kỳ thi */}
+              <Col xs={12} md={selectedExam?.webcam_required === true || selectedExam?.webcam_required === 1 ? 6 : 12}>
+                <div className="session-card h-100">
+                  <div className="card-header-modern">
+                    <div className="header-icon">
+                      <i className="fas fa-info-circle"></i>
+                    </div>
+                    <h6 className="mb-0">{t('studentExams.startModal.examInfoTitle')}</h6>
+                  </div>
+                  <div className="card-body-modern">
+                    <div className="info-item">
+                      <div className="info-label">
+                        <i className="fas fa-clock me-2"></i>
+                        {t('studentExams.examInfo.duration')}
+                      </div>
+                      <div className="info-value">
+                        <Badge bg="primary" className="fs-6">
+                          {selectedExam?.duration_minutes ?? 0} {t('studentExams.examInfo.minutes')}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="info-item">
+                      <div className="info-label">
+                        <i className="fas fa-star me-2"></i>
+                        {t('studentExams.examInfo.totalPoints')}
+                      </div>
+                      <div className="info-value">
+                        <Badge bg="success" className="fs-6">
+                          {formatNumber(selectedExam?.total_points ?? 0)} {t('studentExams.examInfo.points')}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="info-item">
+                      <div className="info-label">
+                        <i className="fas fa-check-circle me-2"></i>
+                        {t('studentExams.examInfo.passingScore')}
+                      </div>
+                      <div className="info-value">
+                        <Badge bg="warning" className="fs-6">
+                          {Math.round(selectedExam?.passing_score ?? 0)}{t('studentExams.examInfo.percent')}
+                        </Badge>
+                      </div>
+                    </div>
+                    {selectedExam?.exam_type && (
+                      <div className="info-item">
+                        <div className="info-label">
+                          <i className="fas fa-tag me-2"></i>
+                          {t('studentExams.examInfo.examType')}
+                        </div>
+                        <div className="info-value">
+                          <Badge bg="info" className="fs-6">
+                            {selectedExam.exam_type === 'midterm' ? t('studentExams.types.midterm') :
+                              selectedExam.exam_type === 'final' ? t('studentExams.types.final') :
+                                selectedExam.exam_type === 'quiz' ? t('studentExams.types.quiz') :
+                                  selectedExam.exam_type === 'assignment' ? t('studentExams.types.practice') :
+                                    selectedExam.exam_type}
+                          </Badge>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Col>
+
+              {/* Cột 2: Webcam & Mic (chỉ khi kỳ thi yêu cầu webcam) */}
+              {(selectedExam?.webcam_required === true || selectedExam?.webcam_required === 1) && (
+                <Col xs={12} md={6}>
+                  <div className="session-card h-100">
+                    <div className="card-header-modern">
+                      <div className="header-icon">
+                        <i className="fas fa-video"></i>
+                      </div>
+                      <h6 className="mb-0">Webcam &amp; Mic</h6>
+                    </div>
+                    <div className="card-body-modern">
+                      <p className="mb-3 text-muted small">
+                        Để bắt đầu làm bài, vui lòng bật webcam và micro để hệ thống kiểm tra thiết bị đang hoạt động ổn định.
+                      </p>
+
+                      {mediaCheckError && (
+                        <Alert variant="danger" className="mb-3">
+                          <div className="d-flex align-items-center">
+                            <i className="fas fa-exclamation-triangle me-2"></i>
+                            <div>{mediaCheckError}</div>
+                          </div>
+                        </Alert>
+                      )}
+
+                      <div className="d-flex flex-column flex-sm-row align-items-start align-items-sm-center justify-content-between gap-2">
+                        <div>
+                          <div className="fw-bold mb-1 small">
+                            Trạng thái thiết bị:
+                          </div>
+                          {mediaReady ? (
+                            <span className="badge bg-success">
+                              <i className="fas fa-check-circle me-1"></i> Đã bật webcam &amp; mic
+                            </span>
+                          ) : (
+                            <span className="badge bg-secondary">
+                              <i className="fas fa-circle-notch me-1"></i> Chưa bật webcam &amp; mic
+                            </span>
+                          )}
+                        </div>
+                        <Button
+                          variant={mediaReady ? 'outline-primary' : 'primary'}
+                          size="sm"
+                          onClick={handlePreflightMediaCheck}
+                          disabled={mediaChecking}
+                        >
+                          {mediaChecking ? (
+                            <>
+                              <Spinner animation="border" size="sm" className="me-2" /> Đang kiểm tra...
+                            </>
+                          ) : (
+                            <>
+                              <i className="fas fa-video me-2"></i> Bật webcam và mic
+                            </>
+                          )}
+                        </Button>
+                      </div>
+
+                      <Form.Text className="text-muted d-block mt-2 small">
+                        Nếu bạn tắt webcam hoặc mic trong quá trình làm bài, hệ thống sẽ tự động kết thúc và cấm thi bài làm này.
+                      </Form.Text>
+                    </div>
+                  </div>
+                </Col>
+              )}
+            </Row>
 
             {/* Password input if required (only show if not webcam error) */}
             {!webcamModalError && (requiresPassword || selectedExam?.exam_password) && (
@@ -4396,19 +4140,50 @@ const StudentExams = () => {
                     </div>
                   ) : imsExamPctuFiles.length > 0 ? (
                     <>
-                      {/* Header với số lượng file */}
-                      <div className="d-flex align-items-center justify-content-between mb-3">
-                        <h6 className="fw-bold mb-0">
-                          <i className="fas fa-folder-open me-2 text-primary"></i>
-                          {t('studentExams.startModal.versions')}
-                        </h6>
-                        <span className="badge bg-primary bg-opacity-10 text-primary px-3 py-2">
-                          {t('studentExams.startModal.versionCount', { count: imsExamPctuFiles.length })}
-                        </span>
-                      </div>
-                      
-                      <div className="file-grid">
-                        {imsExamPctuFiles.map((file, index) => (
+                      {(() => {
+                        const primaryFile = imsExamPctuFiles.find((f) => f.isPrimary) || imsExamPctuFiles[0];
+                        const otherFiles = imsExamPctuFiles.filter((f) => f.name !== primaryFile?.name);
+
+                        return (
+                          <>
+                            <div className="modern-alert modern-alert-success mb-3">
+                              <div className="d-flex align-items-start justify-content-between flex-wrap gap-3">
+                                <div>
+                                  <h6 className="fw-bold mb-1">
+                                    <i className="fas fa-star me-2"></i>
+                                    {t('studentExams.startModal.primarySoftware')}
+                                  </h6>
+                                  <div className="small text-muted">
+                                    {primaryFile?.name}
+                                  </div>
+                                </div>
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  onClick={async (e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    await handleDownloadImsExamClient(primaryFile);
+                                  }}
+                                >
+                                  <i className="fas fa-download me-2"></i>
+                                  {t('studentExams.startModal.download')}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="d-flex align-items-center justify-content-between mb-3">
+                              <h6 className="fw-bold mb-0">
+                                <i className="fas fa-folder-open me-2 text-primary"></i>
+                                {t('studentExams.startModal.versions')}
+                              </h6>
+                              <span className="badge bg-primary bg-opacity-10 text-primary px-3 py-2">
+                                {t('studentExams.startModal.versionCount', { count: imsExamPctuFiles.length })}
+                              </span>
+                            </div>
+
+                            {otherFiles.length > 0 && (
+                              <div className="file-grid">
+                                {otherFiles.map((file, index) => (
                           <div key={index} className="file-card">
                             {/* File header */}
                             <div className="file-header">
@@ -4422,113 +4197,7 @@ const StudentExams = () => {
                                   onClick={async (e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    
-                                    // #region agent log
-                                    fetch('http://127.0.0.1:7242/ingest/2089b47a-5a22-45c6-a7dc-d1cf43a51708',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'StudentExams.js:3477',message:'Download started',data:{fileName:file.name,fileUrl:file.downloadUrl},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-                                    // #endregion
-                                    
-                                    try {
-                                      const token = localStorage.getItem('token');
-                                      const fileUrl = `${window.location.origin}${file.downloadUrl}`;
-                                      
-                                      // #region agent log
-                                      fetch('http://127.0.0.1:7242/ingest/2089b47a-5a22-45c6-a7dc-d1cf43a51708',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'StudentExams.js:3486',message:'Fetch request initiated',data:{fileUrl,hasToken:!!token,tokenLength:token?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-                                      // #endregion
-                                      
-                                      // Fetch file with authentication, then create blob URL for download
-                                      // Add timeout and better error handling for large files
-                                      const controller = new AbortController();
-                                      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
-                                      
-                                      const response = await fetch(fileUrl, {
-                                        method: 'GET',
-                                        headers: {
-                                          'x-auth-token': token || ''
-                                        },
-                                        signal: controller.signal
-                                      });
-                                      
-                                      clearTimeout(timeoutId);
-                                      
-                                      // #region agent log
-                                      console.log('[DOWNLOAD] Response received:', {
-                                        status: response.status,
-                                        statusText: response.statusText,
-                                        ok: response.ok,
-                                        contentType: response.headers.get('content-type'),
-                                        contentLength: response.headers.get('content-length')
-                                      });
-                                      // #endregion
-                                      
-                                      // Accept both 200 and 206 status codes
-                                      if (!response.ok && response.status !== 200 && response.status !== 206) {
-                                        // #region agent log
-                                        fetch('http://127.0.0.1:7242/ingest/2089b47a-5a22-45c6-a7dc-d1cf43a51708',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'StudentExams.js:3497',message:'Response status check failed',data:{status:response.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-                                        // #endregion
-                                        throw new Error(t('studentExams.errors.cannotLoadFile', { status: response.status }));
-                                      }
-                                      
-                                      // #region agent log
-                                      console.log('[DOWNLOAD] Starting blob creation...');
-                                      // #endregion
-                                      
-                                      // Get blob from response (works with both 200 and 206)
-                                      // For large files, this may take time - track progress
-                                      const reader = response.body.getReader();
-                                      const chunks = [];
-                                      let receivedLength = 0;
-                                      
-                                      while (true) {
-                                        const { done, value } = await reader.read();
-                                        if (done) break;
-                                        chunks.push(value);
-                                        receivedLength += value.length;
-                                        
-                                        // Log progress every 10MB
-                                        if (receivedLength % (10 * 1024 * 1024) < value.length) {
-                                          console.log(`[DOWNLOAD] Progress: ${(receivedLength / 1024 / 1024).toFixed(2)} MB`);
-                                        }
-                                      }
-                                      
-                                      // Combine all chunks into a single blob
-                                      const blob = new Blob(chunks);
-                                      
-                                      // #region agent log
-                                      console.log('[DOWNLOAD] Blob created:', {
-                                        blobSize: blob.size,
-                                        blobType: blob.type,
-                                        receivedLength
-                                      });
-                                      // #endregion
-                                      
-                                      const blobUrl = URL.createObjectURL(blob);
-                                      
-                                      // #region agent log
-                                      fetch('http://127.0.0.1:7242/ingest/2089b47a-5a22-45c6-a7dc-d1cf43a51708',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'StudentExams.js:3508',message:'Blob URL created',data:{blobUrl},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-                                      // #endregion
-                                      
-                                      // Create download link
-                                      const link = document.createElement('a');
-                                      link.href = blobUrl;
-                                      link.download = file.name;
-                                      document.body.appendChild(link);
-                                      link.click();
-                                      document.body.removeChild(link);
-                                      
-                                      // #region agent log
-                                      fetch('http://127.0.0.1:7242/ingest/2089b47a-5a22-45c6-a7dc-d1cf43a51708',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'StudentExams.js:3516',message:'Download link clicked',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-                                      // #endregion
-                                      
-                                      // Clean up blob URL
-                                      setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
-                                      showAlert(t('studentExams.success.fileDownloading'), 'success');
-                                    } catch (error) {
-                                      // #region agent log
-                                      fetch('http://127.0.0.1:7242/ingest/2089b47a-5a22-45c6-a7dc-d1cf43a51708',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'StudentExams.js:3522',message:'Error caught',data:{errorName:error.name,errorMessage:error.message,errorStack:error.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-                                      // #endregion
-                                      console.error('Lỗi khi tải file:', error);
-                                      showAlert(error.message || t('studentExams.errors.downloadError'), 'danger');
-                                    }
+                                    await handleDownloadImsExamClient(file);
                                   }}
                                 >
                                   <i className="fas fa-download"></i>
@@ -4557,8 +4226,12 @@ const StudentExams = () => {
                               </div>
                             </div>
                           </div>
-                        ))}
-                      </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </>
                   ) : (
                     <div className="text-center text-muted p-4">
@@ -4591,6 +4264,13 @@ const StudentExams = () => {
               setPasswordError('');
               setRequiresPassword(false);
               setWebcamModalError('');
+        setMediaReady(false);
+        setMediaCheckError('');
+        setMediaChecking(false);
+        if (preflightMediaStreamRef.current) {
+          preflightMediaStreamRef.current.getTracks().forEach(track => track.stop());
+          preflightMediaStreamRef.current = null;
+        }
               // Restart auto-refresh when canceling
               if (!currentAttempt) {
                 startAutoRefresh();
@@ -4604,6 +4284,9 @@ const StudentExams = () => {
           <button
             className="shimmer-button group"
             onClick={confirmStartExam}
+            disabled={
+              (selectedExam?.webcam_required === true || selectedExam?.webcam_required === 1) && !mediaReady
+            }
             style={{
               '--spread': '90deg',
               '--shimmer-color': '#ffffff',
@@ -4788,6 +4471,49 @@ const StudentExams = () => {
           )}
         </Modal.Body>
       </Modal>
+
+      {/* Stack modal: cũ đẩy lên trên, mới nhất ở dưới */}
+      {showProctorMessageModal && (
+        <div
+          ref={(el) => { proctorStackRef.current = el; if (el) setProctorStackContainer(el); }}
+          className="proctor-message-stack-wrapper"
+        >
+          <div className="proctor-message-stack-backdrop" />
+          {proctorStackContainer && proctorMessageQueue.map((item, index) => {
+            const indexClass = `proctor-message-modal-index-${Math.min(index, 5)}`;
+            return (
+              <Modal
+                key={item.id}
+                show
+                backdrop={false}
+                centered
+                container={proctorStackContainer}
+                className={`proctor-message-modal ${indexClass}`}
+                dialogClassName="proctor-message-modal-dialog"
+                contentClassName="proctor-message-modal-content"
+                style={{ zIndex: index + 1 }}
+              >
+                <Modal.Header className="proctor-message-modal-header border-0 pb-0">
+                  <Modal.Title className="d-flex align-items-center">
+                    {t('studentExams.proctorMessage', 'Thông báo từ giám thị')}
+                    {proctorMessageQueue.length > 1 && (
+                      <Badge bg="secondary" className="ms-2">{index + 1}/{proctorMessageQueue.length}</Badge>
+                    )}
+                  </Modal.Title>
+                </Modal.Header>
+                <Modal.Body className="proctor-message-modal-body pt-2">
+                  <div className="proctor-message-text">{item.message}</div>
+                </Modal.Body>
+                <Modal.Footer className="proctor-message-modal-footer border-0 pt-0">
+                  <Button variant="primary" onClick={() => setProctorMessageQueue((prev) => prev.filter((_, i) => i !== index))} className="px-4">
+                    <i className="fas fa-check me-2"></i>Đã đọc
+                  </Button>
+                </Modal.Footer>
+              </Modal>
+            );
+          })}
+        </div>
+      )}
 
     </div>
   );

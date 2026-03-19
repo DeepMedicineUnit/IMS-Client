@@ -1,9 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Form, Button, Container, Row, Col, Alert, InputGroup, ProgressBar, Tab, Tabs, Modal } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthContext';
+
+const DOTLOTTIE_SCRIPT = 'https://unpkg.com/@lottiefiles/dotlottie-wc@0.8.5/dist/dotlottie-wc.js';
+const ensureDotlottie = () => {
+  if (typeof document === 'undefined') return;
+  if (document.querySelector(`script[src="${DOTLOTTIE_SCRIPT}"]`)) return;
+  const s = document.createElement('script');
+  s.type = 'module';
+  s.src = DOTLOTTIE_SCRIPT;
+  document.head.appendChild(s);
+};
 import { useTranslation } from 'react-i18next';
 import { User, Mail, Lock, Eye, EyeOff, CheckCircle, AlertTriangle, Save, Bell, FileText, Shield, Upload, RotateCcw, MapPin, Phone, Building, RefreshCcw, Camera, X, Calendar } from 'lucide-react';
 import usePageTitle from '../../hooks/usePageTitle';
+import { getUploadsBaseURL } from '../../utils/api';
 import '../../styles/auth.css';
 import '../../styles/modern-ui.css';
 
@@ -72,6 +83,7 @@ const ProfilePage = () => {
     hasSpecialChar: false
   });
 
+  useEffect(() => { ensureDotlottie(); }, []);
   useEffect(() => {
     setMounted(true);
     if (currentUser) {
@@ -1178,7 +1190,7 @@ const ProfilePage = () => {
                         />
                       ) : currentUser?.profile_picture ? (
                         <img
-                          src={currentUser.profile_picture.startsWith('http') ? currentUser.profile_picture : `${window.location.origin}${currentUser.profile_picture}`}
+                          src={currentUser.profile_picture.startsWith('http') ? currentUser.profile_picture : `${getUploadsBaseURL()}${currentUser.profile_picture}`}
                           alt="Profile"
                           className="profile-picture"
                           onError={(e) => {
@@ -1232,7 +1244,7 @@ const ProfilePage = () => {
             <Col md={6}>
               <div className="modern-card h-100">
                 <div className="p-4">
-                  <h5 className="fw-bold mb-2">{t('profile.faceRecognition')}</h5>
+                  <h5 className="fw-bold mb-0">{t('profile.faceRecognition')}</h5>
                   
                   {faceCaptureError && (
                     <div className="modern-alert modern-alert-danger mb-3">
@@ -1263,7 +1275,7 @@ const ProfilePage = () => {
                               <img
                                 src={faceSampleImage.startsWith('http') 
                                   ? faceSampleImage 
-                                  : `${window.location.origin}${faceSampleImage}`}
+                                  : `${getUploadsBaseURL()}${faceSampleImage}`}
                                 alt="Face Sample"
                                 onClick={() => setShowImageModal(true)}
                                 style={{
@@ -1313,7 +1325,7 @@ const ProfilePage = () => {
                           <div className="text-muted small text-center d-flex align-items-center justify-content-center gap-1">
                             <Calendar size={14} />
                             <span>
-                              {t('profile.registeredAt')}: {new Date(faceSampleRegisteredAt).toLocaleDateString(i18n.language === 'vi' ? 'vi-VN' : i18n.language === 'hi' ? 'hi-IN' : 'en-US', {
+                              {t('profile.registeredAt')}: {new Date(faceSampleRegisteredAt).toLocaleDateString(i18n.language === 'vi' ? 'vi-VN' : 'en-US', {
                                 year: 'numeric',
                                 month: 'long',
                                 day: 'numeric',
@@ -1408,12 +1420,11 @@ const ProfilePage = () => {
                       )}
                     </div>
                   ) : (
-                    <div className="text-center">
-                      <div className="d-flex flex-column align-items-center">
-                        <div className="rounded-circle bg-warning bg-opacity-10 d-inline-flex align-items-center justify-content-center mb-3" style={{ width: '80px', height: '80px' }}>
-                          <User size={32} className="text-warning" />
+                    <div className="text-center" style={{ marginTop: '-44px' }}>
+                      <div className="d-flex flex-column align-items-center" style={{ gap: '4px' }}>
+                        <div className="d-inline-flex align-items-center justify-content-center" style={{ lineHeight: 0, marginBottom: '-46px' }}>
+                          <dotlottie-wc src={`${process.env.PUBLIC_URL || ''}/icon_animation_lottie/face_recognition.lottie`} autoplay loop style={{ width: '240px', height: '240px', display: 'block', verticalAlign: 'top' }} />
                         </div>
-                        <p className="text-muted mb-3">{t('profile.faceNotRegistered')}</p>
                         <button
                           type="button"
                           className="btn-modern"
@@ -1426,13 +1437,13 @@ const ProfilePage = () => {
                             <span>{t('profile.registerFaceSample')}</span>
                           </div>
                         </button>
+                        <p className="text-muted small mb-0">
+                          {t('profile.faceSampleDesc')}
+                        </p>
                       </div>
                     </div>
                   )}
 
-                  <p className="text-muted small mb-0 text-center">
-                    {t('profile.faceSampleDesc')}
-                  </p>
                 </div>
               </div>
             </Col>
@@ -1861,7 +1872,7 @@ const ProfilePage = () => {
                 <img
                   src={faceSampleImage.startsWith('http') 
                     ? faceSampleImage 
-                    : `${window.location.origin}${faceSampleImage}`}
+                    : `${getUploadsBaseURL()}${faceSampleImage}`}
                   alt="Face Sample - Full Size"
                   style={{
                     maxWidth: '100%',

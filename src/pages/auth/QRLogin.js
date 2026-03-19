@@ -4,6 +4,7 @@ import axios from 'axios';
 import { useAuth } from '../../contexts/AuthContext';
 import { getDeviceFingerprint } from '../../utils/deviceFingerprint';
 import usePageTitle from '../../hooks/usePageTitle';
+import { getApiBaseURL } from '../../utils/api';
 import '../../styles/auth.css';
 
 const QRLogin = () => {
@@ -50,7 +51,7 @@ const QRLogin = () => {
       const deviceMac = await getDeviceFingerprint();
       setDeviceMac(deviceMac);
 
-      const response = await axios.post('/api/auth/qr-login', {
+      const response = await axios.post(`${getApiBaseURL()}/auth/qr-login`, {
         token: token,
         deviceMac: deviceMac
       });

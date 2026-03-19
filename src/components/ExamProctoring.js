@@ -7,7 +7,7 @@ import axios from 'axios';
  * Giám sát thi trực tuyến với webcam và phát hiện gian lận
  * 
  * Tính năng:
- * - Ghi lại webcam sinh viên
+ * - Hiển thị webcam sinh viên (ảnh snapshot do trang thi gửi)
  * - Phát hiện Page Visibility (chuyển tab, ẩn/hiện cửa sổ)
  * - Phát hiện Window Focus/Blur (mất focus)
  * - Phát hiện BeforeUnload (thoát trang, reload)
@@ -20,9 +20,6 @@ const ExamProctoring = ({ attemptId, examId, enabled = false }) => {
   const [warnings, setWarnings] = useState([]);
 
   const videoRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const chunksRef = useRef([]);
-  const uploadIntervalRef = useRef(null);
   const visibilityTimeoutRef = useRef(null);
   const lastVisibilityChangeRef = useRef(null);
 
@@ -54,39 +51,7 @@ const ExamProctoring = ({ attemptId, examId, enabled = false }) => {
         videoRef.current.srcObject = stream;
       }
 
-      // Setup MediaRecorder
-      const options = {
-        mimeType: 'video/webm;codecs=vp8,opus',
-        videoBitsPerSecond: 2500000
-      };
-
-      const mediaRecorder = new MediaRecorder(stream, options);
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          chunksRef.current.push(event.data);
-          uploadChunk(event.data, chunksRef.current.length - 1);
-        }
-      };
-
-      mediaRecorder.onstop = () => {
-        // Upload final chunk
-        if (chunksRef.current.length > 0) {
-          uploadFinalChunk();
-        }
-      };
-
-      // Start recording and capture chunks every 10 seconds
-      mediaRecorder.start(10000); // Capture chunk every 10 seconds
       setIsRecording(true);
-
-      // Upload chunks periodically
-      uploadIntervalRef.current = setInterval(() => {
-        if (mediaRecorder.state === 'recording') {
-          mediaRecorder.requestData();
-        }
-      }, 10000);
 
     } catch (error) {
       console.error('Error accessing webcam:', error);
@@ -95,55 +60,6 @@ const ExamProctoring = ({ attemptId, examId, enabled = false }) => {
         error: error.message,
         error_name: error.name
       }, 'high', 'Không thể truy cập webcam');
-    }
-  };
-
-  const uploadChunk = async (chunk, chunkIndex) => {
-    try {
-      const token = localStorage.getItem('token');
-      const formData = new FormData();
-      formData.append('chunk', chunk, `chunk_${chunkIndex}.webm`);
-      formData.append('chunk_index', chunkIndex);
-      formData.append('total_chunks', '999'); // Will be updated when recording stops
-
-      await axios.post(
-        `${API_BASE_URL}/lms/attempts/${attemptId}/webcam-chunk`,
-        formData,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
-          }
-        }
-      );
-    } catch (error) {
-      console.error('Error uploading chunk:', error);
-    }
-  };
-
-  const uploadFinalChunk = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const formData = new FormData();
-      const finalBlob = new Blob(chunksRef.current, { type: 'video/webm' });
-      formData.append('chunk', finalBlob, 'final.webm');
-      formData.append('chunk_index', chunksRef.current.length);
-      formData.append('total_chunks', chunksRef.current.length + 1);
-
-      await axios.post(
-        `${API_BASE_URL}/lms/attempts/${attemptId}/webcam-chunk`,
-        formData,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
-          }
-        }
-      );
-
-      chunksRef.current = [];
-    } catch (error) {
-      console.error('Error uploading final chunk:', error);
     }
   };
 
@@ -306,20 +222,10 @@ const ExamProctoring = ({ attemptId, examId, enabled = false }) => {
   };
 
   const cleanup = () => {
-    // Stop recording
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
-
     // Stop stream
     if (videoRef.current && videoRef.current.srcObject) {
       const tracks = videoRef.current.srcObject.getTracks();
       tracks.forEach(track => track.stop());
-    }
-
-    // Clear intervals
-    if (uploadIntervalRef.current) {
-      clearInterval(uploadIntervalRef.current);
     }
 
     if (visibilityTimeoutRef.current) {

@@ -1,5 +1,30 @@
 import axios from 'axios';
 
+// Determine API base URL
+// Production: Client (ims/statusims) và API (apiims) khác subdomain → phải gọi đúng domain API.
+// Development: Use relative URL for proxy.
+const getApiBaseURL = () => {
+    if (process.env.NODE_ENV === 'production' && typeof window !== 'undefined') {
+        // Ưu tiên env nếu là URL công khai (https://apiims...). Bỏ qua nếu rỗng hoặc URL nội bộ (http://status:5009, http://gateway:5000).
+        const envUrl = (process.env.REACT_APP_API_URL || '').trim();
+        const isInternalUrl = /^https?:\/\/[^/.:]+:\d+/.test(envUrl); // host không có dấu chấm + port = Docker nội bộ
+        if (envUrl && envUrl.startsWith('http') && !isInternalUrl) {
+            const url = envUrl.replace(/\/+$/, '');
+            return url.includes('/api') ? url : `${url}/api`;
+        }
+        const hostname = window.location.hostname;
+        const protocol = window.location.protocol;
+        // Production: API luôn ở apiims.pctu.edu.vn (không cùng host với ims/statusims)
+        if (hostname === 'ims.pctu.edu.vn' || hostname === 'www.ims.pctu.edu.vn' ||
+            hostname === 'statusims.pctu.edu.vn') {
+            return `${protocol}//apiims.pctu.edu.vn/api`;
+        }
+        // Same-host (localhost / IP): dùng port 8043
+        return `${protocol}//${hostname}:8043/api`;
+    }
+    return '/api';
+};
+
 // CSRF token management
 let csrfToken = null;
 let csrfTokenPromise = null;
@@ -7,7 +32,8 @@ let csrfTokenPromise = null;
 // Function to fetch CSRF token
 const fetchCSRFToken = async () => {
     try {
-        const response = await axios.get('/api/csrf-token', {
+        const apiBaseURL = getApiBaseURL();
+        const response = await axios.get(`${apiBaseURL}/csrf-token`, {
             withCredentials: true
         });
         if (response.data.success && response.data.csrfToken) {
@@ -38,8 +64,11 @@ const getCSRFToken = async () => {
     return token;
 };
 
-// Pre-fetch CSRF token if user is logged in
+// Pre-fetch CSRF token if user is logged in (bỏ qua trên trang công khai để tránh gọi API khi chưa cần)
 const preFetchCSRFToken = () => {
+    if (typeof window !== 'undefined' && window.location.pathname === '/dat-phong-cong-khai') {
+        return;
+    }
     const token = localStorage.getItem('token');
     if (token && !csrfToken && !csrfTokenPromise) {
         // Fetch token in background
@@ -226,7 +255,7 @@ const toAxiosLikeFromCache = (cachedEntry, url, config, extras = {}) => ({
 
 // Create API instance
 const api = axios.create({
-    baseURL: '/api',
+    baseURL: getApiBaseURL(),
     headers: {
         'Content-Type': 'application/json'
     },
@@ -239,7 +268,15 @@ const rawGet = api.get.bind(api);
 // Request interceptor - Add auth token and CSRF token
 api.interceptors.request.use(
     async (config) => {
+        // FormData: bỏ Content-Type để axios tự set multipart/form-data; boundary=...
+        // (default 'application/json' khiến gateway nhận body JSON 12 bytes → 400)
+        if (config.data instanceof FormData) {
+            delete config.headers['Content-Type'];
+            delete config.headers['content-type'];
+        }
         // Add auth token
+        // Browser client luôn khai báo loại client để server phân biệt với desktop app.
+        config.headers['X-Client-Type'] = 'web';
         const token = localStorage.getItem('token');
         if (token) {
             config.headers['x-auth-token'] = token;
@@ -398,5 +435,32 @@ export const refreshCSRFToken = async () => {
 export const hasCSRFToken = () => {
     return !!csrfToken;
 };
+
+// Socket.IO URL - phải cùng host/port với server xử lý API (gateway hoặc main server)
+const getSocketUrl = () => {
+    if (process.env.REACT_APP_SOCKET_URL) {
+        return process.env.REACT_APP_SOCKET_URL;
+    }
+    const base = getApiBaseURL();
+    if (typeof window !== 'undefined' && base && base.startsWith('http')) {
+        return base.replace(/\/api\/?$/, '').replace(/\/$/, '');
+    }
+    if (process.env.NODE_ENV === 'production' && typeof window !== 'undefined') {
+        return `${window.location.protocol}//${window.location.hostname}:8043`;
+    }
+    return 'http://localhost:5000';
+};
+
+// Base URL cho static uploads (avatar, face-samples, session images): gateway phục vụ tại /uploads, không có /api
+const getUploadsBaseURL = () => {
+    const apiBase = getApiBaseURL();
+    if (typeof apiBase === 'string' && apiBase.startsWith('http')) {
+        return apiBase.replace(/\/api\/?$/, '').replace(/\/$/, '');
+    }
+    return typeof window !== 'undefined' ? window.location.origin : '';
+};
+
+// Export getApiBaseURL for use in other files
+export { getApiBaseURL, getUploadsBaseURL, getSocketUrl };
 
 export default api;

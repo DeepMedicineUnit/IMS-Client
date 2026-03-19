@@ -8,6 +8,7 @@ import { format, parseISO, isAfter, isBefore, isEqual } from 'date-fns';
 import { Calendar, Clock, MapPin, Users, FileText, QrCode, ArrowLeft, Info, CheckCircle, AlertTriangle, XCircle, UserCheck, UserX, Hospital, ExternalLink, Map, Upload, Clock as ClockIcon, Timer, TimerOff, User, Shield, Settings, Key, Database, Eye, EyeOff, CircleUser, Camera, FileDown, Activity, Download, History } from 'lucide-react';
 import { useHospitalLocations, findHospitalByCoordinates } from '../../hooks/useHospitalLocations';
 import usePageTitle from '../../hooks/usePageTitle';
+import { getUploadsBaseURL } from '../../utils/api';
 
 const SessionDetail = () => {
   usePageTitle('Chi tiết buổi học');
@@ -474,7 +475,7 @@ const SessionDetail = () => {
           <div key={index} className="webcam-item" onClick={() => handleWebcamClick(item)}>
             <div className="webcam-thumbnail">
               <img 
-                src={item.data_path ? `/api${item.data_path.startsWith('/uploads/') ? item.data_path : `/uploads/${item.data_path.split('/').pop()}`}` : 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2RkZGRkZCI+PC9yZWN0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZmlsbD0iIzk5OTk5OSI+Tm8gaW1hZ2U8L3RleHQ+PC9zdmc+'}
+                src={item.data_path ? `${getUploadsBaseURL()}${item.data_path.startsWith('/uploads/') ? item.data_path : `/uploads/${item.data_path.split('/').pop()}`}` : 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2RkZGRkZCI+PC9yZWN0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZmlsbD0iIzk5OTk5OSI+Tm8gaW1hZ2U8L3RleHQ+PC9zdmc+'}
                 alt={`Webcam image ${index + 1}`}
                 style={item.is_profile ? { border: '3px solid #28a745' } : {}}
                 onError={(e) => {
@@ -2540,7 +2541,7 @@ const SessionDetail = () => {
                 <>
                   <div className="modal-image-container">
                     <img 
-                      src={selectedImage.data_path ? `/api${selectedImage.data_path.startsWith('/uploads/') ? selectedImage.data_path : `/uploads/${selectedImage.data_path.split('/').pop()}`}` : 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2RkZGRkZCI+PC9yZWN0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZmlsbD0iIzk5OTk5OSI+Tm8gaW1hZ2U8L3RleHQ+PC9zdmc+'}
+                      src={selectedImage.data_path ? `${getUploadsBaseURL()}${selectedImage.data_path.startsWith('/uploads/') ? selectedImage.data_path : `/uploads/${selectedImage.data_path.split('/').pop()}`}` : 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2RkZGRkZCI+PC9yZWN0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZmlsbD0iIzk5OTk5OSI+Tm8gaW1hZ2U8L3RleHQ+PC9zdmc+'}
                       alt="Webcam image"
                       className="modal-image"
                       style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '12px' }}

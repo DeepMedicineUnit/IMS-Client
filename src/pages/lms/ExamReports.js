@@ -24,7 +24,7 @@ import { Doughnut, Bar } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAlert } from '../../contexts/AlertContext';
-import api from '../../utils/api';
+import api, { getApiBaseURL } from '../../utils/api';
 import Pagination from '../../components/Pagination';
 import usePageTitle from '../../hooks/usePageTitle';
 import JSZip from 'jszip';
@@ -34,10 +34,101 @@ import '../../styles/user.css';
 // Register Chart.js components
 ChartJS.register(ArcElement, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
+// Lưu trạng thái tab + breadcrumb (Kết quả thi) khi reload
+const LS_EXAM_REPORTS_ACTIVE_TAB = 'lms_exam_reports_active_tab';
+const LS_EXAM_REPORTS_RESULTS_VIEW = 'lms_exam_reports_results_view';
+const LS_EXAM_REPORTS_PERIOD_ID = 'lms_exam_reports_period_id';
+const LS_EXAM_REPORTS_PERIOD_NAME = 'lms_exam_reports_period_name';
+const LS_EXAM_REPORTS_DEPARTMENT = 'lms_exam_reports_department';
+const LS_EXAM_REPORTS_EXAM_ID = 'lms_exam_reports_exam_id';
+const LS_EXAM_REPORTS_EXAM_TITLE = 'lms_exam_reports_exam_title';
+
+function loadExamReportsNavPersistence() {
+    try {
+        const activeTab = localStorage.getItem(LS_EXAM_REPORTS_ACTIVE_TAB) || 'exam-statistics';
+        const view = localStorage.getItem(LS_EXAM_REPORTS_RESULTS_VIEW) || 'periods';
+        const pidRaw = localStorage.getItem(LS_EXAM_REPORTS_PERIOD_ID);
+        const periodId = pidRaw ? parseInt(pidRaw, 10) : null;
+        const periodName = localStorage.getItem(LS_EXAM_REPORTS_PERIOD_NAME) || '';
+        const dept = localStorage.getItem(LS_EXAM_REPORTS_DEPARTMENT) || null;
+        const eidRaw = localStorage.getItem(LS_EXAM_REPORTS_EXAM_ID);
+        const examId = eidRaw ? parseInt(eidRaw, 10) : null;
+        const examTitle = localStorage.getItem(LS_EXAM_REPORTS_EXAM_TITLE) || '';
+
+        const selectedPeriod = periodId && !Number.isNaN(periodId) ? { exam_period_id: periodId, period_name: periodName } : null;
+        const selectedExam = examId && !Number.isNaN(examId) ? { exam_id: examId, exam_title: examTitle } : null;
+
+        // Chỉ cho phép view sâu khi có đủ dữ liệu
+        let resultsViewMode = view;
+        if (resultsViewMode === 'departments' && !selectedPeriod) resultsViewMode = 'periods';
+        if (resultsViewMode === 'exams' && (!selectedPeriod || !dept)) resultsViewMode = selectedPeriod ? 'departments' : 'periods';
+        if (resultsViewMode === 'results' && (!selectedPeriod || !dept || !selectedExam)) resultsViewMode = (!selectedPeriod ? 'periods' : !dept ? 'departments' : 'exams');
+
+        return {
+            activeTab,
+            resultsViewMode,
+            selectedResultsPeriod: selectedPeriod,
+            selectedResultsDepartment: dept,
+            selectedResultsExam: selectedExam
+        };
+    } catch {
+        return {
+            activeTab: 'exam-statistics',
+            resultsViewMode: 'periods',
+            selectedResultsPeriod: null,
+            selectedResultsDepartment: null,
+            selectedResultsExam: null
+        };
+    }
+}
+
+function saveExamReportsNavPersistence(activeTab, resultsViewMode, selectedResultsPeriod, selectedResultsDepartment, selectedResultsExam) {
+    try {
+        localStorage.setItem(LS_EXAM_REPORTS_ACTIVE_TAB, activeTab || 'exam-statistics');
+
+        // Chỉ lưu breadcrumb khi đang ở tab Kết quả thi
+        if (activeTab !== 'exam-results') {
+            localStorage.removeItem(LS_EXAM_REPORTS_RESULTS_VIEW);
+            localStorage.removeItem(LS_EXAM_REPORTS_PERIOD_ID);
+            localStorage.removeItem(LS_EXAM_REPORTS_PERIOD_NAME);
+            localStorage.removeItem(LS_EXAM_REPORTS_DEPARTMENT);
+            localStorage.removeItem(LS_EXAM_REPORTS_EXAM_ID);
+            localStorage.removeItem(LS_EXAM_REPORTS_EXAM_TITLE);
+            return;
+        }
+
+        localStorage.setItem(LS_EXAM_REPORTS_RESULTS_VIEW, resultsViewMode || 'periods');
+        if (selectedResultsPeriod?.exam_period_id) {
+            localStorage.setItem(LS_EXAM_REPORTS_PERIOD_ID, String(selectedResultsPeriod.exam_period_id));
+            localStorage.setItem(LS_EXAM_REPORTS_PERIOD_NAME, selectedResultsPeriod.period_name || '');
+        } else {
+            localStorage.removeItem(LS_EXAM_REPORTS_PERIOD_ID);
+            localStorage.removeItem(LS_EXAM_REPORTS_PERIOD_NAME);
+        }
+
+        if (selectedResultsDepartment) localStorage.setItem(LS_EXAM_REPORTS_DEPARTMENT, selectedResultsDepartment);
+        else localStorage.removeItem(LS_EXAM_REPORTS_DEPARTMENT);
+
+        if (selectedResultsExam?.exam_id) {
+            localStorage.setItem(LS_EXAM_REPORTS_EXAM_ID, String(selectedResultsExam.exam_id));
+            localStorage.setItem(LS_EXAM_REPORTS_EXAM_TITLE, selectedResultsExam.exam_title || '');
+        } else {
+            localStorage.removeItem(LS_EXAM_REPORTS_EXAM_ID);
+            localStorage.removeItem(LS_EXAM_REPORTS_EXAM_TITLE);
+        }
+    } catch (_) { /* ignore */ }
+}
+
 const ExamReports = () => {
     usePageTitle('Báo cáo QA');
     const { currentUser } = useAuth();
     const { showAlert } = useAlert();
+
+    const initialNavRef = useRef(null);
+    if (initialNavRef.current === null) {
+        initialNavRef.current = loadExamReportsNavPersistence();
+    }
+    const initNav = initialNavRef.current;
     
     // Inject PDF export popup styles
     useEffect(() => {
@@ -148,6 +239,40 @@ const ExamReports = () => {
     
     // Data for filters
     const [classes, setClasses] = useState([]);
+
+    // Phân cấp Học kỳ -> Khoa -> Danh sách kỳ thi (Tab "Kết quả thi") (ghi nhớ khi reload)
+    const [resultsViewMode, setResultsViewMode] = useState(initNav.resultsViewMode || 'periods'); // 'periods' | 'departments' | 'exams' | 'results'
+    const [resultsExamPeriods, setResultsExamPeriods] = useState([]);
+    const [resultsDepartments, setResultsDepartments] = useState([]);
+    const [resultsExams, setResultsExams] = useState([]);
+    const [selectedResultsPeriod, setSelectedResultsPeriod] = useState(initNav.selectedResultsPeriod);
+    const [selectedResultsDepartment, setSelectedResultsDepartment] = useState(initNav.selectedResultsDepartment);
+    const [selectedResultsExam, setSelectedResultsExam] = useState(initNav.selectedResultsExam);
+    const [resultsPeriodsPagination, setResultsPeriodsPagination] = useState({ page: 1, limit: 10, totalItems: 0, totalPages: 0 });
+    const [resultsExamsPagination, setResultsExamsPagination] = useState({ page: 1, limit: 10, totalItems: 0, totalPages: 0 });
+    /** Đang xuất file nhập điểm (Excel) cho kỳ thi nào */
+    const [exportingNhapDiemExamId, setExportingNhapDiemExamId] = useState(null);
+
+    // Auto-refresh state
+    const [lastExamStatsHash, setLastExamStatsHash] = useState(null);
+    const [lastExamAttemptsHash, setLastExamAttemptsHash] = useState(null);
+    const [lastQuestionStatsHash, setLastQuestionStatsHash] = useState(null);
+    const pollingIntervalRef = useRef(null);
+    const pollingAttemptsRef = useRef(null);
+    const pollingQuestionRef = useRef(null);
+
+    // Helper function to generate hash of data for comparison
+    const generateDataHash = (data) => {
+      if (!data) return '';
+      try {
+        return JSON.stringify(data).split('').reduce((a, b) => {
+          a = ((a << 5) - a) + b.charCodeAt(0);
+          return a & a; // Convert to 32-bit integer
+        }, 0).toString();
+      } catch {
+        return '';
+      }
+    };
     const [exams, setExams] = useState([]);
     
     // Reliability Data Tab states
@@ -179,8 +304,21 @@ const ExamReports = () => {
     });
     const [loadingScoreRangeSettings, setLoadingScoreRangeSettings] = useState(false);
     
-    // Active Tab state
-    const [activeTab, setActiveTab] = useState('exam-statistics');
+    // Bộ câu hỏi theo kỳ thi tab (lms_exam_topic_question_sets + lms_attempt_questions)
+    const [questionSetsData, setQuestionSetsData] = useState(null);
+    const [attemptQuestionsData, setAttemptQuestionsData] = useState(null);
+    const [loadingQuestionSets, setLoadingQuestionSets] = useState(false);
+    const [loadingAttemptQuestions, setLoadingAttemptQuestions] = useState(false);
+    const [questionSetsFilters, setQuestionSetsFilters] = useState({ exam_id: '' });
+    const [attemptQuestionsPagination, setAttemptQuestionsPagination] = useState({
+        page: 1,
+        limit: 50,
+        total: 0,
+        totalPages: 0
+    });
+    
+    // Active Tab state (ghi nhớ khi reload)
+    const [activeTab, setActiveTab] = useState(initNav.activeTab || 'exam-statistics');
     
     // PDF/Excel Export Options
     const [pdfExportOptions, setPdfExportOptions] = useState(() => {
@@ -307,6 +445,160 @@ const ExamReports = () => {
         }
     }, [currentUser]);
 
+    // Auto-refresh exam statistics when on statistics tab - polling every 5 seconds
+    useEffect(() => {
+        if (activeTab !== 'statistics') {
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+            }
+            return;
+        }
+
+        const startPolling = async () => {
+            pollingIntervalRef.current = setInterval(async () => {
+                try {
+                    const response = await api.get('/lms/exam-reports/statistics');
+                    if (response.data.success) {
+                        const newHash = generateDataHash(response.data.data);
+                        if (newHash !== lastExamStatsHash) {
+                            console.log('[Auto-refresh] Exam statistics updated');
+                            setExamStats(response.data.data);
+                            setPagination(prev => ({
+                                ...prev,
+                                totalItems: response.data.data.length,
+                                totalPages: Math.ceil(response.data.data.length / prev.limit)
+                            }));
+                            setLastExamStatsHash(newHash);
+                        }
+                    }
+                } catch (err) {
+                    console.debug('[Auto-refresh] Statistics polling failed:', err.message);
+                }
+            }, 5000); // Poll every 5 seconds
+        };
+
+        startPolling();
+
+        return () => {
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+            }
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab, lastExamStatsHash]);
+
+    // Auto-refresh exam attempts when on attempts tab - polling every 5 seconds
+    useEffect(() => {
+        if (activeTab !== 'attempts') {
+            if (pollingAttemptsRef.current) {
+                clearInterval(pollingAttemptsRef.current);
+                pollingAttemptsRef.current = null;
+            }
+            return;
+        }
+
+        const startAttemptsPolling = async () => {
+            pollingAttemptsRef.current = setInterval(async () => {
+                try {
+                    const examsResponse = await api.get('/lms/exams');
+                    const examsData = examsResponse.data?.data;
+                    let exams = [];
+                    
+                    if (Array.isArray(examsData)) {
+                        exams = examsData;
+                    } else if (examsData && Array.isArray(examsData.exams)) {
+                        exams = examsData.exams;
+                    }
+
+                    const allAttempts = [];
+                    for (const exam of exams) {
+                        try {
+                            const attemptsResponse = await api.get(`/lms/exams/${exam.exam_id}/attempts`);
+                            const attemptsData = attemptsResponse.data?.data;
+                            
+                            if (Array.isArray(attemptsData)) {
+                                const submittedAttempts = attemptsData
+                                    .filter(attempt => attempt.status === 'submitted')
+                                    .map(attempt => ({
+                                        ...attempt,
+                                        exam_title: exam.exam_title,
+                                        exam_id: exam.exam_id
+                                    }));
+                                allAttempts.push(...submittedAttempts);
+                            }
+                        } catch (error) {
+                            console.debug(`[Auto-refresh] Error fetching attempts for exam ${exam.exam_id}:`, error.message);
+                        }
+                    }
+
+                    const newHash = generateDataHash(allAttempts);
+                    if (newHash !== lastExamAttemptsHash) {
+                        console.log('[Auto-refresh] Exam attempts updated');
+                        setExamAttempts(allAttempts);
+                        const extractedClasses = extractClassesFromAttempts(allAttempts);
+                        if (extractedClasses.length > 0) {
+                            setClasses(extractedClasses);
+                        }
+                        setLastExamAttemptsHash(newHash);
+                    }
+                } catch (err) {
+                    console.debug('[Auto-refresh] Attempts polling failed:', err.message);
+                }
+            }, 5000); // Poll every 5 seconds
+        };
+
+        startAttemptsPolling();
+
+        return () => {
+            if (pollingAttemptsRef.current) {
+                clearInterval(pollingAttemptsRef.current);
+                pollingAttemptsRef.current = null;
+            }
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab, lastExamAttemptsHash]);
+
+    // Auto-refresh question statistics when modal is open
+    useEffect(() => {
+        if (!showQuestionModal || !selectedExam?.exam_id) {
+            if (pollingQuestionRef.current) {
+                clearInterval(pollingQuestionRef.current);
+                pollingQuestionRef.current = null;
+            }
+            return;
+        }
+
+        const startQuestionPolling = async () => {
+            pollingQuestionRef.current = setInterval(async () => {
+                try {
+                    const response = await api.get(`/lms/exam-reports/${selectedExam.exam_id}/questions`);
+                    if (response.data.success) {
+                        const newHash = generateDataHash(response.data.data);
+                        if (newHash !== lastQuestionStatsHash) {
+                            console.log('[Auto-refresh] Question statistics updated');
+                            setQuestionStats(response.data.data);
+                            setLastQuestionStatsHash(newHash);
+                        }
+                    }
+                } catch (err) {
+                    console.debug('[Auto-refresh] Question polling failed:', err.message);
+                }
+            }, 5000); // Poll every 5 seconds
+        };
+
+        startQuestionPolling();
+
+        return () => {
+            if (pollingQuestionRef.current) {
+                clearInterval(pollingQuestionRef.current);
+                pollingQuestionRef.current = null;
+            }
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showQuestionModal, selectedExam?.exam_id, lastQuestionStatsHash]);
+
     const loadQASettings = async () => {
         try {
             setLoadingSettings(true);
@@ -379,6 +671,8 @@ const ExamReports = () => {
             const response = await api.get('/lms/exam-reports/statistics');
             if (response.data.success) {
                 setExamStats(response.data.data);
+                const hash = generateDataHash(response.data.data);
+                setLastExamStatsHash(hash);
                 setPagination(prev => ({
                     ...prev,
                     totalItems: response.data.data.length,
@@ -399,6 +693,8 @@ const ExamReports = () => {
             const response = await api.get(`/lms/exam-reports/${examId}/questions`);
             if (response.data.success) {
                 setQuestionStats(response.data.data);
+                const hash = generateDataHash(response.data.data);
+                setLastQuestionStatsHash(hash);
             }
         } catch (error) {
             console.error('Error loading question statistics:', error);
@@ -612,58 +908,128 @@ const ExamReports = () => {
     };
     
     // Exam Results Tab functions
-    const fetchExamAttempts = async () => {
+    const fetchResultsExamPeriods = async () => {
         try {
-            setLoadingExamAttempts(true);
+            const res = await api.get('/lms/exam-periods'); // hiển thị tất cả
+            const list = Array.isArray(res.data?.data) ? res.data.data : [];
+            setResultsExamPeriods(list);
+            const total = list.length;
+            setResultsPeriodsPagination(prev => ({
+                ...prev,
+                totalItems: total,
+                totalPages: Math.max(1, Math.ceil(total / prev.limit))
+            }));
 
-            // Get all exams first to get attempts
-            const examsResponse = await api.get('/lms/exams');
-            const examsData = examsResponse.data?.data;
-            let exams = [];
-            
-            if (Array.isArray(examsData)) {
-                exams = examsData;
-            } else if (examsData && Array.isArray(examsData.exams)) {
-                exams = examsData.exams;
-            }
-
-            // Get attempts for each exam
-            const allAttempts = [];
-            const userIdsSet = new Set(); // Collect unique user IDs
-            
-            for (const exam of exams) {
-                try {
-                    const attemptsResponse = await api.get(`/lms/exams/${exam.exam_id}/attempts`);
-                    const attemptsData = attemptsResponse.data?.data;
-                    
-                    if (Array.isArray(attemptsData)) {
-                        // Filter only submitted attempts
-                        const submittedAttempts = attemptsData
-                            .filter(attempt => attempt.status === 'submitted')
-                            .map(attempt => {
-                                if (attempt.user_id) {
-                                    userIdsSet.add(attempt.user_id);
-                                }
-                                return {
-                                    ...attempt,
-                                    exam_title: exam.exam_title,
-                                    exam_id: exam.exam_id
-                                };
-                            });
-                        allAttempts.push(...submittedAttempts);
-                    }
-                } catch (error) {
-                    console.error(`Error fetching attempts for exam ${exam.exam_id}:`, error);
+            // Đồng bộ tên học kỳ từ API; nếu học kỳ đã xóa/ẩn thì quay về danh sách học kỳ
+            if (selectedResultsPeriod?.exam_period_id) {
+                const pid = Number(selectedResultsPeriod.exam_period_id);
+                const found = list.find((p) => Number(p.exam_period_id) === pid);
+                if (!found) {
+                    setSelectedResultsPeriod(null);
+                    setSelectedResultsDepartment(null);
+                    setSelectedResultsExam(null);
+                    setResultsViewMode('periods');
+                } else if ((found.period_name || '') !== (selectedResultsPeriod.period_name || '')) {
+                    setSelectedResultsPeriod(found);
                 }
             }
+        } catch (err) {
+            console.error('fetchResultsExamPeriods:', err);
+            setResultsExamPeriods([]);
+            setResultsPeriodsPagination(prev => ({ ...prev, totalItems: 0, totalPages: 0 }));
+        }
+    };
 
-            // class_name is now included in API response (updated in examController.js)
-            setExamAttempts(allAttempts);
+    const fetchResultsDepartmentsByPeriod = async (periodId) => {
+        try {
+            const res = await api.get(`/lms/exam-periods/${periodId}/departments`);
+            setResultsDepartments(Array.isArray(res.data?.data) ? res.data.data : []);
+        } catch (err) {
+            console.error('fetchResultsDepartmentsByPeriod:', err);
+            setResultsDepartments([]);
+        }
+    };
+
+    const fetchResultsExams = async () => {
+        try {
+            setLoadingExamAttempts(true);
+            const params = new URLSearchParams();
+            if (selectedResultsPeriod?.exam_period_id) params.append('exam_period_id', selectedResultsPeriod.exam_period_id);
+            if (selectedResultsDepartment) params.append('department_name', selectedResultsDepartment);
+            params.append('page', resultsExamsPagination.page);
+            params.append('limit', resultsExamsPagination.limit);
+            const res = await api.get(`/lms/exams?${params.toString()}`);
+            const data = res.data?.data;
+            let list = [];
+            let pag = null;
+            if (data && Array.isArray(data.exams)) {
+                list = data.exams;
+                pag = data.pagination;
+            } else if (Array.isArray(data)) {
+                list = data;
+            }
+            setResultsExams(list);
+            if (pag) {
+                setResultsExamsPagination(prev => ({
+                    ...prev,
+                    totalItems: pag.total || list.length,
+                    totalPages: pag.pages || Math.max(1, Math.ceil((pag.total || list.length) / prev.limit))
+                }));
+            } else {
+                setResultsExamsPagination(prev => ({
+                    ...prev,
+                    totalItems: list.length,
+                    totalPages: Math.max(1, Math.ceil(list.length / prev.limit))
+                }));
+            }
+
+            // Nếu đang chọn 1 kỳ thi -> đồng bộ lại object theo danh sách mới (giữ title/type/class nếu có)
+            if (selectedResultsExam?.exam_id) {
+                const eid = Number(selectedResultsExam.exam_id);
+                const foundExam = list.find((e) => Number(e.exam_id) === eid);
+                if (foundExam) setSelectedResultsExam(foundExam);
+            }
+        } catch (err) {
+            console.error('fetchResultsExams:', err);
+            setResultsExams([]);
+            setResultsExamsPagination(prev => ({ ...prev, totalItems: 0, totalPages: 0 }));
+        } finally {
+            setLoadingExamAttempts(false);
+        }
+    };
+
+    const fetchExamAttempts = async (exam) => {
+        try {
+            setLoadingExamAttempts(true);
+            if (!exam?.exam_id) {
+                setExamAttempts([]);
+                setClasses([]);
+                setLastExamAttemptsHash(generateDataHash([]));
+                return;
+            }
+
+            const attemptsResponse = await api.get(`/lms/exams/${exam.exam_id}/attempts`);
+            const attemptsData = attemptsResponse.data?.data;
+            const submittedAttempts = Array.isArray(attemptsData)
+                ? attemptsData
+                    .filter(a => a.status === 'submitted')
+                    .map(a => ({
+                        ...a,
+                        exam_title: exam.exam_title,
+                        exam_id: exam.exam_id
+                    }))
+                : [];
+
+            setExamAttempts(submittedAttempts);
+            const hash = generateDataHash(submittedAttempts);
+            setLastExamAttemptsHash(hash);
             
             // Extract and set classes from attempts data
-            const extractedClasses = extractClassesFromAttempts(allAttempts);
+            const extractedClasses = extractClassesFromAttempts(submittedAttempts);
             if (extractedClasses.length > 0) {
                 setClasses(extractedClasses);
+            } else {
+                setClasses([]);
             }
         } catch (error) {
             console.error('Error fetching exam attempts:', error);
@@ -672,6 +1038,99 @@ const ExamReports = () => {
             setClasses([]);
         } finally {
             setLoadingExamAttempts(false);
+        }
+    };
+
+    /** Độ rộng cột Excel (wch) theo nội dung để chữ không bị cắt */
+    const buildSheetColWidths = (aoa, { minWch = 14, maxWch = 52, pad = 3 } = {}) => {
+        const colCount = Math.max(5, ...aoa.map((r) => (Array.isArray(r) ? r.length : 0)));
+        const widths = Array(colCount).fill(minWch);
+        for (const row of aoa) {
+            if (!Array.isArray(row)) continue;
+            row.forEach((cell, i) => {
+                const s = String(cell ?? '');
+                let units = 0;
+                for (let k = 0; k < s.length; k++) {
+                    units += s.charCodeAt(k) > 255 ? 1.35 : 1;
+                }
+                const w = Math.min(maxWch, Math.max(widths[i], Math.ceil(units) + pad));
+                widths[i] = w;
+            });
+        }
+        return widths.map((wch) => ({ wch }));
+    };
+
+    /** Excel mẫu nhập điểm: 2 dòng tiêu đề + dữ liệu T1/MaSV/MaMH theo từng SV (điểm khớp mã SV) */
+    const exportNhapDiemExcelForExam = async (exam, e) => {
+        e?.stopPropagation?.();
+        e?.preventDefault?.();
+        if (!exam?.exam_id) return;
+        setExportingNhapDiemExamId(exam.exam_id);
+        try {
+            const attemptsResponse = await api.get(`/lms/exams/${exam.exam_id}/attempts`);
+            const attemptsData = attemptsResponse.data?.data;
+            const submitted = Array.isArray(attemptsData)
+                ? attemptsData.filter((a) => a.status === 'submitted' && String(a.student_id || '').trim() !== '')
+                : [];
+
+            const byStudent = new Map();
+            for (const a of submitted) {
+                const sid = String(a.student_id).trim();
+                const sc = parseFloat(a.score);
+                const prev = byStudent.get(sid);
+                const prevSc = prev ? parseFloat(prev.score) : -Infinity;
+                const tNew = a.submit_time || a.end_time || 0;
+                const tPrev = prev ? (prev.submit_time || prev.end_time || 0) : 0;
+                if (!prev || sc > prevSc || (sc === prevSc && new Date(tNew) > new Date(tPrev))) {
+                    byStudent.set(sid, a);
+                }
+            }
+
+            const maMh = String(exam.ma_mh || '').trim();
+            const rows = Array.from(byStudent.entries())
+                .map(([maSv, a]) => {
+                    const scoreStr = a.score != null && a.score !== ''
+                        ? String(formatNumber(parseFloat(a.score)))
+                        : '';
+                    return [scoreStr, maSv, maMh, '', ''];
+                })
+                .sort((r1, r2) => String(r1[1]).localeCompare(String(r2[1]), 'vi'));
+
+            const header1 = [
+                'Điểm thi lần 1 (Kiểu chuỗi/500)',
+                'Mã SV (Kiểu chuỗi/50)',
+                'Mã môn học (Kiểu chuỗi/50)',
+                'Ghi chú điểm (Kiểu chuỗi/4000)',
+                'Nhóm/tổ (Kiểu chuỗi/50)'
+            ];
+            const header2 = ['T1', 'MaSV', 'MaMH', 'GcNhapDiem', 'NhomTo'];
+            const aoa = [header1, header2, ...rows];
+
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+            ws['!cols'] = buildSheetColWidths(aoa, {
+                minWch: 16,
+                maxWch: 60,
+                pad: 4
+            });
+            ws['!rows'] = [{ hpt: 40 }, { hpt: 24 }];
+            XLSX.utils.book_append_sheet(wb, ws, 'NhapDiem');
+
+            const safeTitle = String(exam.exam_title || 'ky_thi').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80);
+            XLSX.writeFile(wb, `NhapDiem_exam${exam.exam_id}_${safeTitle}.xlsx`);
+
+            if (rows.length === 0) {
+                showAlertMessage('Đã tạo file (chưa có bài nộp). Kiểm tra mã môn học (MaMH) trên kỳ thi.', 'warning');
+            } else if (!maMh) {
+                showAlertMessage('Đã xuất Excel. Kỳ thi chưa có Mã môn học (ma_mh) — cột MaMH đang trống.', 'warning');
+            } else {
+                showAlertMessage(`Đã xuất ${rows.length} dòng điểm.`, 'success');
+            }
+        } catch (err) {
+            console.error('exportNhapDiemExcelForExam:', err);
+            showAlertMessage(err.response?.data?.message || 'Lỗi khi xuất file Excel nhập điểm', 'danger');
+        } finally {
+            setExportingNhapDiemExamId(null);
         }
     };
 
@@ -819,6 +1278,72 @@ const ExamReports = () => {
             setScoreDistributionData(null);
         } finally {
             setLoadingScoreDistribution(false);
+        }
+    };
+    
+    const fetchQuestionSetsData = async (examId) => {
+        if (!examId) {
+            setQuestionSetsData(null);
+            return;
+        }
+        try {
+            setLoadingQuestionSets(true);
+            const response = await api.get(`/lms/exam-reports/${examId}/question-sets`);
+            if (response.data.success) {
+                setQuestionSetsData(response.data.data);
+            } else {
+                setQuestionSetsData([]);
+            }
+        } catch (error) {
+            console.error('Error fetching question sets:', error);
+            showAlertMessage('Lỗi khi tải bộ câu hỏi theo kỳ thi', 'danger');
+            setQuestionSetsData(null);
+        } finally {
+            setLoadingQuestionSets(false);
+        }
+    };
+    
+    const fetchAttemptQuestionsData = async (examId, page = 1) => {
+        if (!examId) {
+            setAttemptQuestionsData(null);
+            setAttemptQuestionsPagination(p => ({ ...p, total: 0, totalPages: 0 }));
+            return;
+        }
+        try {
+            setLoadingAttemptQuestions(true);
+            const response = await api.get(`/lms/exam-reports/${examId}/attempt-questions`, {
+                params: { page, limit: 50 }
+            });
+            if (response.data.success && response.data.data) {
+                setAttemptQuestionsData(response.data.data.items);
+                setAttemptQuestionsPagination(prev => ({
+                    ...prev,
+                    page: response.data.data.pagination.page,
+                    limit: response.data.data.pagination.limit,
+                    total: response.data.data.pagination.total,
+                    totalPages: response.data.data.pagination.totalPages
+                }));
+            } else {
+                setAttemptQuestionsData([]);
+            }
+        } catch (error) {
+            console.error('Error fetching attempt questions:', error);
+            showAlertMessage('Lỗi khi tải câu hỏi theo lần làm bài', 'danger');
+            setAttemptQuestionsData(null);
+        } finally {
+            setLoadingAttemptQuestions(false);
+        }
+    };
+    
+    const loadQuestionSetsTabData = (examId) => {
+        setQuestionSetsFilters(prev => ({ ...prev, exam_id: examId }));
+        if (examId) {
+            fetchQuestionSetsData(examId);
+            fetchAttemptQuestionsData(examId, 1);
+        } else {
+            setQuestionSetsData(null);
+            setAttemptQuestionsData(null);
+            setAttemptQuestionsPagination(p => ({ ...p, total: 0, totalPages: 0 }));
         }
     };
     
@@ -1037,13 +1562,63 @@ const ExamReports = () => {
         }
     }, [bulkExcelExportOptions]);
     
-    // Load exam attempts when component mounts or filters change
+    // Load data cho Tab "Kết quả thi"
     useEffect(() => {
-        if (hasLMSQAPermission()) {
-            fetchExamAttempts();
+        if (!hasLMSQAPermission()) return;
+        if (activeTab !== 'exam-results') return;
+
+        // Load học kỳ ngay khi vào tab
+        if (resultsViewMode === 'periods') {
+            fetchResultsExamPeriods();
+            return;
+        }
+        // Load khoa khi đã chọn học kỳ
+        if (resultsViewMode === 'departments' && selectedResultsPeriod?.exam_period_id) {
+            fetchResultsDepartmentsByPeriod(selectedResultsPeriod.exam_period_id);
+            return;
+        }
+        // Load danh sách kỳ thi khi đã chọn khoa
+        if (resultsViewMode === 'exams') {
+            fetchResultsExams();
+            return;
+        }
+        // Load kết quả thi khi đã chọn kỳ thi
+        if (resultsViewMode === 'results' && selectedResultsExam?.exam_id) {
+            fetchExamAttempts(selectedResultsExam);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+        activeTab,
+        currentUser,
+        resultsViewMode,
+        selectedResultsPeriod?.exam_period_id,
+        selectedResultsDepartment,
+        selectedResultsExam?.exam_id,
+        resultsExamsPagination.page,
+        resultsExamsPagination.limit
+    ]);
+    
+    // Load exams when opening "Bộ câu hỏi theo kỳ thi" tab if list is empty
+    useEffect(() => {
+        if (activeTab === 'question-sets' && hasLMSQAPermission() && (!exams || exams.length === 0)) {
             fetchExamsForFilter();
         }
-    }, [examFilters, currentUser]);
+    }, [activeTab, exams]);
+
+    // Đảm bảo danh sách kỳ thi phục vụ các tab cần dropdown chọn kỳ thi
+    useEffect(() => {
+        if (!hasLMSQAPermission()) return;
+        const needsExamList = ['reliability-data', 'score-distribution', 'question-sets'].includes(activeTab);
+        if (!needsExamList) return;
+        if (!exams || exams.length === 0) fetchExamsForFilter();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab, currentUser]);
+
+    // Ghi nhớ tab + breadcrumb khi reload
+    useEffect(() => {
+        if (!hasLMSQAPermission()) return;
+        saveExamReportsNavPersistence(activeTab, resultsViewMode, selectedResultsPeriod, selectedResultsDepartment, selectedResultsExam);
+    }, [activeTab, resultsViewMode, selectedResultsPeriod, selectedResultsDepartment, selectedResultsExam, currentUser]);
     
     // Filter exam attempts based on filters (client-side filtering)
     const filteredExamAttempts = React.useMemo(() => {
@@ -1324,7 +1899,7 @@ const ExamReports = () => {
 
                 try {
                     const token = localStorage.getItem('token');
-                    const fetchResponse = await fetch(`/api/lms/attempts/${attempt.attempt_id}/results/pdf?${queryString}`, {
+                    const fetchResponse = await fetch(`${getApiBaseURL()}/lms/attempts/${attempt.attempt_id}/results/pdf?${queryString}`, {
                         headers: {
                             'x-auth-token': token
                         }
@@ -1637,7 +2212,7 @@ const ExamReports = () => {
 
                 try {
                     const token = localStorage.getItem('token');
-                    const fetchResponse = await fetch(`/api/lms/attempts/${attempt.attempt_id}/results/excel?${queryString}`, {
+                    const fetchResponse = await fetch(`${getApiBaseURL()}/lms/attempts/${attempt.attempt_id}/results/excel?${queryString}`, {
                         headers: {
                             'x-auth-token': token
                         }
@@ -2126,9 +2701,83 @@ const ExamReports = () => {
             {/* Header Section */}
             <div className="session-header">
                 <div className="header-content">
-                    <div className="header-title">
-                        <h1>Báo cáo QA</h1>
-                        <p className="header-subtitle">Phân tích chi tiết về kỳ thi và câu hỏi</p>
+                    <div className="header-title d-flex flex-wrap align-items-center gap-2">
+                        <div>
+                            <h1>Báo cáo QA</h1>
+                            <p className="header-subtitle">Phân tích chi tiết về kỳ thi và câu hỏi</p>
+                        </div>
+
+                        {/* Breadcrumb phân cấp - chỉ khi tab Kết quả thi và đã chọn học kỳ */}
+                        {activeTab === 'exam-results' && hasLMSQAPermission() && (resultsViewMode === 'departments' || resultsViewMode === 'exams' || resultsViewMode === 'results') && (
+                            <div className="d-flex align-items-center flex-wrap gap-2 ms-3 ps-3 border-start">
+                                <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-light"
+                                    onClick={() => {
+                                        setResultsViewMode('periods');
+                                        setSelectedResultsPeriod(null);
+                                        setSelectedResultsDepartment(null);
+                                        setSelectedResultsExam(null);
+                                        setResultsDepartments([]);
+                                        setResultsExams([]);
+                                        setExamAttempts([]);
+                                        setExamFilters(prev => ({ ...prev, exam_id: '' }));
+                                        setExamAttemptsPagination(prev => ({ ...prev, page: 1 }));
+                                    }}
+                                >
+                                    <i className="fas fa-folder me-1"></i>Học kỳ thi
+                                </button>
+
+                                {selectedResultsPeriod && (
+                                    <>
+                                        <span className="text-muted">/</span>
+                                        <button
+                                            type="button"
+                                            className="btn btn-sm btn-outline-light"
+                                            onClick={() => {
+                                                setResultsViewMode('departments');
+                                                setSelectedResultsDepartment(null);
+                                                setSelectedResultsExam(null);
+                                                setResultsExams([]);
+                                                setExamAttempts([]);
+                                                setExamFilters(prev => ({ ...prev, exam_id: '' }));
+                                                setExamAttemptsPagination(prev => ({ ...prev, page: 1 }));
+                                            }}
+                                        >
+                                            {selectedResultsPeriod.period_name || selectedResultsPeriod.period_code || 'Học kỳ'}
+                                        </button>
+                                    </>
+                                )}
+
+                                {selectedResultsDepartment && (resultsViewMode === 'exams' || resultsViewMode === 'results') && (
+                                    <>
+                                        <span className="text-muted">/</span>
+                                        <button
+                                            type="button"
+                                            className="btn btn-sm btn-outline-light"
+                                            onClick={() => {
+                                                setResultsViewMode('exams');
+                                                setSelectedResultsExam(null);
+                                                setExamAttempts([]);
+                                                setExamFilters(prev => ({ ...prev, exam_id: '' }));
+                                                setExamAttemptsPagination(prev => ({ ...prev, page: 1 }));
+                                            }}
+                                        >
+                                            {selectedResultsDepartment}
+                                        </button>
+                                    </>
+                                )}
+
+                                {resultsViewMode === 'results' && selectedResultsExam && (
+                                    <>
+                                        <span className="text-muted">/</span>
+                                        <span className="badge bg-primary">
+                                            {selectedResultsExam.exam_title || `Kỳ thi #${selectedResultsExam.exam_id}`}
+                                        </span>
+                                    </>
+                                )}
+                            </div>
+                        )}
                     </div>
                     <div className="header-actions">
                         {hasLMSQAPermission() && (
@@ -2539,69 +3188,251 @@ const ExamReports = () => {
                     </Tab>
                     {hasLMSQAPermission() && (
                         <Tab eventKey="exam-results" title={<span><i className="fas fa-clipboard-check me-2"></i>Kết quả thi</span>}>
-                            {/* Filters */}
-                            <div className="session-list-controls mb-3">
-                                <div className="search-controls">
-                                    <div className="search-input" style={{ minWidth: '350px', flex: '1' }}>
-                                        <input
-                                            type="text"
-                                            placeholder="Tìm theo tên sinh viên hoặc mã sinh viên..."
-                                            value={examFilters.search}
-                                            onChange={(e) => setExamFilters({ ...examFilters, search: e.target.value })}
-                                            style={{ width: '100%' }}
-                                        />
-                                    </div>
-
-                                    <select
-                                        className="filter-select"
-                                        value={examFilters.exam_id}
-                                        onChange={(e) => setExamFilters({ ...examFilters, exam_id: e.target.value })}
-                                    >
-                                        <option value="">Tất cả kỳ thi</option>
-                                        {Array.isArray(exams) && exams.map((exam) => (
-                                            <option key={exam.exam_id} value={exam.exam_id}>
-                                                {exam.exam_title}
-                                            </option>
-                                        ))}
-                                    </select>
-
-                                    <select
-                                        className="filter-select"
-                                        value={examFilters.class_name}
-                                        onChange={(e) => setExamFilters({ ...examFilters, class_name: e.target.value })}
-                                    >
-                                        <option value="">Tất cả lớp</option>
-                                        {Array.isArray(classes) && classes.length > 0 ? (
-                                            classes.map((cls, index) => (
-                                                <option key={cls.id || index} value={cls.name}>
-                                                    {cls.name}
-                                                </option>
-                                            ))
-                                        ) : (
-                                            <option disabled>Đang tải lớp...</option>
-                                        )}
-                                    </select>
-
-                                    <select
-                                        className="filter-select"
-                                        value={examFilters.result}
-                                        onChange={(e) => setExamFilters({ ...examFilters, result: e.target.value })}
-                                    >
-                                        <option value="">Tất cả kết quả</option>
-                                        <option value="passed">Đạt</option>
-                                        <option value="failed">Không đạt</option>
-                                    </select>
-                                </div>
-                            </div>
-
                             <div className="session-table-container">
                                 {loadingExamAttempts ? (
                                     <div className="text-center p-5">
                                         <Spinner animation="border" variant="primary" />
-                                        <p className="mt-3">Đang tải danh sách bài thi...</p>
+                                        <p className="mt-3">Đang tải dữ liệu...</p>
                                     </div>
+                                ) : resultsViewMode === 'periods' ? (
+                                    <>
+                                        <div className="table-responsive-mobile">
+                                            <table className="session-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Mã</th>
+                                                        <th>Tên học kỳ thi</th>
+                                                        <th>Thời gian</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {resultsExamPeriods.length === 0 ? (
+                                                        <tr>
+                                                            <td colSpan="3" className="text-center p-4">
+                                                                <i className="fas fa-folder-open fa-3x text-muted mb-3"></i>
+                                                                <p className="text-muted">Chưa có học kỳ thi.</p>
+                                                            </td>
+                                                        </tr>
+                                                    ) : (
+                                                        resultsExamPeriods
+                                                            .slice((resultsPeriodsPagination.page - 1) * resultsPeriodsPagination.limit, resultsPeriodsPagination.page * resultsPeriodsPagination.limit)
+                                                            .map((p) => (
+                                                                <tr
+                                                                    key={p.exam_period_id}
+                                                                    onClick={() => {
+                                                                        setSelectedResultsPeriod(p);
+                                                                        setResultsViewMode('departments');
+                                                                        setSelectedResultsDepartment(null);
+                                                                        setSelectedResultsExam(null);
+                                                                        setResultsDepartments([]);
+                                                                        setResultsExams([]);
+                                                                        setExamAttempts([]);
+                                                                        setExamFilters(prev => ({ ...prev, exam_id: '' }));
+                                                                        setExamAttemptsPagination(prev => ({ ...prev, page: 1 }));
+                                                                    }}
+                                                                    style={{ cursor: 'pointer' }}
+                                                                    className="table-row-hover"
+                                                                >
+                                                                    <td><strong>{p.period_code}</strong></td>
+                                                                    <td>{p.period_name}</td>
+                                                                    <td>
+                                                                        {p.start_date && p.end_date
+                                                                            ? `${new Date(p.start_date).toLocaleDateString('vi-VN')} - ${new Date(p.end_date).toLocaleDateString('vi-VN')}`
+                                                                            : '-'}
+                                                                    </td>
+                                                                </tr>
+                                                            ))
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        {resultsExamPeriods.length > 0 && resultsPeriodsPagination.totalPages > 1 && (
+                                            <div className="mt-3">
+                                                <Pagination
+                                                    currentPage={resultsPeriodsPagination.page}
+                                                    totalPages={resultsPeriodsPagination.totalPages}
+                                                    onPageChange={(page) => setResultsPeriodsPagination(prev => ({ ...prev, page }))}
+                                                    maxVisiblePages={5}
+                                                    showFirstLast={true}
+                                                />
+                                            </div>
+                                        )}
+                                    </>
+                                ) : resultsViewMode === 'departments' ? (
+                                    <>
+                                        <div className="table-responsive-mobile">
+                                            <table className="session-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Khoa</th>
+                                                        <th>Số kỳ thi</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {resultsDepartments.length === 0 ? (
+                                                        <tr>
+                                                            <td colSpan="2" className="text-center p-4">
+                                                                <i className="fas fa-inbox fa-3x text-muted mb-3"></i>
+                                                                <p className="text-muted">Chưa có khoa/kỳ thi trong học kỳ này.</p>
+                                                            </td>
+                                                        </tr>
+                                                    ) : (
+                                                        resultsDepartments.map((d, idx) => (
+                                                            <tr
+                                                                key={idx}
+                                                                onClick={() => {
+                                                                    setSelectedResultsDepartment(d.department_name);
+                                                                    setResultsViewMode('exams');
+                                                                    setSelectedResultsExam(null);
+                                                                    setResultsExamsPagination(prev => ({ ...prev, page: 1 }));
+                                                                    setExamAttempts([]);
+                                                                    setExamFilters(prev => ({ ...prev, exam_id: '' }));
+                                                                    setExamAttemptsPagination(prev => ({ ...prev, page: 1 }));
+                                                                }}
+                                                                style={{ cursor: 'pointer' }}
+                                                                className="table-row-hover"
+                                                            >
+                                                                <td><strong>{d.department_name}</strong></td>
+                                                                <td><Badge bg="primary">{d.exams_count || 0}</Badge></td>
+                                                            </tr>
+                                                        ))
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </>
+                                ) : resultsViewMode === 'exams' ? (
+                                    <>
+                                        <div className="table-responsive-mobile">
+                                            <table className="session-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Tên kỳ thi</th>
+                                                        <th>Loại</th>
+                                                        <th>Lớp</th>
+                                                        <th>Thời gian</th>
+                                                        <th style={{ width: 120 }}>Hành động</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {resultsExams.length === 0 ? (
+                                                        <tr>
+                                                            <td colSpan="5" className="text-center p-4">
+                                                                <i className="fas fa-inbox fa-3x text-muted mb-3"></i>
+                                                                <p className="text-muted">Chưa có kỳ thi nào.</p>
+                                                            </td>
+                                                        </tr>
+                                                    ) : (
+                                                        resultsExams.map((exam) => (
+                                                            <tr
+                                                                key={exam.exam_id}
+                                                                onClick={() => {
+                                                                    setSelectedResultsExam(exam);
+                                                                    setResultsViewMode('results');
+                                                                    setExamFilters(prev => ({ ...prev, exam_id: String(exam.exam_id) }));
+                                                                    setExamAttemptsPagination(prev => ({ ...prev, page: 1 }));
+                                                                }}
+                                                                style={{ cursor: 'pointer' }}
+                                                                className="table-row-hover"
+                                                            >
+                                                                <td><strong>{exam.exam_title}</strong></td>
+                                                                <td>{formatExamType(exam.exam_type)}</td>
+                                                                <td>{(exam.participant_class_name || exam.class_name) ? <Badge bg="info">{exam.participant_class_name || exam.class_name}</Badge> : <span className="text-muted">-</span>}</td>
+                                                                <td>
+                                                                    {exam.available_from ? (
+                                                                        exam.available_until
+                                                                            ? `${new Date(exam.available_from).toLocaleString('vi-VN')} – ${new Date(exam.available_until).toLocaleString('vi-VN')}`
+                                                                            : new Date(exam.available_from).toLocaleString('vi-VN')
+                                                                    ) : '-'}
+                                                                </td>
+                                                                <td onClick={(ev) => ev.stopPropagation()}>
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="outline-success"
+                                                                        title="Tải Excel nhập điểm (T1, MaSV, MaMH...)"
+                                                                        disabled={exportingNhapDiemExamId === exam.exam_id}
+                                                                        onClick={(ev) => exportNhapDiemExcelForExam(exam, ev)}
+                                                                    >
+                                                                        {exportingNhapDiemExamId === exam.exam_id ? (
+                                                                            <Spinner animation="border" size="sm" />
+                                                                        ) : (
+                                                                            <><i className="fas fa-file-excel me-1"></i>Excel</>
+                                                                        )}
+                                                                    </Button>
+                                                                </td>
+                                                            </tr>
+                                                        ))
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        {resultsExamsPagination.totalPages > 1 && (
+                                            <div className="mt-3">
+                                                <Pagination
+                                                    currentPage={resultsExamsPagination.page}
+                                                    totalPages={resultsExamsPagination.totalPages}
+                                                    onPageChange={(page) => setResultsExamsPagination(prev => ({ ...prev, page }))}
+                                                    maxVisiblePages={5}
+                                                    showFirstLast={true}
+                                                />
+                                            </div>
+                                        )}
+                                    </>
                                 ) : (
                                     <>
+                                        {/* Filters (khi đã chọn kỳ thi) */}
+                                        <div className="session-list-controls mb-3">
+                                            <div className="search-controls">
+                                                <div className="search-input" style={{ minWidth: '350px', flex: '1' }}>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Tìm theo tên sinh viên hoặc mã sinh viên..."
+                                                        value={examFilters.search}
+                                                        onChange={(e) => {
+                                                            setExamFilters({ ...examFilters, search: e.target.value });
+                                                            setExamAttemptsPagination(prev => ({ ...prev, page: 1 }));
+                                                        }}
+                                                        style={{ width: '100%' }}
+                                                    />
+                                                </div>
+
+                                                <select
+                                                    className="filter-select"
+                                                    value={examFilters.class_name}
+                                                    onChange={(e) => {
+                                                        setExamFilters({ ...examFilters, class_name: e.target.value });
+                                                        setExamAttemptsPagination(prev => ({ ...prev, page: 1 }));
+                                                    }}
+                                                >
+                                                    <option value="">Tất cả lớp</option>
+                                                    {Array.isArray(classes) && classes.length > 0 ? (
+                                                        classes.map((cls, index) => (
+                                                            <option key={cls.id || index} value={cls.name}>
+                                                                {cls.name}
+                                                            </option>
+                                                        ))
+                                                    ) : (
+                                                        <option disabled>Chưa có dữ liệu lớp</option>
+                                                    )}
+                                                </select>
+
+                                                <select
+                                                    className="filter-select"
+                                                    value={examFilters.result}
+                                                    onChange={(e) => {
+                                                        setExamFilters({ ...examFilters, result: e.target.value });
+                                                        setExamAttemptsPagination(prev => ({ ...prev, page: 1 }));
+                                                    }}
+                                                >
+                                                    <option value="">Tất cả kết quả</option>
+                                                    <option value="passed">Đạt</option>
+                                                    <option value="failed">Không đạt</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
                                         <div className="table-responsive-mobile">
                                             <table className="session-table">
                                                 <thead>
@@ -2622,7 +3453,7 @@ const ExamReports = () => {
                                                             <td colSpan="8" className="text-center p-4">
                                                                 <i className="fas fa-inbox fa-3x text-muted mb-3"></i>
                                                                 <p className="text-muted">
-                                                                    {examAttempts.length === 0 
+                                                                    {examAttempts.length === 0
                                                                         ? 'Chưa có bài thi nào đã nộp'
                                                                         : 'Không tìm thấy bài thi nào phù hợp với bộ lọc đã chọn'}
                                                                 </p>
@@ -2635,9 +3466,9 @@ const ExamReports = () => {
                                                             const percentage = totalPoints > 0 ? (score / totalPoints) * 100 : 0;
                                                             const passingScore = parseFloat(attempt.passing_score || 60);
                                                             const passed = percentage >= passingScore;
-                                                            
+
                                                             return (
-                                                                <tr 
+                                                                <tr
                                                                     key={attempt.attempt_id}
                                                                     onClick={() => handleViewExamResults(attempt)}
                                                                     style={{ cursor: 'pointer' }}
@@ -2656,7 +3487,7 @@ const ExamReports = () => {
                                                                             <span className="text-muted">-</span>
                                                                         )}
                                                                     </td>
-                                                                    <td>{attempt.exam_title || 'N/A'}</td>
+                                                                    <td>{attempt.exam_title || selectedResultsExam?.exam_title || 'N/A'}</td>
                                                                     <td>{formatDateTime(attempt.start_time)}</td>
                                                                     <td>{formatDateTime(attempt.submit_time || attempt.end_time)}</td>
                                                                     <td>
@@ -2699,8 +3530,7 @@ const ExamReports = () => {
                                                 </tbody>
                                             </table>
                                         </div>
-                                        
-                                        {/* Pagination */}
+
                                         {filteredExamAttempts.length > 0 && examAttemptsPagination.totalPages > 1 && (
                                             <div className="mt-3">
                                                 <Pagination
@@ -3229,6 +4059,190 @@ const ExamReports = () => {
                             </div>
                         </Tab>
                     )}
+                    
+                    {/* Bộ câu hỏi theo kỳ thi - lms_exam_topic_question_sets + lms_attempt_questions */}
+                    {hasLMSQAPermission() && (
+                        <Tab eventKey="question-sets" title={<span><i className="fas fa-layer-group me-2"></i>Bộ câu hỏi theo kỳ thi</span>}>
+                            <div className="mb-3" style={{
+                                display: 'flex',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                gap: '20px',
+                                padding: '16px 0'
+                            }}>
+                                <select
+                                    value={questionSetsFilters.exam_id}
+                                    onChange={(e) => {
+                                        const examId = e.target.value || '';
+                                        loadQuestionSetsTabData(examId);
+                                    }}
+                                    style={{
+                                        minWidth: '500px',
+                                        padding: '16px 24px',
+                                        fontSize: '17px',
+                                        border: '2px solid #e3e8ef',
+                                        borderRadius: '14px',
+                                        backgroundColor: '#ffffff',
+                                        color: '#2c3e50',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.3s ease',
+                                        outline: 'none',
+                                        fontWeight: '600',
+                                        boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
+                                        height: '58px'
+                                    }}
+                                >
+                                    <option value="">Chọn kỳ thi để xem bộ câu hỏi...</option>
+                                    {Array.isArray(exams) && exams.map((exam) => (
+                                        <option key={exam.exam_id} value={exam.exam_id}>
+                                            {exam.exam_title}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="session-table-container">
+                                {!questionSetsFilters.exam_id ? (
+                                    <div className="text-center p-5">
+                                        <i className="fas fa-layer-group fa-3x text-muted mb-3"></i>
+                                        <p className="text-muted">Vui lòng chọn kỳ thi để xem bộ câu hỏi và câu hỏi theo lần làm bài</p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        {/* 1. Bộ câu hỏi cố định theo chủ đề - mỗi dòng là một câu hỏi */}
+                                        <div className="session-card mb-4">
+                                            <div className="card-header-modern">
+                                                <div className="header-icon"><i className="fas fa-database"></i></div>
+                                                <h6>Bộ câu hỏi cố định theo chủ đề (mỗi dòng = một câu hỏi)</h6>
+                                            </div>
+                                            <div className="card-body-modern">
+                                                {loadingQuestionSets ? (
+                                                    <div className="text-center p-4">
+                                                        <Spinner animation="border" variant="primary" />
+                                                        <p className="mt-2">Đang tải...</p>
+                                                    </div>
+                                                ) : !questionSetsData || questionSetsData.length === 0 ? (
+                                                    <p className="text-muted mb-0">Không có bộ câu hỏi cố định (kỳ thi không dùng Random cố định hoặc chưa tạo bộ).</p>
+                                                ) : (
+                                                    <Table striped bordered hover responsive>
+                                                        <thead>
+                                                            <tr>
+                                                                <th style={{ width: '60px' }}>Mã bộ</th>
+                                                                <th>Tên kỳ thi</th>
+                                                                <th>Chủ đề</th>
+                                                                <th style={{ width: '90px' }}>Mã chủ đề</th>
+                                                                <th style={{ width: '70px' }} className="text-center">STT câu</th>
+                                                                <th>Nội dung câu hỏi</th>
+                                                                <th style={{ width: '130px' }}>Ngày tạo bộ</th>
+                                                                <th style={{ width: '130px' }}>Ngày cập nhật</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {questionSetsData.map((row, idx) => (
+                                                                <tr key={`${row.set_id}-${row.question_id}-${idx}`}>
+                                                                    <td>{row.set_id}</td>
+                                                                    <td>{row.exam_title || '—'}</td>
+                                                                    <td>{row.topic_name || '—'}</td>
+                                                                    <td>{row.topic_code ?? '—'}</td>
+                                                                    <td className="text-center">{row.question_order}</td>
+                                                                    <td style={{ maxWidth: '400px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }} title={row.question_text}>
+                                                                        {(row.question_text || '').length > 200 ? `${(row.question_text || '').slice(0, 200)}...` : (row.question_text || '—')}
+                                                                    </td>
+                                                                    <td>{row.set_created_at ? new Date(row.set_created_at).toLocaleString() : '—'}</td>
+                                                                    <td>{row.set_updated_at ? new Date(row.set_updated_at).toLocaleString() : '—'}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </Table>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {/* 2. Câu hỏi theo từng lần làm bài */}
+                                        <div className="session-card mb-4">
+                                            <div className="card-header-modern">
+                                                <div className="header-icon"><i className="fas fa-list-ol"></i></div>
+                                                <h6>Câu hỏi theo từng lần làm bài (mỗi dòng = một câu trong một lượt thi)</h6>
+                                            </div>
+                                            <div className="card-body-modern">
+                                                {loadingAttemptQuestions ? (
+                                                    <div className="text-center p-4">
+                                                        <Spinner animation="border" variant="primary" />
+                                                        <p className="mt-2">Đang tải...</p>
+                                                    </div>
+                                                ) : !attemptQuestionsData || attemptQuestionsData.length === 0 ? (
+                                                    <p className="text-muted mb-0">Chưa có lần làm bài nào hoặc không có dữ liệu.</p>
+                                                ) : (
+                                                    <>
+                                                        <p className="text-muted small mb-2">
+                                                            Tổng {attemptQuestionsPagination.total} bản ghi (trang {attemptQuestionsPagination.page}/{attemptQuestionsPagination.totalPages || 1}).
+                                                        </p>
+                                                        <Table striped bordered hover responsive>
+                                                            <thead>
+                                                                <tr>
+                                                                    <th style={{ width: '70px' }}>Mã bản ghi</th>
+                                                                    <th style={{ width: '80px' }}>Lần làm bài</th>
+                                                                    <th>Tên kỳ thi</th>
+                                                                    <th>Thí sinh</th>
+                                                                    <th style={{ width: '60px' }} className="text-center">STT câu</th>
+                                                                    <th>Nội dung câu hỏi</th>
+                                                                    <th style={{ width: '70px' }} className="text-center">Điểm</th>
+                                                                    <th style={{ width: '60px' }} className="text-center">Bonus</th>
+                                                                    <th style={{ width: '100px' }}>Trạng thái</th>
+                                                                    <th style={{ width: '130px' }}>Thời gian</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {attemptQuestionsData.map((row) => (
+                                                                    <tr key={row.attempt_question_id}>
+                                                                        <td>{row.attempt_question_id}</td>
+                                                                        <td>{row.attempt_id}</td>
+                                                                        <td>{row.exam_title || '—'}</td>
+                                                                        <td>{row.user_full_name || row.user_email || '—'}</td>
+                                                                        <td className="text-center">{row.question_order}</td>
+                                                                        <td style={{ maxWidth: '350px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }} title={row.question_content}>
+                                                                            {(row.question_content || '').length > 180 ? `${(row.question_content || '').slice(0, 180)}...` : (row.question_content || '—')}
+                                                                        </td>
+                                                                        <td className="text-center">{row.points != null ? row.points : '—'}</td>
+                                                                        <td className="text-center">{row.is_bonus ? 'Có' : 'Không'}</td>
+                                                                        <td>{row.attempt_status || '—'}</td>
+                                                                        <td>{row.created_at ? new Date(row.created_at).toLocaleString() : '—'}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </Table>
+                                                        {attemptQuestionsPagination.totalPages > 1 && (
+                                                            <div className="d-flex justify-content-between align-items-center mt-3">
+                                                                <span className="text-muted">
+                                                                    Trang {attemptQuestionsPagination.page} / {attemptQuestionsPagination.totalPages}
+                                                                </span>
+                                                                <div className="d-flex gap-2">
+                                                                    <Button
+                                                                        variant="outline-primary"
+                                                                        size="sm"
+                                                                        disabled={attemptQuestionsPagination.page <= 1}
+                                                                        onClick={() => fetchAttemptQuestionsData(questionSetsFilters.exam_id, attemptQuestionsPagination.page - 1)}
+                                                                    >
+                                                                        Trước
+                                                                    </Button>
+                                                                    <Button
+                                                                        variant="outline-primary"
+                                                                        size="sm"
+                                                                        disabled={attemptQuestionsPagination.page >= attemptQuestionsPagination.totalPages}
+                                                                        onClick={() => fetchAttemptQuestionsData(questionSetsFilters.exam_id, attemptQuestionsPagination.page + 1)}
+                                                                    >
+                                                                        Sau
+                                                                    </Button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </Tab>
+                    )}
                 </Tabs>
             </div>
 
@@ -3422,7 +4436,7 @@ const ExamReports = () => {
                             ) : (
                                 <div className="accordion" id="questionAccordion">
                             {questionStats.map((question, index) => (
-                                <div className="accordion-item session-card mb-3" key={question.question_id}>
+                                <div className="accordion-item mb-3" key={question.question_id}>
                                     <h2 className="accordion-header">
                                         <button
                                             className={`accordion-button ${expandedQuestion === question.question_id ? '' : 'collapsed'}`}

@@ -120,7 +120,7 @@ const StaffDashboard = () => {
       case 'today':
         return {
           startDate: toLocalDateString(today),
-          endDate: null
+          endDate: toLocalDateString(today) // Set endDate to same day for "Hôm nay"
         };
       case '2days':
         const twoDaysAgo = new Date(today);

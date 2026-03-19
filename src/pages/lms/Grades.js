@@ -21,7 +21,7 @@ const pdfExportPopupStyles = `
 import { Modal, Button, Form, Alert, Badge, Tab, Tabs, Table, ProgressBar, Spinner, Row, Col } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAlert } from '../../contexts/AlertContext';
-import api from '../../utils/api';
+import api, { getApiBaseURL } from '../../utils/api';
 import Pagination from '../../components/Pagination';
 import usePageTitle from '../../hooks/usePageTitle';
 import JSZip from 'jszip';
@@ -1499,7 +1499,7 @@ const Grades = () => {
         try {
           // Use fetch API directly to ensure blob data integrity
           const token = localStorage.getItem('token');
-          const fetchResponse = await fetch(`/api/lms/attempts/${attempt.attempt_id}/results/pdf?${queryString}`, {
+          const fetchResponse = await fetch(`${getApiBaseURL()}/lms/attempts/${attempt.attempt_id}/results/pdf?${queryString}`, {
             headers: {
               'x-auth-token': token
             }
@@ -1812,7 +1812,7 @@ const Grades = () => {
         try {
           // Use fetch API directly to ensure blob data integrity
           const token = localStorage.getItem('token');
-          const fetchResponse = await fetch(`/api/lms/attempts/${attempt.attempt_id}/results/excel?${queryString}`, {
+          const fetchResponse = await fetch(`${getApiBaseURL()}/lms/attempts/${attempt.attempt_id}/results/excel?${queryString}`, {
             headers: {
               'x-auth-token': token
             }

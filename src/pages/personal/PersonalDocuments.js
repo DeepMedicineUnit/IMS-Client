@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Modal, Button, Form, Alert, Badge, Dropdown, Table, Nav, Tab } from 'react-bootstrap';
 import * as XLSX from 'xlsx';
-import api from '../../utils/api';
+import api, { getApiBaseURL } from '../../utils/api';
 import Pagination from '../../components/Pagination';
 import { useAlert } from '../../contexts/AlertContext';
 import '../../styles/user.css';
@@ -329,7 +329,7 @@ const PersonalDocuments = () => {
         const fileExt = template.file_path.toLowerCase();
         if (fileExt.endsWith('.txt')) {
           try {
-            const response = await fetch(`/api${template.file_path}`);
+            const response = await fetch(`${getApiBaseURL()}${template.file_path}`);
             const text = await response.text();
             setEditedTextContent(text);
           } catch (error) {
@@ -337,7 +337,7 @@ const PersonalDocuments = () => {
           }
         } else if (fileExt.endsWith('.xlsx') || fileExt.endsWith('.xls')) {
           try {
-            const response = await fetch(`/api${template.file_path}`);
+            const response = await fetch(`${getApiBaseURL()}${template.file_path}`);
             const arrayBuffer = await response.arrayBuffer();
             const workbook = XLSX.read(arrayBuffer, { type: 'array' });
             const firstSheetName = workbook.SheetNames[0];

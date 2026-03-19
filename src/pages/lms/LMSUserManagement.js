@@ -6,6 +6,7 @@ import Pagination from '../../components/Pagination';
 import * as XLSX from 'xlsx';
 import '../../styles/user.css';
 import usePageTitle from '../../hooks/usePageTitle';
+import { getApiBaseURL } from '../../utils/api';
 
 // CSS cho dropdown menu
 const dropdownStyles = `
@@ -112,6 +113,9 @@ const LMSUserManagement = () => {
         expirationDate: '',
         totalQuestions: '',
         allowExceed: false,
+        // Mặc định: 1 ngày
+        conditionPeriodValue: '1', // số lượng (ngày / tuần / tháng)
+        conditionPeriodUnit: 'day', // 'day' | 'week' | 'month'
         questionTypeCounts: {
             mcq: '', multiple_response: '', true_false: '', matching: '',
             short_answer: '', essay: '', fill_blank: '', ordering: ''
@@ -206,8 +210,115 @@ const LMSUserManagement = () => {
         isComplete: false
     });
 
-    // LMS roles hierarchy: QA (highest) => lms_admin => mod => staff => view
-    const lmsRoles = ['mod', 'staff', 'view']; // Cannot assign lms_admin
+    // LMS roles hierarchy: QA (highest) => admin => mod => staff
+    const lmsRoles = ['qa', 'admin', 'mod', 'staff'];
+
+    const getLmsRoleLabel = (role) => {
+        const labels = {
+            qa: 'QA (Khảo thí & ĐBCL)',
+            admin: 'Admin LMS',
+            mod: 'Điều hành kỳ thi',
+            staff: 'Nhân viên ngân hàng câu hỏi'
+        };
+        return labels[role] || role;
+    };
+
+    // Mô tả chi tiết quyền từng vai trò trong module LMS
+    const LMS_ROLE_DESCRIPTIONS = {
+        qa: {
+            label: 'QA (lms_qa)',
+            desc: 'Quyền cao nhất: quản lý toàn bộ module LMS – Users, Activity-logs, Mail-settings, Courses, Live, Exams (tạo/sửa/xóa/duyệt/publish/giám sát), Question bank (tạo/sửa/xóa/duyệt/import/export/cài đặt), Grades (sổ điểm), Reports (thống kê kỳ thi).'
+        },
+        admin: {
+            label: 'Admin LMS (lms_admin)',
+            desc: 'Quyền quản trị tổng quan LMS nhưng không trực tiếp chỉnh sửa đề/câu hỏi/sổ điểm: xem Dashboard, Courses, Live và Activity-logs; không truy cập Users, Mail-settings, Exams, Questions, Grades, Reports.'
+        },
+        mod: {
+            label: 'Moderator kỳ thi (lms_mod)',
+            desc: 'Quyền điều hành kỳ thi: xem Dashboard, Courses, Live; quản lý Question bank (tạo/sửa/xóa, duyệt câu hỏi của Staff); quản lý Exams (tạo/sửa/xóa, publish, giám sát, proctor-message, ban/unban, chấm tay, quy chế thi). Không truy cập Users, Activity-logs, Mail-settings, Grades, Reports.'
+        },
+        staff: {
+            label: 'Staff ngân hàng câu hỏi (lms_staff)',
+            desc: 'Chỉ làm việc với ngân hàng câu hỏi: xem Dashboard, Courses, Live; tạo/sửa/xóa chủ đề và câu hỏi, import câu hỏi theo giới hạn được cấu hình (số lượng, loại, độ khó, Bloom, khoảng thời gian). Không được duyệt câu hỏi, không truy cập Exams, Users, Activity-logs, Mail-settings, Grades, Reports.'
+        }
+    };
+
+    const normalizeModuleRoles = (value) => {
+        if (!value) return [];
+        if (Array.isArray(value)) return value.filter((v) => typeof v === 'string' && v.trim());
+        if (typeof value === 'string') {
+            try {
+                const parsed = JSON.parse(value);
+                return Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string' && v.trim()) : [];
+            } catch (_) {
+                return [];
+            }
+        }
+        return [];
+    };
+
+    const getBaseRoleRank = (role) => {
+        if (role === 'superadmin') return 3;
+        if (role === 'admin') return 2;
+        if (role === 'staff') return 1;
+        if (role === 'student') return 0;
+        return 0;
+    };
+
+    // Chỉ cho phép "Chỉnh sửa thông tin người dùng" khi:
+    // - User mục tiêu đã có ít nhất một role LMS.
+    // - Quyền được xác định theo role chính (superadmin > admin > staff > student):
+    //   currentBaseRank >= targetBaseRank.
+    const canEditLmsUserInfo = (user) => {
+        const moduleRoles = normalizeModuleRoles(user?.module_roles);
+        const hasLmsRole = moduleRoles.some((r) => typeof r === 'string' && r.startsWith('lms_'));
+        if (!hasLmsRole) return false;
+
+        const currentBaseRank = getBaseRoleRank(currentUser?.role);
+        const targetBaseRank = getBaseRoleRank(user.role);
+        return currentBaseRank >= targetBaseRank;
+    };
+
+    // States for "Danh sách người dùng" – Xóa khỏi danh sách / Thêm / Sửa (giống QA)
+    const [showRemoveFromListModal, setShowRemoveFromListModal] = useState(false);
+    const [userToRemoveFromList, setUserToRemoveFromList] = useState(null);
+    const [removeFromListLoading, setRemoveFromListLoading] = useState(false);
+    const [showAddLmsUserModal, setShowAddLmsUserModal] = useState(false);
+    const [addLmsUserForm, setAddLmsUserForm] = useState({
+        username: '',
+        email: '',
+        full_name: '',
+        password: '',
+        lmsRole: 'staff'
+    });
+    const [addLmsUserLoading, setAddLmsUserLoading] = useState(false);
+    const [addLmsUserError, setAddLmsUserError] = useState('');
+    const [showEditLmsUserModal, setShowEditLmsUserModal] = useState(false);
+    const [userToEditLms, setUserToEditLms] = useState(null);
+    const [editLmsUserForm, setEditLmsUserForm] = useState({ full_name: '', email: '', password: '' });
+    const [editLmsUserLoading, setEditLmsUserLoading] = useState(false);
+    const [editLmsUserError, setEditLmsUserError] = useState('');
+    const [approvalStatusFilterUsers, setApprovalStatusFilterUsers] = useState('all');
+    const [approveLmsUserLoading, setApproveLmsUserLoading] = useState(false);
+    const [approvingLmsUserId, setApprovingLmsUserId] = useState(null);
+
+    /** Tab Nhóm sinh viên — cùng logic/style UserManagement (superadmin), trang LMS chỉ lms_qa */
+    const hasLmsQaForGroups = normalizeModuleRoles(currentUser?.module_roles).includes('lms_qa');
+    const [studentGroups, setStudentGroups] = useState([]);
+    const [showGroupModal, setShowGroupModal] = useState(false);
+    const [showGroupDetailModal, setShowGroupDetailModal] = useState(false);
+    const [selectedGroup, setSelectedGroup] = useState(null);
+    const [groupFormData, setGroupFormData] = useState({
+        group_name: '',
+        description: '',
+        selected_classes: [],
+        student_ids: []
+    });
+    const [availableClasses, setAvailableClasses] = useState([]);
+    const [studentsByClasses, setStudentsByClasses] = useState([]);
+    const [showDeleteGroupModal, setShowDeleteGroupModal] = useState(false);
+    const [groupToDelete, setGroupToDelete] = useState(null);
+
     const questionTypes = ['mcq', 'multiple_response', 'true_false', 'matching', 'short_answer', 'essay', 'fill_blank', 'ordering'];
     const difficultyLevels = ['easy', 'medium', 'hard', 'expert'];
     const bloomLevels = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create'];
@@ -248,6 +359,25 @@ const LMSUserManagement = () => {
             fetchUsers();
         }
     }, [activeTab, pagination.page, debouncedSearchTerm, classFilter, facultyFilter, majorFilter, statusFilter, sortField, sortOrder]);
+
+    useEffect(() => {
+        if (activeTab === 'student-groups' && hasLmsQaForGroups) {
+            fetchStudentGroups();
+            fetchAvailableClasses();
+        }
+    }, [activeTab, hasLmsQaForGroups]);
+
+    useEffect(() => {
+        if (activeTab !== 'student-groups') return;
+        const totalItems = studentGroups.length;
+        const totalPages = Math.max(1, Math.ceil(totalItems / pagination.limit));
+        setPagination((prev) => ({
+            ...prev,
+            totalItems,
+            totalPages,
+            page: prev.page > totalPages ? totalPages : prev.page
+        }));
+    }, [studentGroups, activeTab, pagination.limit]);
 
     // Auto-check for expired roles every 5 minutes when on users tab
     useEffect(() => {
@@ -413,59 +543,277 @@ const LMSUserManagement = () => {
     const fetchUsers = async () => {
         try {
             setLoading(true);
-            // Fetch all users by calling multiple times if needed
-            // Then filter and paginate on client side because we need to filter out lms_admin and lms_qa
-            let allUsers = [];
-            let page = 1;
-            let hasMore = true;
-            const limit = 1000; // Fetch 1000 at a time
-
-            while (hasMore) {
-                const response = await api.get('/users', {
-                    params: {
-                        search: debouncedSearchTerm,
-                        excludeRole: 'student',
-                        page: page,
-                        limit: limit
-                    }
-                });
-
-                if (response.data.success) {
-                    const users = response.data.data || [];
-                    allUsers = [...allUsers, ...users];
-                    
-                    // Check if there are more pages
-                    const pagination = response.data.pagination || {};
-                    if (pagination.totalPages && page >= pagination.totalPages) {
-                        hasMore = false;
-                    } else if (users.length < limit) {
-                        hasMore = false;
-                    } else {
-                        page++;
-                    }
-                } else {
-                    hasMore = false;
-                }
+            setError('');
+            // Giống QA: gọi API danh sách LMS (mọi user không phải student, trừ user đã bị xóa khỏi danh sách và trừ lms_admin/lms_qa)
+            const response = await api.get('/lms/users');
+            if (response.data.success) {
+                const data = response.data.data || [];
+                setUsers(data);
+                setPagination(prev => ({
+                    ...prev,
+                    totalItems: data.length,
+                    totalPages: Math.max(1, Math.ceil(data.length / prev.limit))
+                }));
+            } else {
+                setError(response.data.message || 'Không thể tải danh sách');
+                setUsers([]);
             }
-
-            // Filter users that have or can have LMS roles (exclude lms_admin and lms_qa)
-            const lmsUsers = allUsers.filter(user => {
-                const moduleRoles = user.module_roles || [];
-                return !moduleRoles.includes('lms_admin') && !moduleRoles.includes('lms_qa');
-            });
-
-            // Note: Expired roles are now automatically revoked by backend middleware
-            // when user authenticates or uses API, so we don't need to manually refresh here
-
-            setUsers(lmsUsers);
-            setPagination(prev => ({
-                ...prev,
-                totalItems: lmsUsers.length,
-                totalPages: Math.ceil(lmsUsers.length / prev.limit)
-            }));
         } catch (error) {
             console.error('Error fetching users:', error);
-            setError('Không thể tải danh sách người dùng');
+            setError(error.response?.data?.message || 'Không thể tải danh sách người dùng');
+            setUsers([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const fetchStudentGroups = async () => {
+        try {
+            setLoading(true);
+            const response = await api.get('/student-groups');
+            if (response.data && response.data.success) {
+                setStudentGroups(response.data.data || []);
+            } else {
+                setStudentGroups([]);
+            }
+        } catch (error) {
+            console.error('Error fetching student groups:', error);
+            setStudentGroups([]);
+            setError(error.response?.data?.message || 'Không thể tải danh sách nhóm sinh viên');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const fetchAvailableClasses = async () => {
+        try {
+            try {
+                const response = await api.get('/student-groups/classes/unique');
+                if (response.data && response.data.success) {
+                    setAvailableClasses(response.data.data || []);
+                    return;
+                }
+            } catch (apiError) {
+                console.warn('Student-groups classes API failed, trying users API:', apiError);
+            }
+            const response = await api.get('/users?role=student&limit=999999');
+            if (response.data && response.data.success) {
+                const userList = response.data.data || [];
+                const classMap = new Map();
+                userList.forEach((user) => {
+                    if (user.class_name && user.class_name.trim() !== '') {
+                        if (classMap.has(user.class_name)) {
+                            classMap.get(user.class_name).student_count++;
+                        } else {
+                            classMap.set(user.class_name, {
+                                class_name: user.class_name,
+                                student_count: 1
+                            });
+                        }
+                    }
+                });
+                setAvailableClasses(Array.from(classMap.values()).sort((a, b) => a.class_name.localeCompare(b.class_name)));
+            } else {
+                setAvailableClasses([]);
+            }
+        } catch (error) {
+            console.error('Error fetching available classes:', error);
+            setAvailableClasses([]);
+        }
+    };
+
+    const fetchStudentsByClasses = async (classes) => {
+        if (!classes || classes.length === 0) {
+            setStudentsByClasses([]);
+            return;
+        }
+        try {
+            try {
+                const response = await api.get(`/student-groups/students/by-classes?classes=${classes.join(',')}`);
+                if (response.data && response.data.success) {
+                    setStudentsByClasses(response.data.data || []);
+                    return;
+                }
+            } catch (apiError) {
+                console.warn('Student-groups students API failed, trying users API:', apiError);
+            }
+            const response = await api.get('/users?role=student&limit=999999');
+            if (response.data && response.data.success) {
+                const userList = response.data.data || [];
+                setStudentsByClasses(userList.filter((u) => u.class_name && classes.includes(u.class_name)));
+            } else {
+                setStudentsByClasses([]);
+            }
+        } catch (error) {
+            console.error('Error fetching students by classes:', error);
+            setStudentsByClasses([]);
+        }
+    };
+
+    const handleGroupFormChange = (e) => {
+        const { name, value } = e.target;
+        setGroupFormData((prev) => ({ ...prev, [name]: value }));
+    };
+
+    const handleClassSelectionChange = (e) => {
+        const selectedClasses = Array.from(e.target.selectedOptions, (option) => option.value);
+        setGroupFormData((prev) => ({ ...prev, selected_classes: selectedClasses }));
+        if (selectedClasses.length > 0) {
+            fetchStudentsByClasses(selectedClasses);
+        } else {
+            setStudentsByClasses([]);
+        }
+    };
+
+    const handleStudentSelectionChange = (studentId, isSelected) => {
+        setGroupFormData((prev) => ({
+            ...prev,
+            student_ids: isSelected
+                ? [...prev.student_ids, studentId]
+                : prev.student_ids.filter((id) => id !== studentId)
+        }));
+    };
+
+    const handleCreateGroup = async (e) => {
+        e.preventDefault();
+        if (!groupFormData.group_name.trim()) {
+            setError('Vui lòng nhập tên nhóm');
+            return;
+        }
+        if (!groupFormData.selected_classes || groupFormData.selected_classes.length === 0) {
+            setError('Vui lòng chọn ít nhất một lớp');
+            return;
+        }
+        try {
+            setLoading(true);
+            setError('');
+            const validStudentIds = groupFormData.student_ids.filter((id) => id !== undefined && id !== null);
+            const requestData = { ...groupFormData, student_ids: validStudentIds };
+            const response = await api.post('/student-groups', requestData);
+            if (response.data.success) {
+                showAlert('Tạo nhóm sinh viên thành công', 'success');
+                setShowGroupModal(false);
+                setGroupFormData({
+                    group_name: '',
+                    description: '',
+                    selected_classes: [],
+                    student_ids: []
+                });
+                setStudentsByClasses([]);
+                fetchStudentGroups();
+            } else {
+                setError(response.data.message || 'Lỗi khi tạo nhóm sinh viên');
+            }
+        } catch (error) {
+            console.error('Error creating group:', error);
+            setError(error.response?.data?.message || 'Lỗi khi tạo nhóm sinh viên');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleEditGroup = async (group) => {
+        try {
+            setLoading(true);
+            const response = await api.get(`/student-groups/${group.id}`);
+            if (response.data.success) {
+                const groupDetails = response.data.data;
+                const studentIds = groupDetails.students ? groupDetails.students.map((s) => s.id) : [];
+                setSelectedGroup(groupDetails);
+                setGroupFormData({
+                    group_name: groupDetails.group_name,
+                    description: groupDetails.description || '',
+                    selected_classes: groupDetails.selected_classes || [],
+                    student_ids: studentIds
+                });
+                if (groupDetails.selected_classes && groupDetails.selected_classes.length > 0) {
+                    await fetchStudentsByClasses(groupDetails.selected_classes);
+                }
+                setShowGroupModal(true);
+            } else {
+                setError('Lỗi khi tải thông tin nhóm sinh viên');
+            }
+        } catch (error) {
+            console.error('Error fetching group details:', error);
+            setError('Lỗi khi tải thông tin nhóm sinh viên');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleUpdateGroup = async (e) => {
+        e.preventDefault();
+        if (!groupFormData.group_name.trim()) {
+            setError('Vui lòng nhập tên nhóm');
+            return;
+        }
+        if (!groupFormData.selected_classes || groupFormData.selected_classes.length === 0) {
+            setError('Vui lòng chọn ít nhất một lớp');
+            return;
+        }
+        try {
+            setLoading(true);
+            setError('');
+            const validStudentIds = groupFormData.student_ids.filter((id) => id !== undefined && id !== null);
+            const requestData = { ...groupFormData, student_ids: validStudentIds };
+            const response = await api.put(`/student-groups/${selectedGroup.id}`, requestData);
+            if (response.data.success) {
+                showAlert('Cập nhật nhóm sinh viên thành công', 'success');
+                setShowGroupModal(false);
+                setSelectedGroup(null);
+                setGroupFormData({
+                    group_name: '',
+                    description: '',
+                    selected_classes: [],
+                    student_ids: []
+                });
+                setStudentsByClasses([]);
+                fetchStudentGroups();
+            } else {
+                setError(response.data.message || 'Lỗi khi cập nhật nhóm sinh viên');
+            }
+        } catch (error) {
+            console.error('Error updating group:', error);
+            setError(error.response?.data?.message || 'Lỗi khi cập nhật nhóm sinh viên');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDeleteGroup = async () => {
+        if (!groupToDelete) return;
+        try {
+            setLoading(true);
+            const response = await api.delete(`/student-groups/${groupToDelete.id}`);
+            if (response.data.success) {
+                showAlert('Xóa nhóm sinh viên thành công', 'success');
+                setShowDeleteGroupModal(false);
+                setGroupToDelete(null);
+                fetchStudentGroups();
+            } else {
+                setError(response.data.message || 'Lỗi khi xóa nhóm sinh viên');
+            }
+        } catch (error) {
+            console.error('Error deleting group:', error);
+            setError(error.response?.data?.message || 'Lỗi khi xóa nhóm sinh viên');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleViewGroupDetails = async (group) => {
+        try {
+            setLoading(true);
+            const response = await api.get(`/student-groups/${group.id}`);
+            if (response.data.success) {
+                setSelectedGroup(response.data.data);
+                setShowGroupDetailModal(true);
+            } else {
+                setError(response.data.message || 'Lỗi khi tải thông tin nhóm');
+            }
+        } catch (error) {
+            console.error('Error fetching group details:', error);
+            setError(error.response?.data?.message || 'Lỗi khi tải thông tin nhóm');
         } finally {
             setLoading(false);
         }
@@ -669,6 +1017,26 @@ const LMSUserManagement = () => {
             setError(error.response?.data?.message || 'Không thể duyệt sinh viên');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleApproveLmsUser = async (e, userId) => {
+        e.stopPropagation();
+        try {
+            setApprovingLmsUserId(userId);
+            setApproveLmsUserLoading(true);
+            const response = await api.post(`/lms/users/${userId}/approve`);
+            if (response.data.success) {
+                showAlert(response.data.message || 'Đã duyệt người dùng thành công', 'success');
+                fetchUsers();
+            } else {
+                showAlert(response.data.message || 'Không thể duyệt', 'danger');
+            }
+        } catch (err) {
+            showAlert(err.response?.data?.message || 'Không thể duyệt người dùng', 'danger');
+        } finally {
+            setApprovingLmsUserId(null);
+            setApproveLmsUserLoading(false);
         }
     };
 
@@ -927,7 +1295,7 @@ const LMSUserManagement = () => {
             };
 
             const token = localStorage.getItem('token');
-            const baseURL = '/api';
+            const baseURL = getApiBaseURL();
             
             let csrfToken = null;
             try {
@@ -1089,103 +1457,136 @@ const LMSUserManagement = () => {
     };
 
     const handleOpenRoleModal = (user) => {
-        setSelectedUser(user);
-        const moduleRoles = user.module_roles || [];
-        const currentLmsRole = moduleRoles.find(role => role.startsWith('lms_'));
-        
-        // Parse JSON fields safely
-        let questionTypes = {};
-        let difficulties = {};
-        let bloomLevels = {};
-        
         try {
-            questionTypes = user.lms_staff_question_types 
-                ? (typeof user.lms_staff_question_types === 'string' 
-                    ? JSON.parse(user.lms_staff_question_types) 
-                    : user.lms_staff_question_types)
-                : {};
-        } catch (e) {
-            console.error('Error parsing question types:', e);
-        }
-        
-        try {
-            difficulties = user.lms_staff_difficulties 
-                ? (typeof user.lms_staff_difficulties === 'string' 
-                    ? JSON.parse(user.lms_staff_difficulties) 
-                    : user.lms_staff_difficulties)
-                : {};
-        } catch (e) {
-            console.error('Error parsing difficulties:', e);
-        }
-        
-        try {
-            bloomLevels = user.lms_staff_bloom_levels 
-                ? (typeof user.lms_staff_bloom_levels === 'string' 
-                    ? JSON.parse(user.lms_staff_bloom_levels) 
-                    : user.lms_staff_bloom_levels)
-                : {};
-        } catch (e) {
-            console.error('Error parsing bloom levels:', e);
-        }
-        
-        // Format expiration date for date input (YYYY-MM-DD)
-        // IMPORTANT: Use local date components to avoid timezone issues
-        let formattedExpirationDate = '';
-        if (user.lms_role_expiration) {
+            setSelectedUser(user);
+            const moduleRoles = normalizeModuleRoles(user?.module_roles);
+            const currentLmsRole = moduleRoles.find(role => typeof role === 'string' && role.startsWith('lms_'));
+
+            // Parse JSON fields safely
+            let questionTypes = {};
+            let difficulties = {};
+            let bloomLevels = {};
+
             try {
-                const dateStr = String(user.lms_role_expiration).trim();
-                // If it's already in YYYY-MM-DD format, use it directly
-                if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-                    formattedExpirationDate = dateStr;
-                } else {
-                    // Otherwise, parse and format using local date components
-                    // This avoids timezone conversion issues
-                    const date = new Date(dateStr + 'T12:00:00'); // Use noon to avoid timezone edge cases
-                    if (!isNaN(date.getTime())) {
-                        // Get local date components (not UTC) to preserve the intended date
-                        const year = date.getFullYear();
-                        const month = String(date.getMonth() + 1).padStart(2, '0');
-                        const day = String(date.getDate()).padStart(2, '0');
-                        formattedExpirationDate = `${year}-${month}-${day}`;
-                    }
+                if (user?.lms_staff_question_types) {
+                    const qt = typeof user.lms_staff_question_types === 'string'
+                        ? JSON.parse(user.lms_staff_question_types)
+                        : user.lms_staff_question_types;
+                    questionTypes = qt && typeof qt === 'object' ? qt : {};
                 }
             } catch (e) {
-                console.error('Error formatting expiration date:', e);
-                formattedExpirationDate = '';
+                console.error('Error parsing question types:', e);
+                questionTypes = {};
+            }
+
+            try {
+                if (user?.lms_staff_difficulties) {
+                    const df = typeof user.lms_staff_difficulties === 'string'
+                        ? JSON.parse(user.lms_staff_difficulties)
+                        : user.lms_staff_difficulties;
+                    difficulties = df && typeof df === 'object' ? df : {};
+                }
+            } catch (e) {
+                console.error('Error parsing difficulties:', e);
+                difficulties = {};
+            }
+
+            try {
+                if (user?.lms_staff_bloom_levels) {
+                    const bl = typeof user.lms_staff_bloom_levels === 'string'
+                        ? JSON.parse(user.lms_staff_bloom_levels)
+                        : user.lms_staff_bloom_levels;
+                    bloomLevels = bl && typeof bl === 'object' ? bl : {};
+                }
+            } catch (e) {
+                console.error('Error parsing bloom levels:', e);
+                bloomLevels = {};
+            }
+
+            // Format expiration date for date input (YYYY-MM-DD)
+            // IMPORTANT: Use local date components to avoid timezone issues
+            let formattedExpirationDate = '';
+            if (user?.lms_role_expiration) {
+                try {
+                    const dateStr = String(user.lms_role_expiration).trim();
+                    // If it's already in YYYY-MM-DD format, use it directly
+                    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                        formattedExpirationDate = dateStr;
+                    } else {
+                        // Otherwise, parse and format using local date components
+                        // This avoids timezone conversion issues
+                        const date = new Date(dateStr + 'T12:00:00'); // Use noon to avoid timezone edge cases
+                        if (!isNaN(date.getTime())) {
+                            // Get local date components (not UTC) to preserve the intended date
+                            const year = date.getFullYear();
+                            const month = String(date.getMonth() + 1).padStart(2, '0');
+                            const day = String(date.getDate()).padStart(2, '0');
+                            formattedExpirationDate = `${year}-${month}-${day}`;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error formatting expiration date:', e);
+                    formattedExpirationDate = '';
+                }
+            }
+
+        // Map điều kiện thời gian (lưu trong DB là số ngày) -> value + unit để hiển thị
+        let periodValue = '1'; // mặc định 1 ngày nếu chưa cấu hình
+        let periodUnit = 'day';
+        const rawDays = user.lms_staff_condition_period_months;
+        if (rawDays != null && !isNaN(rawDays)) {
+            const daysInt = parseInt(rawDays, 10) || 0;
+            if (daysInt > 0) {
+                if (daysInt % 30 === 0) {
+                    periodUnit = 'month';
+                    periodValue = String(daysInt / 30);
+                } else if (daysInt % 7 === 0) {
+                    periodUnit = 'week';
+                    periodValue = String(daysInt / 7);
+                } else {
+                    periodUnit = 'day';
+                    periodValue = String(daysInt);
+                }
             }
         }
 
-        setRoleFormData({
-            role: currentLmsRole ? currentLmsRole.replace('lms_', '') : '',
-            expirationDate: formattedExpirationDate,
-            totalQuestions: user.lms_staff_total_questions || '',
-            allowExceed: user.lms_staff_allow_exceed === true || user.lms_staff_allow_exceed === 1 || false,
-            questionTypeCounts: {
-                mcq: questionTypes.mcq || '',
-                multiple_response: questionTypes.multiple_response || '',
-                true_false: questionTypes.true_false || '',
-                matching: questionTypes.matching || '',
-                short_answer: questionTypes.short_answer || '',
-                essay: questionTypes.essay || '',
-                fill_blank: questionTypes.fill_blank || '',
-                ordering: questionTypes.ordering || ''
-            },
-            difficultyCounts: {
-                easy: difficulties.easy || '',
-                medium: difficulties.medium || '',
-                hard: difficulties.hard || '',
-                expert: difficulties.expert || ''
-            },
-            bloomCounts: {
-                remember: bloomLevels.remember || '',
-                understand: bloomLevels.understand || '',
-                apply: bloomLevels.apply || '',
-                analyze: bloomLevels.analyze || '',
-                evaluate: bloomLevels.evaluate || '',
-                create: bloomLevels.create || ''
-            }
-        });
-        setShowRoleModal(true);
+            setRoleFormData({
+                role: currentLmsRole ? currentLmsRole.replace('lms_', '') : '',
+                expirationDate: formattedExpirationDate,
+                totalQuestions: user?.lms_staff_total_questions || '',
+                allowExceed: user?.lms_staff_allow_exceed === true || user?.lms_staff_allow_exceed === 1 || false,
+                conditionPeriodValue: periodValue,
+                conditionPeriodUnit: periodUnit,
+                questionTypeCounts: {
+                    mcq: (questionTypes || {}).mcq || '',
+                    multiple_response: (questionTypes || {}).multiple_response || '',
+                    true_false: (questionTypes || {}).true_false || '',
+                    matching: (questionTypes || {}).matching || '',
+                    short_answer: (questionTypes || {}).short_answer || '',
+                    essay: (questionTypes || {}).essay || '',
+                    fill_blank: (questionTypes || {}).fill_blank || '',
+                    ordering: (questionTypes || {}).ordering || ''
+                },
+                difficultyCounts: {
+                    easy: (difficulties || {}).easy || '',
+                    medium: (difficulties || {}).medium || '',
+                    hard: (difficulties || {}).hard || '',
+                    expert: (difficulties || {}).expert || ''
+                },
+                bloomCounts: {
+                    remember: (bloomLevels || {}).remember || '',
+                    understand: (bloomLevels || {}).understand || '',
+                    apply: (bloomLevels || {}).apply || '',
+                    analyze: (bloomLevels || {}).analyze || '',
+                    evaluate: (bloomLevels || {}).evaluate || '',
+                    create: (bloomLevels || {}).create || ''
+                }
+            });
+            setShowRoleModal(true);
+        } catch (err) {
+            console.error('handleOpenRoleModal error:', err, { user });
+            showAlert(err?.message || 'Lỗi khi mở phân quyền LMS', 'danger');
+        }
     };
 
     const handleSaveRole = async () => {
@@ -1193,10 +1594,10 @@ const LMSUserManagement = () => {
 
         try {
             setLoading(true);
-            const moduleRoles = selectedUser.module_roles || [];
+            const moduleRoles = normalizeModuleRoles(selectedUser?.module_roles);
             
             // Remove existing LMS roles
-            const updatedRoles = moduleRoles.filter(role => !role.startsWith('lms_'));
+            const updatedRoles = moduleRoles.filter(role => typeof role === 'string' && !role.startsWith('lms_'));
             
             // Add new role if selected
             if (roleFormData.role) {
@@ -1215,6 +1616,20 @@ const LMSUserManagement = () => {
                 updateData.lms_staff_difficulties = JSON.stringify(roleFormData.difficultyCounts);
                 updateData.lms_staff_bloom_levels = JSON.stringify(roleFormData.bloomCounts);
                 updateData.lms_staff_allow_exceed = roleFormData.allowExceed || false;
+
+                // Tính tổng số ngày từ value + unit
+                let periodDays = null;
+                if (roleFormData.conditionPeriodValue) {
+                    const v = parseInt(roleFormData.conditionPeriodValue, 10);
+                    if (!isNaN(v) && v > 0) {
+                        const unit = roleFormData.conditionPeriodUnit || 'day';
+                        let multiplier = 1;
+                        if (unit === 'week') multiplier = 7;
+                        else if (unit === 'month') multiplier = 30; // xấp xỉ, đủ cho use-case limit
+                        periodDays = v * multiplier;
+                    }
+                }
+                updateData.lms_staff_condition_period_months = periodDays;
             } else {
                 // Clear staff conditions if role is not staff
                 updateData.lms_staff_total_questions = null;
@@ -1222,6 +1637,7 @@ const LMSUserManagement = () => {
                 updateData.lms_staff_difficulties = null;
                 updateData.lms_staff_bloom_levels = null;
                 updateData.lms_staff_allow_exceed = false;
+                updateData.lms_staff_condition_period_months = null;
             }
 
             const response = await api.put(`/users/${selectedUser.id}`, updateData);
@@ -1243,9 +1659,10 @@ const LMSUserManagement = () => {
 
     const formatModuleRole = (roleKey) => {
         const roleMap = {
-            'lms_mod': 'Quản lý LMS',
-            'lms_staff': 'Nhân viên LMS',
-            'lms_view': 'Chỉ xem LMS'
+            'lms_qa': 'QA',
+            'lms_admin': 'Toàn quyền',
+            'lms_mod': 'Quyền điều hành',
+            'lms_staff': 'Quyền nhân viên'
         };
         return roleMap[roleKey] || roleKey;
     };
@@ -1267,6 +1684,273 @@ const LMSUserManagement = () => {
     const isRoleExpired = (expirationDate) => {
         if (!expirationDate) return false;
         return new Date(expirationDate) < new Date();
+    };
+
+    // ——— Xóa khỏi danh sách (gỡ quyền LMS) ———
+    const openRemoveFromListModal = (e, user) => {
+        e.stopPropagation();
+        setUserToRemoveFromList(user);
+        setShowRemoveFromListModal(true);
+    };
+
+    const closeRemoveFromListModal = () => {
+        if (!removeFromListLoading) {
+            setShowRemoveFromListModal(false);
+            setUserToRemoveFromList(null);
+        }
+    };
+
+    const handleConfirmRemoveFromList = async () => {
+        if (!userToRemoveFromList) return;
+        try {
+            setRemoveFromListLoading(true);
+            // Gọi API xóa khỏi danh sách LMS (giống QA: DELETE /quality-assurance/users/:id/list)
+            const response = await api.delete(`/lms/users/${userToRemoveFromList.id}/list`);
+            if (response.data.success) {
+                showAlert(response.data.message || 'Đã xóa khỏi danh sách người dùng LMS', 'success');
+                setShowRemoveFromListModal(false);
+                setUserToRemoveFromList(null);
+                fetchUsers();
+            } else {
+                showAlert(response.data.message || 'Không thể xóa khỏi danh sách', 'danger');
+            }
+        } catch (err) {
+            showAlert(err.response?.data?.message || 'Không thể xóa khỏi danh sách', 'danger');
+        } finally {
+            setRemoveFromListLoading(false);
+        }
+    };
+
+    // ——— Chỉnh sửa thông tin người dùng (LMS) ———
+    const openEditLmsUserModal = (e, user) => {
+        e.stopPropagation();
+        setUserToEditLms(user);
+        setEditLmsUserForm({
+            full_name: user.full_name || '',
+            email: user.email || '',
+            password: ''
+        });
+        setEditLmsUserError('');
+        setShowEditLmsUserModal(true);
+    };
+
+    const handleEditLmsUserSubmit = async (e) => {
+        e.preventDefault();
+        if (!userToEditLms) return;
+        setEditLmsUserError('');
+        const { full_name, email, password } = editLmsUserForm;
+        if (!full_name?.trim() || !email?.trim()) {
+            setEditLmsUserError('Vui lòng điền đầy đủ Họ tên và Email.');
+            return;
+        }
+        try {
+            setEditLmsUserLoading(true);
+            const payload = { fullName: full_name.trim(), email: email.trim() };
+            if (password && password.trim()) payload.password = password;
+            const response = await api.put(`/users/${userToEditLms.id}`, payload);
+            if (response.data.success) {
+                showAlert('Cập nhật thông tin người dùng thành công', 'success');
+                setShowEditLmsUserModal(false);
+                setUserToEditLms(null);
+                fetchUsers();
+            } else {
+                setEditLmsUserError(response.data.message || 'Không thể cập nhật thông tin');
+            }
+        } catch (err) {
+            setEditLmsUserError(err.response?.data?.message || 'Không thể cập nhật thông tin người dùng');
+        } finally {
+            setEditLmsUserLoading(false);
+        }
+    };
+
+    // ——— Thêm người dùng mới (LMS) ———
+    const openAddLmsUserModal = () => {
+        setAddLmsUserError('');
+        setAddLmsUserForm({
+            username: '',
+            email: '',
+            full_name: '',
+            password: '',
+            lmsRole: 'staff'
+        });
+        setShowAddLmsUserModal(true);
+    };
+
+    const handleAddLmsUserSubmit = async (e) => {
+        e.preventDefault();
+        setAddLmsUserError('');
+        const { username, email, full_name, password, lmsRole } = addLmsUserForm;
+        if (!username?.trim() || !email?.trim() || !full_name?.trim() || !password) {
+            setAddLmsUserError('Vui lòng điền đầy đủ tên đăng nhập, email, họ tên và mật khẩu.');
+            return;
+        }
+        try {
+            setAddLmsUserLoading(true);
+            const createRes = await api.post('/users', {
+                username: username.trim(),
+                email: email.trim(),
+                fullName: full_name.trim(),
+                password,
+                role: 'staff'
+            });
+            const createdUser = createRes.data.data || createRes.data.user;
+            if (!createRes.data.success || !createdUser?.id) {
+                setAddLmsUserError(createRes.data.message || 'Không thể tạo người dùng');
+                return;
+            }
+            const newId = createdUser.id;
+            let moduleRoles = createdUser.module_roles;
+            if (typeof moduleRoles === 'string') {
+                try {
+                    moduleRoles = JSON.parse(moduleRoles);
+                } catch (_) {
+                    moduleRoles = [];
+                }
+            }
+            moduleRoles = Array.isArray(moduleRoles) ? moduleRoles.filter(r => typeof r === 'string' && !r.startsWith('lms_')) : [];
+            moduleRoles.push(`lms_${lmsRole}`);
+            await api.put(`/users/${newId}`, { module_roles: moduleRoles });
+            showAlert(createRes.data.message || 'Đã tạo người dùng và cấp quyền LMS thành công', 'success');
+            setShowAddLmsUserModal(false);
+            fetchUsers();
+        } catch (err) {
+            setAddLmsUserError(err.response?.data?.message || 'Không thể tạo người dùng');
+        } finally {
+            setAddLmsUserLoading(false);
+        }
+    };
+
+    const renderStudentGroupsTab = () => {
+        const currentIsMobile = window.innerWidth <= 768;
+        return (
+            <>
+                <div className="session-list-controls">
+                    <div className="search-controls">
+                        <div className="search-input">
+                            <input
+                                type="text"
+                                placeholder="Tìm kiếm nhóm sinh viên..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="search-input"
+                            />
+                        </div>
+                    </div>
+                </div>
+                <div className="session-table-container">
+                    <div className="table-responsive-mobile">
+                        <table className="session-table students-table">
+                            <thead>
+                                <tr>
+                                    <th className={currentIsMobile ? 'mobile-essential' : 'mobile-hide'}>#</th>
+                                    <th className="mobile-essential">Tên nhóm</th>
+                                    <th className="mobile-essential">Mô tả</th>
+                                    <th className="mobile-essential">Lớp</th>
+                                    <th className="mobile-essential">Số sinh viên</th>
+                                    <th className="mobile-essential">Ngày tạo</th>
+                                    <th className="mobile-essential">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {studentGroups.length > 0 ? (
+                                    studentGroups
+                                        .slice((pagination.page - 1) * pagination.limit, pagination.page * pagination.limit)
+                                        .map((group, index) => (
+                                            <tr
+                                                key={group.id}
+                                                onClick={() => handleViewGroupDetails(group)}
+                                                style={{ cursor: 'pointer' }}
+                                                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f8f9fa'; }}
+                                                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = ''; }}
+                                            >
+                                                <td className={currentIsMobile ? 'mobile-essential' : 'mobile-hide'}>
+                                                    {(pagination.page - 1) * pagination.limit + index + 1}
+                                                </td>
+                                                <td className="mobile-essential">
+                                                    <div className="fw-bold">{group.group_name}</div>
+                                                </td>
+                                                <td className="mobile-essential">
+                                                    <div className="text-muted">
+                                                        {group.description
+                                                            ? group.description.length > 50
+                                                                ? `${group.description.substring(0, 50)}...`
+                                                                : group.description
+                                                            : '-'}
+                                                    </div>
+                                                </td>
+                                                <td className="mobile-essential">
+                                                    <div>
+                                                        {(() => {
+                                                            const actualClasses = group.actual_classes || [];
+                                                            return actualClasses && actualClasses.length > 0 ? (
+                                                                <div>
+                                                                    {actualClasses.map((className, idx) => (
+                                                                        <Badge key={idx} bg="success" className="me-1 mb-1">
+                                                                            {className}
+                                                                        </Badge>
+                                                                    ))}
+                                                                </div>
+                                                            ) : '-';
+                                                        })()}
+                                                    </div>
+                                                </td>
+                                                <td className="mobile-essential">
+                                                    <Badge bg="primary">{group.student_count || 0}</Badge>
+                                                </td>
+                                                <td className="mobile-essential">
+                                                    {group.created_at ? new Date(group.created_at).toLocaleDateString('vi-VN') : '-'}
+                                                </td>
+                                                <td className="mobile-essential">
+                                                    <div className="action-buttons" onClick={(e) => e.stopPropagation()}>
+                                                        <Dropdown className="action-dropdown">
+                                                            <Dropdown.Toggle variant="light" size="sm" className="btn-icon" id={`dropdown-group-lms-${group.id}`}>
+                                                                <i className="fas fa-ellipsis-v"></i>
+                                                            </Dropdown.Toggle>
+                                                            <Dropdown.Menu popperConfig={{ strategy: 'fixed' }}>
+                                                                <Dropdown.Item onClick={() => handleViewGroupDetails(group)}>
+                                                                    <i className="fas fa-eye me-2 text-info"></i>Xem chi tiết
+                                                                </Dropdown.Item>
+                                                                <Dropdown.Item onClick={() => handleEditGroup(group)}>
+                                                                    <i className="fas fa-edit me-2 text-primary"></i>Chỉnh sửa
+                                                                </Dropdown.Item>
+                                                                <Dropdown.Item
+                                                                    onClick={() => {
+                                                                        setGroupToDelete(group);
+                                                                        setShowDeleteGroupModal(true);
+                                                                    }}
+                                                                >
+                                                                    <i className="fas fa-trash me-2 text-danger"></i>Xóa
+                                                                </Dropdown.Item>
+                                                            </Dropdown.Menu>
+                                                        </Dropdown>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))
+                                ) : (
+                                    <tr>
+                                        <td colSpan="7" className="text-center">
+                                            {loading ? <Spinner animation="border" size="sm" /> : 'Không có nhóm sinh viên nào'}
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                    {studentGroups.length > 0 && pagination.totalPages > 1 && (
+                        <div className="mt-3">
+                            <Pagination
+                                currentPage={pagination.page}
+                                totalPages={pagination.totalPages}
+                                onPageChange={(page) => setPagination((prev) => ({ ...prev, page }))}
+                                maxVisiblePages={5}
+                                showFirstLast={true}
+                            />
+                        </div>
+                    )}
+                </div>
+            </>
+        );
     };
 
     const renderStudentsTab = () => {
@@ -1472,125 +2156,240 @@ const LMSUserManagement = () => {
         );
     };
 
+    // Filtered & paginated cho tab "Danh sách người dùng"
+    const filteredUsersList = React.useMemo(() => {
+        let list = users;
+        if (approvalStatusFilterUsers === 'pending') list = list.filter(u => !u.approved);
+        if (debouncedSearchTerm.trim()) {
+            const term = debouncedSearchTerm.toLowerCase();
+            list = list.filter(u =>
+                (u.full_name || '').toLowerCase().includes(term) ||
+                (u.username || '').toLowerCase().includes(term) ||
+                (u.email || '').toLowerCase().includes(term)
+            );
+        }
+        return list;
+    }, [users, approvalStatusFilterUsers, debouncedSearchTerm]);
+    const paginatedUsersList = React.useMemo(() => {
+        const start = (pagination.page - 1) * pagination.limit;
+        return filteredUsersList.slice(start, start + pagination.limit);
+    }, [filteredUsersList, pagination.page, pagination.limit]);
+    const totalPagesUsers = Math.max(1, Math.ceil(filteredUsersList.length / pagination.limit));
+
+    useEffect(() => {
+        if (activeTab === 'users' && pagination.page > totalPagesUsers && totalPagesUsers >= 1) {
+            setPagination(prev => ({ ...prev, page: 1 }));
+        }
+    }, [activeTab, totalPagesUsers, pagination.page]);
+
     const renderUsersTab = () => {
         const currentIsMobile = window.innerWidth <= 768;
 
         return (
             <>
-                {/* Search Controls */}
+                {/* Search Controls – style giống QA */}
                 <div className="session-list-controls">
-                    <div className="search-controls">
-                        <div className="search-input">
+                    <div className="search-controls w-100 d-flex flex-wrap align-items-center gap-2">
+                        <div className="search-input flex-grow-1" style={{ minWidth: '200px' }}>
                             <input
                                 type="text"
                                 placeholder="Tìm kiếm người dùng..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
-                                className="search-input"
+                                className="search-input w-100"
+                                style={{ width: '100%' }}
                             />
                         </div>
+                        <Form.Select
+                            value={approvalStatusFilterUsers}
+                            onChange={(e) => { setApprovalStatusFilterUsers(e.target.value); setPagination(prev => ({ ...prev, page: 1 })); }}
+                            style={{ width: 'auto', minWidth: '140px' }}
+                            className="form-control-modern"
+                        >
+                            <option value="all">Tất cả trạng thái</option>
+                            <option value="pending">Chờ duyệt</option>
+                        </Form.Select>
                     </div>
                 </div>
 
-                {/* Users Table */}
+                {/* Users Table – thêm cột Thao tác (Sửa, Xóa khỏi danh sách) */}
                 <div className="session-table-container">
                     <div className="table-responsive-mobile">
                         <table className="session-table staff-table">
                             <thead>
                                 <tr>
-                                    <th className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>#</th>
+                                    <th className={currentIsMobile ? 'mobile-hide' : ''}>#</th>
                                     <th className="mobile-essential">Tên đăng nhập</th>
                                     <th className="mobile-essential">Họ và tên</th>
-                                    <th className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>Email</th>
+                                    <th className={currentIsMobile ? 'mobile-hide' : ''}>Email</th>
                                     <th className="mobile-essential">Vai trò LMS</th>
                                     <th className="mobile-essential">Thời hạn</th>
                                     <th className="mobile-essential">Trạng thái</th>
+                                    <th className="mobile-essential">Duyệt TK</th>
+                                    <th className="mobile-essential">Thao tác</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {users.length > 0 ? (
-                                    users
-                                        .slice((pagination.page - 1) * pagination.limit, pagination.page * pagination.limit)
-                                        .map((user, index) => {
-                                            const moduleRoles = user.module_roles || [];
-                                            const lmsRole = moduleRoles.find(role => role.startsWith('lms_'));
-                                            const expired = isRoleExpired(user.lms_role_expiration);
-                                            
-                                            return (
-                                                <tr 
-                                                    key={user.id}
-                                                    onClick={() => handleOpenRoleModal(user)}
-                                                    style={{ cursor: 'pointer' }}
-                                                >
-                                                    <td className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>
-                                                        {(pagination.page - 1) * pagination.limit + index + 1}
-                                                    </td>
-                                                    <td className="mobile-essential">
-                                                        <div className="user-info-mobile">
-                                                            <div className="user-username">{user.username}</div>
-                                                            {currentIsMobile && (
-                                                                <div className="user-email-mobile">{user.email}</div>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                    <td className="mobile-essential">{user.full_name}</td>
-                                                    <td className={currentIsMobile ? "mobile-hide" : "mobile-hide"}>
-                                                        {!currentIsMobile && user.email}
-                                                    </td>
-                                                    <td className="mobile-essential">
-                                                        {lmsRole ? (
-                                                            <Badge bg={
-                                                                lmsRole === 'lms_mod' ? 'warning' :
-                                                                lmsRole === 'lms_staff' ? 'info' : 'secondary'
-                                                            }>
-                                                                {formatModuleRole(lmsRole)}
-                                                            </Badge>
-                                                        ) : (
-                                                            <span className="text-muted">Chưa có</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="mobile-essential">
-                                                        {user.lms_role_expiration ? (
-                                                            <span className={expired ? 'text-danger' : ''}>
-                                                                {formatDate(user.lms_role_expiration)}
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-muted">-</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="mobile-essential">
-                                                        {expired && lmsRole ? (
-                                                            <Badge bg="danger">Hết hạn</Badge>
-                                                        ) : lmsRole ? (
-                                                            <Badge bg="success">Hoạt động</Badge>
-                                                        ) : (
-                                                            <Badge bg="secondary">Chưa cấp</Badge>
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })
-                                ) : (
+                                {loading ? (
                                     <tr>
-                                        <td colSpan="7" className="text-center">
-                                            {loading ? (
-                                                <Spinner animation="border" size="sm" />
-                                            ) : (
-                                                'Không có người dùng nào'
-                                            )}
+                                        <td colSpan={9} className="text-center py-4">
+                                            <Spinner animation="border" size="sm" />
+                                            <span className="ms-2">Đang tải...</span>
                                         </td>
                                     </tr>
+                                ) : paginatedUsersList.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={9} className="text-center text-muted py-4">
+                                            Không có người dùng nào
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    paginatedUsersList.map((user, index) => {
+                                        const moduleRoles = normalizeModuleRoles(user?.module_roles);
+                                        const lmsRole = moduleRoles.find(role => typeof role === 'string' && role.startsWith('lms_'));
+                                        const expired = isRoleExpired(user.lms_role_expiration);
+                                        const canEditInfo = canEditLmsUserInfo(user);
+                                        return (
+                                            <tr
+                                                key={user.id}
+                                                style={{ cursor: 'default' }}
+                                            >
+                                                <td className={currentIsMobile ? 'mobile-hide' : ''}>
+                                                    {(pagination.page - 1) * pagination.limit + index + 1}
+                                                </td>
+                                                <td
+                                                    className="mobile-essential"
+                                                    onClick={canEditInfo ? (e) => openEditLmsUserModal(e, user) : undefined}
+                                                    style={canEditInfo ? { cursor: 'pointer' } : undefined}
+                                                >
+                                                    <div className="user-info-mobile">
+                                                        <div className="user-username">{user.username}</div>
+                                                        {currentIsMobile && user.email && (
+                                                            <div className="user-email-mobile">{user.email}</div>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td
+                                                    className="mobile-essential"
+                                                    onClick={canEditInfo ? (e) => openEditLmsUserModal(e, user) : undefined}
+                                                    style={canEditInfo ? { cursor: 'pointer' } : undefined}
+                                                >
+                                                    {user.full_name || '—'}
+                                                </td>
+                                                <td
+                                                    className={currentIsMobile ? 'mobile-hide' : ''}
+                                                    onClick={canEditInfo ? (e) => openEditLmsUserModal(e, user) : undefined}
+                                                    style={canEditInfo ? { cursor: 'pointer' } : undefined}
+                                                >
+                                                    {!currentIsMobile && (user.email || '—')}
+                                                </td>
+                                                <td
+                                                    className="mobile-essential"
+                                                    style={{ maxWidth: '180px', minWidth: 0, overflow: 'hidden', cursor: 'pointer' }}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleOpenRoleModal(user);
+                                                    }}
+                                                >
+                                                    {lmsRole ? (
+                                                        <Badge bg={
+                                                            lmsRole === 'lms_qa' ? 'danger' :
+                                                            lmsRole === 'lms_admin' ? 'primary' :
+                                                            lmsRole === 'lms_mod' ? 'warning' :
+                                                            lmsRole === 'lms_staff' ? 'info' : 'secondary'
+                                                        }>
+                                                            {formatModuleRole(lmsRole)}
+                                                        </Badge>
+                                                    ) : (
+                                                        <span className="text-muted">Chưa có</span>
+                                                    )}
+                                                </td>
+                                                <td
+                                                    className="mobile-essential"
+                                                    onClick={canEditInfo ? (e) => openEditLmsUserModal(e, user) : undefined}
+                                                    style={canEditInfo ? { cursor: 'pointer' } : undefined}
+                                                >
+                                                    {user.lms_role_expiration ? (
+                                                        <span className={expired ? 'text-danger' : ''}>
+                                                            {formatDate(user.lms_role_expiration)}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-muted">-</span>
+                                                    )}
+                                                </td>
+                                                <td
+                                                    className="mobile-essential"
+                                                    onClick={canEditInfo ? (e) => openEditLmsUserModal(e, user) : undefined}
+                                                    style={canEditInfo ? { cursor: 'pointer' } : undefined}
+                                                >
+                                                    {expired && lmsRole ? (
+                                                        <Badge bg="danger">Hết hạn</Badge>
+                                                    ) : lmsRole ? (
+                                                        <Badge bg="success">Hoạt động</Badge>
+                                                    ) : (
+                                                        <Badge bg="secondary">Chưa cấp</Badge>
+                                                    )}
+                                                </td>
+                                                <td className="mobile-essential" onClick={(e) => e.stopPropagation()}>
+                                                    {user.approved ? (
+                                                        <Badge bg="success">Đã duyệt</Badge>
+                                                    ) : (
+                                                        <>
+                                                            <Badge bg="warning" className="me-1">Chờ duyệt</Badge>
+                                                            <Button
+                                                                variant="outline-success"
+                                                                size="sm"
+                                                                disabled={approveLmsUserLoading}
+                                                                onClick={(e) => handleApproveLmsUser(e, user.id)}
+                                                                title="Duyệt người dùng"
+                                                            >
+                                                                {approvingLmsUserId === user.id ? (
+                                                                    <Spinner animation="border" size="sm" className="me-1" />
+                                                                ) : (
+                                                                    <i className="fas fa-check me-1"></i>
+                                                                )}
+                                                                Duyệt
+                                                            </Button>
+                                                        </>
+                                                    )}
+                                                </td>
+                                                <td className="mobile-essential" onClick={(e) => e.stopPropagation()}>
+                                                    <div className="d-flex flex-wrap gap-1">
+                                                        {canEditLmsUserInfo(user) && (
+                                                            <Button
+                                                                variant="outline-primary"
+                                                                size="sm"
+                                                                onClick={(e) => openEditLmsUserModal(e, user)}
+                                                                title="Chỉnh sửa thông tin"
+                                                            >
+                                                                <i className="fas fa-edit me-1"></i>
+                                                                Sửa
+                                                            </Button>
+                                                        )}
+                                                        <Button
+                                                            variant="outline-danger"
+                                                            size="sm"
+                                                            onClick={(e) => openRemoveFromListModal(e, user)}
+                                                            title="Xóa khỏi danh sách"
+                                                        >
+                                                            <i className="fas fa-trash-alt me-1"></i>
+                                                            Xóa
+                                                        </Button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
                                 )}
                             </tbody>
                         </table>
                     </div>
 
-                    {/* Pagination */}
-                    {users.length > 0 && pagination.totalPages > 1 && (
+                    {!loading && filteredUsersList.length > 0 && totalPagesUsers > 1 && (
                         <div className="mt-3">
                             <Pagination
                                 currentPage={pagination.page}
-                                totalPages={pagination.totalPages}
+                                totalPages={totalPagesUsers}
                                 onPageChange={(page) => setPagination(prev => ({ ...prev, page }))}
                                 maxVisiblePages={5}
                                 showFirstLast={true}
@@ -1650,8 +2449,36 @@ const LMSUserManagement = () => {
                                     Xuất Excel
                                 </Button>
                             </>
+                        ) : activeTab === 'student-groups' && hasLmsQaForGroups ? (
+                            <Button
+                                variant="outline-light"
+                                className="create-session-btn"
+                                onClick={() => {
+                                    setGroupFormData({
+                                        group_name: '',
+                                        description: '',
+                                        selected_classes: [],
+                                        student_ids: []
+                                    });
+                                    setStudentsByClasses([]);
+                                    setSelectedGroup(null);
+                                    fetchAvailableClasses();
+                                    setShowGroupModal(true);
+                                }}
+                            >
+                                <i className="fas fa-plus"></i>
+                                Thêm nhóm mới
+                            </Button>
                         ) : (
                             <>
+                                <Button
+                                    variant="outline-light"
+                                    className="create-session-btn"
+                                    onClick={openAddLmsUserModal}
+                                >
+                                    <i className="fas fa-plus"></i>
+                                    Thêm người dùng mới
+                                </Button>
                                 <Button
                                     variant="outline-light"
                                     className="create-session-btn"
@@ -1693,6 +2520,16 @@ const LMSUserManagement = () => {
                     }>
                         {renderUsersTab()}
                     </Tab>
+                    {hasLmsQaForGroups && (
+                        <Tab eventKey="student-groups" title={
+                            <span className="tab-title">
+                                <i className="fas fa-layer-group"></i>
+                                Nhóm sinh viên
+                            </span>
+                        }>
+                            {renderStudentGroupsTab()}
+                        </Tab>
+                    )}
                 </Tabs>
             </div>
 
@@ -1714,12 +2551,20 @@ const LMSUserManagement = () => {
                 <Modal.Body className="student-detail-body">
                     <div className="student-detail-container">
                         <Alert variant="info" className="mb-4">
-                            <div className="d-flex align-items-center">
-                                <i className="fas fa-info-circle me-3"></i>
+                            <div className="d-flex align-items-start">
+                                <i className="fas fa-info-circle me-3 mt-1"></i>
                                 <div>
                                     <strong>Hướng dẫn:</strong> Chọn quyền LMS cho người dùng này.
-                                    Có thể đặt thời hạn cho các role mod, staff, view.
-                                    Với role staff, có thể thiết lập điều kiện nhập câu hỏi.
+                                    Có thể đặt thời hạn cho các role mod, staff. Với role staff, có thể thiết lập điều kiện nhập câu hỏi.
+                                    <hr className="my-2" />
+                                    <ul className="mb-0 ps-3">
+                                        {Object.entries(LMS_ROLE_DESCRIPTIONS).map(([key, { label, desc }]) => (
+                                            <li key={key} className="mb-1">
+                                                <strong className="text-primary">{label}:</strong>{' '}
+                                                <span className="text-muted">{desc}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
                                 </div>
                             </div>
                         </Alert>
@@ -1747,13 +2592,13 @@ const LMSUserManagement = () => {
                                                 <option value="">Không có quyền</option>
                                                 {lmsRoles.map(role => (
                                                     <option key={role} value={role}>
-                                                        {role === 'mod' ? 'Quản lý' : role === 'staff' ? 'Nhân viên' : 'Chỉ xem'}
+                                                        {getLmsRoleLabel(role)}
                                                     </option>
                                                 ))}
                                             </Form.Select>
                                         </Form.Group>
                                     </Col>
-                                    {(roleFormData.role === 'mod' || roleFormData.role === 'staff' || roleFormData.role === 'view') && (
+                                    {(roleFormData.role === 'mod' || roleFormData.role === 'staff') && (
                                         <Col md={6}>
                                             <Form.Group className="mb-3">
                                                 <Form.Label className="info-label">
@@ -1785,43 +2630,78 @@ const LMSUserManagement = () => {
                                     <h6 className="mb-0">Điều kiện nhập câu hỏi (cho role Staff)</h6>
                                 </div>
                                 <div className="card-body-modern">
-                                    <Form.Group className="mb-3">
-                                        <Form.Label className="info-label">
-                                            <i className="fas fa-list-ol me-2"></i>
-                                            Tổng số câu hỏi
-                                        </Form.Label>
-                                        <Form.Control
-                                            type="number"
-                                            min="0"
-                                            value={roleFormData.totalQuestions}
-                                            onChange={(e) => setRoleFormData(prev => ({ ...prev, totalQuestions: e.target.value }))}
-                                            placeholder="Nhập tổng số câu hỏi được phép"
-                                            className="form-control-modern"
-                                        />
-                                    </Form.Group>
-
-                                    <Form.Group className="mb-3">
-                                        <div>
-                                            <Form.Check
-                                                type="radio"
-                                                id="allowExceedNo"
-                                                label="Không cho phép số lượng dư, vượt quá điều kiện"
-                                                checked={!roleFormData.allowExceed}
-                                                onChange={() => setRoleFormData(prev => ({ ...prev, allowExceed: false }))}
-                                                className="mb-2"
-                                            />
-                                            <Form.Check
-                                                type="radio"
-                                                id="allowExceedYes"
-                                                label="Cho phép số lượng dư, vượt quá điều kiện"
-                                                checked={roleFormData.allowExceed}
-                                                onChange={() => setRoleFormData(prev => ({ ...prev, allowExceed: true }))}
-                                            />
-                                        </div>
-                                        <Form.Text className="text-muted">
-                                            Nếu chọn "Không cho phép", hệ thống sẽ chặn khi số lượng câu hỏi vượt quá điều kiện đã set. Nếu chọn "Cho phép", hệ thống sẽ cho phép số lượng vượt quá.
-                                        </Form.Text>
-                                    </Form.Group>
+                                    <Row>
+                                        <Col md={6}>
+                                            <Form.Group className="mb-2">
+                                                <Form.Label className="info-label">
+                                                    <i className="fas fa-list-ol me-2"></i>
+                                                    Tổng số câu hỏi
+                                                </Form.Label>
+                                                <Form.Control
+                                                    type="number"
+                                                    min="0"
+                                                    value={roleFormData.totalQuestions}
+                                                    onChange={(e) => setRoleFormData(prev => ({ ...prev, totalQuestions: e.target.value }))}
+                                                    placeholder="Nhập tổng số câu hỏi được phép"
+                                                    className="form-control-modern"
+                                                />
+                                            </Form.Group>
+                                            <Form.Group className="mb-0">
+                                                <div>
+                                                    <Form.Check
+                                                        type="radio"
+                                                        id="allowExceedNo"
+                                                        label="Không cho phép số lượng dư, vượt quá điều kiện"
+                                                        checked={!roleFormData.allowExceed}
+                                                        onChange={() => setRoleFormData(prev => ({ ...prev, allowExceed: false }))}
+                                                        className="mb-2"
+                                                    />
+                                                    <Form.Check
+                                                        type="radio"
+                                                        id="allowExceedYes"
+                                                        label="Cho phép số lượng dư, vượt quá điều kiện"
+                                                        checked={roleFormData.allowExceed}
+                                                        onChange={() => setRoleFormData(prev => ({ ...prev, allowExceed: true }))}
+                                                    />
+                                                </div>
+                                                <Form.Text className="text-muted">
+                                                    Nếu chọn "Không cho phép", hệ thống sẽ chặn khi số lượng câu hỏi vượt quá điều kiện đã set. Nếu chọn "Cho phép", hệ thống sẽ cho phép số lượng vượt quá.
+                                                </Form.Text>
+                                            </Form.Group>
+                                        </Col>
+                                        <Col md={6}>
+                                            <Form.Group className="mb-2">
+                                                <Form.Label className="info-label">
+                                                    <i className="fas fa-calendar-alt me-2"></i>
+                                                    Chỉ tính câu hỏi trong (để Staff có thể import nhiều lần theo thời gian)
+                                                </Form.Label>
+                                                <div className="d-flex">
+                                                    <Form.Control
+                                                        type="number"
+                                                        min="1"
+                                                        value={roleFormData.conditionPeriodValue}
+                                                        onChange={(e) => setRoleFormData(prev => ({ ...prev, conditionPeriodValue: e.target.value }))}
+                                                        placeholder="Nhập số lượng"
+                                                        className="form-control-modern me-2"
+                                                        style={{ maxWidth: '140px' }}
+                                                    />
+                                                    <Form.Select
+                                                        className="form-control-modern"
+                                                        value={roleFormData.conditionPeriodUnit}
+                                                        onChange={(e) => setRoleFormData(prev => ({ ...prev, conditionPeriodUnit: e.target.value }))}
+                                                        style={{ maxWidth: '160px' }}
+                                                    >
+                                                        <option value="day">Ngày</option>
+                                                        <option value="week">Tuần</option>
+                                                        <option value="month">Tháng</option>
+                                                    </Form.Select>
+                                                </div>
+                                                <Form.Text className="text-muted">
+                                                    Để trống = tính tất cả thời gian. Ví dụ: 30 ngày, 4 tuần hoặc 3 tháng gần nhất; sau khoảng đó Staff có thể import thêm theo cùng điều kiện.
+                                                </Form.Text>
+                                            </Form.Group>
+                                        </Col>
+                                    </Row>
 
                                     <Row>
                                         <Col md={4}>
@@ -1968,6 +2848,323 @@ const LMSUserManagement = () => {
                             <>
                                 <i className="fas fa-save me-2"></i>
                                 Lưu quyền LMS
+                            </>
+                        )}
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+
+            {/* Modal Xóa khỏi danh sách (LMS) */}
+            <Modal show={showRemoveFromListModal} onHide={closeRemoveFromListModal} size="lg" className="student-detail-modal">
+                <Modal.Header closeButton className="student-detail-header">
+                    <Modal.Title className="student-detail-title">
+                        <div className="student-avatar" style={{ backgroundColor: 'rgba(220, 53, 69, 0.15)', color: '#dc3545' }}>
+                            <i className="fas fa-user-minus"></i>
+                        </div>
+                        <div>
+                            <h4 className="mb-0">Xóa khỏi danh sách</h4>
+                            <p className="mb-0 student-subtitle">
+                                {userToRemoveFromList?.full_name || userToRemoveFromList?.username || 'Người dùng'}
+                            </p>
+                        </div>
+                    </Modal.Title>
+                </Modal.Header>
+                <Modal.Body className="student-detail-body">
+                    <div className="student-detail-container">
+                        <Alert variant="warning" className="mb-0 d-flex align-items-start">
+                            <i className="fas fa-exclamation-triangle me-3 mt-1"></i>
+                            <div>
+                                <strong>Bạn có chắc muốn xóa người dùng này khỏi danh sách Quản lý người dùng LMS?</strong>
+                                <span className="d-block mt-2 text-muted">Quyền LMS (mod/staff) sẽ bị gỡ; tài khoản vẫn tồn tại trong hệ thống.</span>
+                            </div>
+                        </Alert>
+                    </div>
+                </Modal.Body>
+                <Modal.Footer className="student-detail-footer">
+                    <Button variant="outline-secondary" onClick={closeRemoveFromListModal} disabled={removeFromListLoading} className="btn-cancel">
+                        <i className="fas fa-times me-2"></i>
+                        Hủy
+                    </Button>
+                    <Button variant="danger" onClick={handleConfirmRemoveFromList} disabled={removeFromListLoading} className="btn-edit">
+                        {removeFromListLoading ? (
+                            <>
+                                <Spinner as="span" animation="border" size="sm" className="me-2" />
+                                Đang xử lý...
+                            </>
+                        ) : (
+                            <>
+                                <i className="fas fa-trash-alt me-2"></i>
+                                Xóa khỏi danh sách
+                            </>
+                        )}
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+
+            {/* Modal Chỉnh sửa thông tin người dùng (LMS) */}
+            <Modal show={showEditLmsUserModal} onHide={() => { if (!editLmsUserLoading) { setShowEditLmsUserModal(false); setUserToEditLms(null); } }} size="lg" className="student-detail-modal">
+                <Modal.Header closeButton className="student-detail-header">
+                    <Modal.Title className="student-detail-title">
+                        <div className="student-avatar" style={{ backgroundColor: 'rgba(13, 110, 253, 0.15)', color: '#0d6efd' }}>
+                            <i className="fas fa-user-edit"></i>
+                        </div>
+                        <div>
+                            <h4 className="mb-0">Chỉnh sửa thông tin người dùng</h4>
+                            <p className="mb-0 student-subtitle">
+                                {userToEditLms?.username && <span className="text-muted">{userToEditLms.username}</span>}
+                            </p>
+                        </div>
+                    </Modal.Title>
+                </Modal.Header>
+                <Modal.Body className="student-detail-body">
+                    <div className="student-detail-container">
+                        <Form id="lms-edit-user-form" onSubmit={handleEditLmsUserSubmit}>
+                            {editLmsUserError && (
+                                <Alert variant="danger" dismissible onClose={() => setEditLmsUserError('')} className="mb-4">
+                                    {editLmsUserError}
+                                </Alert>
+                            )}
+                            <div className="session-card mb-0">
+                                <div className="card-header-modern">
+                                    <div className="header-icon">
+                                        <i className="fas fa-user"></i>
+                                    </div>
+                                    <h6 className="mb-0">Thông tin cơ bản</h6>
+                                </div>
+                                <div className="card-body-modern">
+                                    <Form.Group className="mb-3">
+                                        <Form.Label className="info-label">
+                                            <i className="fas fa-user me-2"></i>
+                                            Tên đăng nhập
+                                        </Form.Label>
+                                        <Form.Control
+                                            type="text"
+                                            value={userToEditLms?.username || ''}
+                                            disabled
+                                            className="form-control-modern bg-light"
+                                        />
+                                        <Form.Text className="text-muted">Không thể thay đổi tên đăng nhập</Form.Text>
+                                    </Form.Group>
+                                    <Row>
+                                        <Col md={6}>
+                                            <Form.Group className="mb-3">
+                                                <Form.Label className="info-label">
+                                                    <i className="fas fa-id-card me-2"></i>
+                                                    Họ và tên
+                                                </Form.Label>
+                                                <Form.Control
+                                                    type="text"
+                                                    value={editLmsUserForm.full_name}
+                                                    onChange={(e) => setEditLmsUserForm(prev => ({ ...prev, full_name: e.target.value }))}
+                                                    placeholder="Nguyễn Văn A"
+                                                    required
+                                                    className="form-control-modern"
+                                                />
+                                            </Form.Group>
+                                        </Col>
+                                        <Col md={6}>
+                                            <Form.Group className="mb-3">
+                                                <Form.Label className="info-label">
+                                                    <i className="fas fa-envelope me-2"></i>
+                                                    Email
+                                                </Form.Label>
+                                                <Form.Control
+                                                    type="email"
+                                                    value={editLmsUserForm.email}
+                                                    onChange={(e) => setEditLmsUserForm(prev => ({ ...prev, email: e.target.value }))}
+                                                    placeholder="email@example.com"
+                                                    required
+                                                    className="form-control-modern"
+                                                />
+                                            </Form.Group>
+                                        </Col>
+                                    </Row>
+                                    <Form.Group className="mb-0">
+                                        <Form.Label className="info-label">
+                                            <i className="fas fa-key me-2"></i>
+                                            Mật khẩu mới
+                                        </Form.Label>
+                                        <Form.Control
+                                            type="password"
+                                            value={editLmsUserForm.password}
+                                            onChange={(e) => setEditLmsUserForm(prev => ({ ...prev, password: e.target.value }))}
+                                            placeholder="Để trống nếu không đổi mật khẩu"
+                                            minLength={6}
+                                            className="form-control-modern"
+                                        />
+                                        <Form.Text className="text-muted">Chỉ điền khi muốn đổi mật khẩu</Form.Text>
+                                    </Form.Group>
+                                </div>
+                            </div>
+                        </Form>
+                    </div>
+                </Modal.Body>
+                <Modal.Footer className="student-detail-footer">
+                    <Button variant="outline-secondary" type="button" onClick={() => { setShowEditLmsUserModal(false); setUserToEditLms(null); }} disabled={editLmsUserLoading} className="btn-cancel">
+                        <i className="fas fa-times me-2"></i>
+                        Hủy
+                    </Button>
+                    <Button variant="primary" type="submit" form="lms-edit-user-form" disabled={editLmsUserLoading} className="btn-edit">
+                        {editLmsUserLoading ? (
+                            <>
+                                <Spinner as="span" animation="border" size="sm" className="me-2" />
+                                Đang lưu...
+                            </>
+                        ) : (
+                            <>
+                                <i className="fas fa-save me-2"></i>
+                                Lưu thay đổi
+                            </>
+                        )}
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+
+            {/* Modal Thêm người dùng mới (LMS) */}
+            <Modal show={showAddLmsUserModal} onHide={() => setShowAddLmsUserModal(false)} size="lg" className="student-detail-modal">
+                <Modal.Header closeButton className="student-detail-header">
+                    <Modal.Title className="student-detail-title">
+                        <div className="student-avatar">
+                            <i className="fas fa-user-plus"></i>
+                        </div>
+                        <div>
+                            <h4 className="mb-0">Thêm người dùng mới</h4>
+                            <p className="mb-0 student-subtitle">Tạo tài khoản và cấp quyền truy cập LMS</p>
+                        </div>
+                    </Modal.Title>
+                </Modal.Header>
+                <Modal.Body className="student-detail-body">
+                    <div className="student-detail-container">
+                        <Form id="lms-add-user-form" onSubmit={handleAddLmsUserSubmit}>
+                            {addLmsUserError && (
+                                <Alert variant="danger" dismissible onClose={() => setAddLmsUserError('')} className="mb-4">
+                                    {addLmsUserError}
+                                </Alert>
+                            )}
+                            <div className="session-card mb-4">
+                                <div className="card-header-modern">
+                                    <div className="header-icon">
+                                        <i className="fas fa-user"></i>
+                                    </div>
+                                    <h6 className="mb-0">Thông tin cơ bản</h6>
+                                </div>
+                                <div className="card-body-modern">
+                                    <Row>
+                                        <Col md={6}>
+                                            <Form.Group className="mb-3">
+                                                <Form.Label className="info-label">
+                                                    <i className="fas fa-user me-2"></i>
+                                                    Tên đăng nhập
+                                                </Form.Label>
+                                                <Form.Control
+                                                    type="text"
+                                                    value={addLmsUserForm.username}
+                                                    onChange={(e) => setAddLmsUserForm(prev => ({ ...prev, username: e.target.value }))}
+                                                    placeholder="username"
+                                                    required
+                                                    className="form-control-modern"
+                                                />
+                                            </Form.Group>
+                                        </Col>
+                                        <Col md={6}>
+                                            <Form.Group className="mb-3">
+                                                <Form.Label className="info-label">
+                                                    <i className="fas fa-envelope me-2"></i>
+                                                    Email
+                                                </Form.Label>
+                                                <Form.Control
+                                                    type="email"
+                                                    value={addLmsUserForm.email}
+                                                    onChange={(e) => setAddLmsUserForm(prev => ({ ...prev, email: e.target.value }))}
+                                                    placeholder="email@example.com"
+                                                    required
+                                                    className="form-control-modern"
+                                                />
+                                            </Form.Group>
+                                        </Col>
+                                    </Row>
+                                    <Row>
+                                        <Col md={6}>
+                                            <Form.Group className="mb-3">
+                                                <Form.Label className="info-label">
+                                                    <i className="fas fa-id-card me-2"></i>
+                                                    Họ và tên
+                                                </Form.Label>
+                                                <Form.Control
+                                                    type="text"
+                                                    value={addLmsUserForm.full_name}
+                                                    onChange={(e) => setAddLmsUserForm(prev => ({ ...prev, full_name: e.target.value }))}
+                                                    placeholder="Nguyễn Văn A"
+                                                    required
+                                                    className="form-control-modern"
+                                                />
+                                            </Form.Group>
+                                        </Col>
+                                        <Col md={6}>
+                                            <Form.Group className="mb-3">
+                                                <Form.Label className="info-label">
+                                                    <i className="fas fa-key me-2"></i>
+                                                    Mật khẩu
+                                                </Form.Label>
+                                                <Form.Control
+                                                    type="password"
+                                                    value={addLmsUserForm.password}
+                                                    onChange={(e) => setAddLmsUserForm(prev => ({ ...prev, password: e.target.value }))}
+                                                    placeholder="••••••••"
+                                                    required
+                                                    minLength={6}
+                                                    className="form-control-modern"
+                                                />
+                                            </Form.Group>
+                                        </Col>
+                                    </Row>
+                                </div>
+                            </div>
+                            <div className="session-card mb-0">
+                                <div className="card-header-modern">
+                                    <div className="header-icon">
+                                        <i className="fas fa-shield-alt"></i>
+                                    </div>
+                                    <h6 className="mb-0">Vai trò LMS mặc định</h6>
+                                </div>
+                                <div className="card-body-modern">
+                                    <Form.Group className="mb-0">
+                                        <Form.Label className="info-label">
+                                            <i className="fas fa-layer-group me-2"></i>
+                                            Vai trò
+                                        </Form.Label>
+                                        <Form.Select
+                                            value={addLmsUserForm.lmsRole}
+                                            onChange={(e) => setAddLmsUserForm(prev => ({ ...prev, lmsRole: e.target.value }))}
+                                            className="form-control-modern"
+                                        >
+                                            {lmsRoles.map(role => (
+                                                <option key={role} value={role}>
+                                                    {getLmsRoleLabel(role)}
+                                                </option>
+                                            ))}
+                                        </Form.Select>
+                                    </Form.Group>
+                                </div>
+                            </div>
+                        </Form>
+                    </div>
+                </Modal.Body>
+                <Modal.Footer className="student-detail-footer">
+                    <Button variant="outline-secondary" type="button" onClick={() => setShowAddLmsUserModal(false)} className="btn-cancel">
+                        <i className="fas fa-times me-2"></i>
+                        Hủy
+                    </Button>
+                    <Button variant="primary" type="submit" form="lms-add-user-form" disabled={addLmsUserLoading} className="btn-edit">
+                        {addLmsUserLoading ? (
+                            <>
+                                <Spinner as="span" animation="border" size="sm" className="me-2" />
+                                Đang tạo...
+                            </>
+                        ) : (
+                            <>
+                                <i className="fas fa-plus me-2"></i>
+                                Thêm
                             </>
                         )}
                     </Button>
@@ -3838,6 +5035,489 @@ const LMSUserManagement = () => {
                             <>
                                 <i className="fas fa-paper-plane me-2"></i>
                                 Gửi email
+                            </>
+                        )}
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+
+            {/* Student Group Modal — giống SuperAdmin UserManagement */}
+            <Modal show={showGroupModal} onHide={() => setShowGroupModal(false)} size="xl" className="student-detail-modal">
+                <Modal.Header closeButton className="student-detail-header">
+                    <Modal.Title className="student-detail-title">
+                        <div className="student-avatar">
+                            <i className="fas fa-layer-group"></i>
+                        </div>
+                        <div>
+                            <h4 className="mb-0">{selectedGroup ? 'Chỉnh sửa nhóm sinh viên' : 'Thêm nhóm sinh viên mới'}</h4>
+                            <p className="mb-0 student-subtitle">Quản lý nhóm sinh viên</p>
+                        </div>
+                    </Modal.Title>
+                </Modal.Header>
+                <Modal.Body className="student-detail-body">
+                    <div className="student-detail-container">
+                        <Form onSubmit={selectedGroup ? handleUpdateGroup : handleCreateGroup}>
+                            <Row>
+                                <Col md={6}>
+                                    <div className="session-card mb-4">
+                                        <div className="card-header-modern">
+                                            <div className="header-icon">
+                                                <i className="fas fa-info-circle"></i>
+                                            </div>
+                                            <h6 className="mb-0">Thông tin nhóm</h6>
+                                        </div>
+                                        <div className="card-body-modern">
+                                            <Form.Group className="mb-3">
+                                                <Form.Label className="info-label">
+                                                    <i className="fas fa-tag me-2"></i>
+                                                    Tên nhóm
+                                                </Form.Label>
+                                                <Form.Text className="text-muted" style={{ fontSize: '0.65rem' }}>
+                                                    Tạo tên nhóm theo quy tắc: <span className="fw-bold">Tên lớp</span> + <span className="fw-bold">-</span> + <span className="fw-bold">Số thứ tự nhóm</span> + <span className="fw-bold">-</span> + <span className="fw-bold">Tên bệnh viện thực tập (Viết tắt)</span>.
+                                                </Form.Text>
+                                                <Form.Control
+                                                    type="text"
+                                                    name="group_name"
+                                                    value={groupFormData.group_name}
+                                                    onChange={handleGroupFormChange}
+                                                    required
+                                                    className="form-control-modern"
+                                                    placeholder="Nhập tên nhóm"
+                                                />
+                                                <Form.Text className="text-muted" style={{ fontSize: '0.75rem' }}>
+                                                    Ví dụ: <span className="fw-bold">21YK-4-TTĐN</span>
+                                                </Form.Text>
+                                            </Form.Group>
+                                            <Form.Group className="mb-3">
+                                                <Form.Label className="info-label">
+                                                    <i className="fas fa-align-left me-2"></i>
+                                                    Mô tả
+                                                </Form.Label>
+                                                <Form.Control
+                                                    as="textarea"
+                                                    rows={4}
+                                                    name="description"
+                                                    value={groupFormData.description}
+                                                    onChange={handleGroupFormChange}
+                                                    className="form-control-modern"
+                                                    placeholder="Nhập mô tả nhóm (tùy chọn)"
+                                                />
+                                            </Form.Group>
+                                        </div>
+                                    </div>
+                                </Col>
+                                <Col md={6}>
+                                    <div className="session-card mb-4">
+                                        <div className="card-header-modern">
+                                            <div className="header-icon">
+                                                <i className="fas fa-users"></i>
+                                            </div>
+                                            <h6 className="mb-0">Chọn lớp</h6>
+                                        </div>
+                                        <div className="card-body-modern">
+                                            <Form.Group className="mb-1">
+                                                <Form.Label className="info-label">
+                                                    <i className="fas fa-graduation-cap me-2"></i>
+                                                    Lớp học
+                                                </Form.Label>
+                                                <Form.Select
+                                                    multiple
+                                                    name="selected_classes"
+                                                    value={groupFormData.selected_classes}
+                                                    onChange={handleClassSelectionChange}
+                                                    required
+                                                    className="form-control-modern"
+                                                    size={10}
+                                                    style={{ height: '230px' }}
+                                                >
+                                                    {availableClasses.length > 0 ? (
+                                                        availableClasses.map((classItem, index) => (
+                                                            <option key={index} value={classItem.class_name}>
+                                                                {classItem.class_name} ({classItem.student_count} sinh viên)
+                                                            </option>
+                                                        ))
+                                                    ) : (
+                                                        <option disabled>Không có lớp nào được tìm thấy</option>
+                                                    )}
+                                                </Form.Select>
+                                                <Form.Text className="text-muted">
+                                                    {availableClasses.length > 0
+                                                        ? 'Giữ Ctrl (hoặc Cmd trên Mac) để chọn nhiều lớp'
+                                                        : 'Vui lòng kiểm tra lại dữ liệu sinh viên hoặc liên hệ quản trị viên'}
+                                                </Form.Text>
+                                            </Form.Group>
+                                        </div>
+                                    </div>
+                                </Col>
+                            </Row>
+                            {studentsByClasses.length > 0 && (
+                                <div className="session-card mb-4">
+                                    <div className="card-header-modern">
+                                        <div className="header-icon">
+                                            <i className="fas fa-user-check"></i>
+                                        </div>
+                                        <h6 className="mb-0">Chọn sinh viên</h6>
+                                        <Badge bg="success" className="fs-6">
+                                            Đã chọn: {groupFormData.student_ids.length} sinh viên
+                                        </Badge>
+                                    </div>
+                                    <div className="card-body-modern">
+                                        <div className="table-responsive" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                                            <table className="table table-hover">
+                                                <thead className="table-light sticky-top">
+                                                    <tr>
+                                                        <th>
+                                                            <Form.Check
+                                                                type="checkbox"
+                                                                checked={studentsByClasses.length > 0 && studentsByClasses.every((s) => groupFormData.student_ids.includes(s.id))}
+                                                                onChange={(e) => {
+                                                                    if (e.target.checked) {
+                                                                        setGroupFormData((prev) => ({
+                                                                            ...prev,
+                                                                            student_ids: studentsByClasses.map((s) => s.id)
+                                                                        }));
+                                                                    } else {
+                                                                        setGroupFormData((prev) => ({ ...prev, student_ids: [] }));
+                                                                    }
+                                                                }}
+                                                            />
+                                                        </th>
+                                                        <th>Mã SV</th>
+                                                        <th>Họ và tên</th>
+                                                        <th>Email</th>
+                                                        <th>Lớp</th>
+                                                        <th>Nhóm</th>
+                                                        <th>Giới tính</th>
+                                                        <th>Tình trạng</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {studentsByClasses.map((student) => (
+                                                        <tr
+                                                            key={student.id}
+                                                            onClick={() => {
+                                                                const isChecked = groupFormData.student_ids.includes(student.id);
+                                                                handleStudentSelectionChange(student.id, !isChecked);
+                                                            }}
+                                                            style={{ cursor: 'pointer' }}
+                                                        >
+                                                            <td onClick={(e) => e.stopPropagation()}>
+                                                                <Form.Check
+                                                                    type="checkbox"
+                                                                    checked={groupFormData.student_ids.includes(student.id)}
+                                                                    onChange={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleStudentSelectionChange(student.id, e.target.checked);
+                                                                    }}
+                                                                />
+                                                            </td>
+                                                            <td>
+                                                                <Badge bg="secondary">{student.student_id}</Badge>
+                                                            </td>
+                                                            <td>{student.full_name}</td>
+                                                            <td>{student.email}</td>
+                                                            <td>
+                                                                <Badge bg="info">{student.class_name}</Badge>
+                                                            </td>
+                                                            <td>
+                                                                {student.group_names ? (
+                                                                    <div>
+                                                                        {student.group_names.split(', ').map((groupName, idx) => (
+                                                                            <Badge key={idx} bg="info" className="me-1 mb-1">
+                                                                                {groupName}
+                                                                            </Badge>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : '-'}
+                                                            </td>
+                                                            <td>
+                                                                {(() => {
+                                                                    const gender = student.gender;
+                                                                    if (gender === null || gender === undefined) return 'Nam';
+                                                                    if (gender === 'male') return 'Nữ';
+                                                                    if (gender === 'female') return 'Nữ';
+                                                                    if (gender === 'other') return 'Khác';
+                                                                    return '-';
+                                                                })()}
+                                                            </td>
+                                                            <td>
+                                                                <Badge bg={student.status === 'Đang học' ? 'success' :
+                                                                    student.status === 'Tạm nghỉ' ? 'warning' :
+                                                                        student.status === 'Thôi học' ? 'danger' : 'secondary'}>
+                                                                    {student.status || 'Đang học'}
+                                                                </Badge>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </Form>
+                    </div>
+                </Modal.Body>
+                <Modal.Footer className="student-detail-footer">
+                    <Button variant="outline-secondary" onClick={() => setShowGroupModal(false)} className="btn-cancel">
+                        <i className="fas fa-times me-2"></i>
+                        Hủy
+                    </Button>
+                    <Button
+                        variant="primary"
+                        type="submit"
+                        onClick={selectedGroup ? handleUpdateGroup : handleCreateGroup}
+                        disabled={loading}
+                        className="btn-edit"
+                    >
+                        <i className="fas fa-save me-2"></i>
+                        {loading ? 'Đang xử lý...' : (selectedGroup ? 'Cập nhật' : 'Tạo nhóm')}
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+
+            <Modal show={showGroupDetailModal} onHide={() => setShowGroupDetailModal(false)} size="xl" className="student-detail-modal">
+                <Modal.Header closeButton className="student-detail-header">
+                    <Modal.Title className="student-detail-title">
+                        <div className="student-avatar">
+                            <i className="fas fa-layer-group"></i>
+                        </div>
+                        <div>
+                            <h4 className="mb-0">{selectedGroup?.group_name || 'Chi tiết nhóm'}</h4>
+                            <p className="mb-0 student-subtitle">Thông tin chi tiết nhóm sinh viên</p>
+                        </div>
+                    </Modal.Title>
+                </Modal.Header>
+                <Modal.Body className="student-detail-body">
+                    {selectedGroup && (
+                        <div className="student-detail-container">
+                            <div className="session-card mb-4">
+                                <div className="card-header-modern">
+                                    <div className="header-icon">
+                                        <i className="fas fa-info-circle"></i>
+                                    </div>
+                                    <h6 className="mb-0">Thông tin nhóm</h6>
+                                </div>
+                                <div className="card-body-modern">
+                                    <div className="info-item">
+                                        <div className="info-label">
+                                            <i className="fas fa-tag me-2"></i>
+                                            Tên nhóm
+                                        </div>
+                                        <div className="info-value">{selectedGroup.group_name}</div>
+                                    </div>
+                                    <div className="info-item">
+                                        <div className="info-label">
+                                            <i className="fas fa-align-left me-2"></i>
+                                            Mô tả
+                                        </div>
+                                        <div className="info-value">{selectedGroup.description || 'Không có mô tả'}</div>
+                                    </div>
+                                    <div className="info-item">
+                                        <div className="info-label">
+                                            <i className="fas fa-graduation-cap me-2"></i>
+                                            Lớp học
+                                        </div>
+                                        <div className="info-value">
+                                            {selectedGroup.selected_classes && selectedGroup.selected_classes.length > 0 ? (
+                                                selectedGroup.selected_classes.map((className, idx) => (
+                                                    <Badge key={idx} bg="info" className="me-1 mb-1">
+                                                        {className}
+                                                    </Badge>
+                                                ))
+                                            ) : 'Không có lớp nào'}
+                                        </div>
+                                    </div>
+                                    <div className="info-item">
+                                        <div className="info-label">
+                                            <i className="fas fa-hashtag me-2"></i>
+                                            Số sinh viên
+                                        </div>
+                                        <div className="info-value">
+                                            <Badge bg="primary" className="fs-6">
+                                                {selectedGroup.students ? selectedGroup.students.length : 0} sinh viên
+                                            </Badge>
+                                        </div>
+                                    </div>
+                                    <div className="info-item">
+                                        <div className="info-label">
+                                            <i className="fas fa-calendar-plus me-2"></i>
+                                            Ngày tạo
+                                        </div>
+                                        <div className="info-value">
+                                            {selectedGroup.created_at ? new Date(selectedGroup.created_at).toLocaleString('vi-VN') : 'Không có'}
+                                        </div>
+                                    </div>
+                                    <div className="info-item">
+                                        <div className="info-label">
+                                            <i className="fas fa-user-plus me-2"></i>
+                                            Người tạo nhóm
+                                        </div>
+                                        <div className="info-value">
+                                            <Badge bg="primary" className="fs-6">
+                                                {selectedGroup.created_by_name || 'Không có'}
+                                            </Badge>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {selectedGroup.students && selectedGroup.students.length > 0 && (
+                                <div className="session-card">
+                                    <div className="card-header-modern">
+                                        <div className="header-icon">
+                                            <i className="fas fa-users"></i>
+                                        </div>
+                                        <h6 className="mb-0">Danh sách sinh viên</h6>
+                                    </div>
+                                    <div className="card-body-modern">
+                                        <div className="table-responsive">
+                                            <table className="table table-hover">
+                                                <thead className="table-light">
+                                                    <tr>
+                                                        <th>STT</th>
+                                                        <th>Mã SV</th>
+                                                        <th>Họ và tên</th>
+                                                        <th>Lớp</th>
+                                                        <th>Khoa</th>
+                                                        <th>Ngành</th>
+                                                        <th>Email</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {selectedGroup.students.map((student, index) => (
+                                                        <tr key={student.id}>
+                                                            <td>{index + 1}</td>
+                                                            <td>
+                                                                <Badge bg="secondary">{student.student_id}</Badge>
+                                                            </td>
+                                                            <td>{student.full_name}</td>
+                                                            <td>
+                                                                <Badge bg="info">{student.class_name}</Badge>
+                                                            </td>
+                                                            <td>{student.faculty_name}</td>
+                                                            <td>{student.major_name}</td>
+                                                            <td>
+                                                                <small className="text-muted">{student.email}</small>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </Modal.Body>
+                <Modal.Footer className="student-detail-footer">
+                    <Button variant="outline-secondary" onClick={() => setShowGroupDetailModal(false)} className="btn-cancel">
+                        <i className="fas fa-times me-2"></i>
+                        Đóng
+                    </Button>
+                    <Button
+                        variant="primary"
+                        onClick={() => {
+                            if (selectedGroup) {
+                                setShowGroupDetailModal(false);
+                                handleEditGroup(selectedGroup);
+                            }
+                        }}
+                        className="btn-edit"
+                    >
+                        <i className="fas fa-edit me-2"></i>
+                        Chỉnh sửa
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+
+            <Modal show={showDeleteGroupModal} onHide={() => setShowDeleteGroupModal(false)} size="lg" className="student-detail-modal">
+                <Modal.Header closeButton className="student-detail-header">
+                    <Modal.Title className="student-detail-title">
+                        <div className="student-avatar">
+                            <i className="fas fa-exclamation-triangle"></i>
+                        </div>
+                        <div>
+                            <h4 className="mb-0">Xác nhận xóa nhóm</h4>
+                            <p className="mb-0 student-subtitle">Xóa nhóm sinh viên khỏi hệ thống</p>
+                        </div>
+                    </Modal.Title>
+                </Modal.Header>
+                <Modal.Body className="student-detail-body">
+                    <div className="student-detail-container">
+                        {groupToDelete && (
+                            <div className="session-card">
+                                <div className="card-header-modern">
+                                    <div className="header-icon">
+                                        <i className="fas fa-layer-group"></i>
+                                    </div>
+                                    <h6 className="mb-0">Thông tin nhóm sẽ bị xóa</h6>
+                                </div>
+                                <div className="card-body-modern">
+                                    <div className="info-item">
+                                        <div className="info-label">
+                                            <i className="fas fa-tag me-2"></i>
+                                            Tên nhóm
+                                        </div>
+                                        <div className="info-value">{groupToDelete.group_name}</div>
+                                    </div>
+                                    <div className="info-item">
+                                        <div className="info-label">
+                                            <i className="fas fa-hashtag me-2"></i>
+                                            Số sinh viên
+                                        </div>
+                                        <div className="info-value">
+                                            <Badge bg="primary">{groupToDelete.student_count || 0} sinh viên</Badge>
+                                        </div>
+                                    </div>
+                                    <div className="info-item">
+                                        <div className="info-label">
+                                            <i className="fas fa-graduation-cap me-2"></i>
+                                            Lớp học
+                                        </div>
+                                        <div className="info-value">
+                                            {groupToDelete.selected_classes && groupToDelete.selected_classes.length > 0 ? (
+                                                groupToDelete.selected_classes.map((className, idx) => (
+                                                    <Badge key={idx} bg="info" className="me-1 mb-1">
+                                                        {className}
+                                                    </Badge>
+                                                ))
+                                            ) : 'Không có lớp nào'}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        <Alert variant="danger" className="mb-0">
+                            <div className="d-flex align-items-center">
+                                <i className="fas fa-exclamation-triangle me-3"></i>
+                                <div>
+                                    <strong>Cảnh báo:</strong> Hành động này không thể hoàn tác. Tất cả dữ liệu liên quan đến nhóm này sẽ bị xóa vĩnh viễn.
+                                </div>
+                            </div>
+                        </Alert>
+                    </div>
+                </Modal.Body>
+                <Modal.Footer className="student-detail-footer">
+                    <Button variant="outline-secondary" onClick={() => setShowDeleteGroupModal(false)} className="btn-cancel">
+                        <i className="fas fa-times me-2"></i>
+                        Hủy
+                    </Button>
+                    <Button
+                        variant="danger"
+                        onClick={handleDeleteGroup}
+                        disabled={loading}
+                        className="btn-delete"
+                    >
+                        {loading ? (
+                            <>
+                                <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" className="me-2" />
+                                Đang xử lý...
+                            </>
+                        ) : (
+                            <>
+                                <i className="fas fa-trash me-2"></i>
+                                Xóa nhóm
                             </>
                         )}
                     </Button>

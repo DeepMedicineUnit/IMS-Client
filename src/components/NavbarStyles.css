@@ -64,6 +64,13 @@
   display: none;
 }
 
+/* Placeholder giữ đúng vị trí khi không có quyền Cá nhân - không đẩy các icon khác lên/xuống */
+.ims-rail .ims-icon-placeholder {
+  visibility: hidden;
+  pointer-events: none;
+  overflow: hidden;
+}
+
 .ims-rail .ims-icon {
   width: 40px;
   height: 40px;
@@ -639,6 +646,28 @@ body.no-ims-rail .vertical-navbar {
   border: 1px solid var(--nav-border);
   color: var(--nav-text);
   transition: var(--transition-base);
+}
+
+/* Đẩy mobile-toggle xuống khi có emergency-banner */
+body.has-emergency-banner .mobile-toggle,
+body:has(.emergency-banner) .mobile-toggle {
+  top: 45px; /* 16px (original) + 40px (banner height) */
+}
+
+/* Extra small mobile - đẩy mobile-toggle xuống khi có emergency-banner */
+@media (max-width: 480px) {
+  body.has-emergency-banner .mobile-toggle,
+  body:has(.emergency-banner) .mobile-toggle {
+    top: 43px; /* 16px (original) + 38px (banner height) */
+  }
+}
+
+/* Tablet - đẩy mobile-toggle xuống khi có emergency-banner */
+@media (min-width: 769px) and (max-width: 1024px) {
+  body.has-emergency-banner .mobile-toggle,
+  body:has(.emergency-banner) .mobile-toggle {
+    top: 58px; /* 16px (original) + 42px (banner height) */
+  }
 }
 
 .mobile-toggle:hover {

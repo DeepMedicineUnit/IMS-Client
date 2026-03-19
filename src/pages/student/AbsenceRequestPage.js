@@ -37,13 +37,9 @@ const AbsenceRequestPage = () => {
   // Fetch available sessions for absence request
   const fetchAvailableSessions = async () => {
     try {
-      console.log('Fetching available sessions...');
       const response = await api.get('/sessions/student/attendance?status=all');
-      console.log('Sessions response:', response.data);
       if (response.data.success) {
         setSessions(response.data.data);
-        console.log('Sessions set:', response.data.data);
-        console.log('Sessions count:', response.data.data.length);
       } else {
         console.error('API returned success: false', response.data);
         setSessions([]);
@@ -58,13 +54,9 @@ const AbsenceRequestPage = () => {
   // Fetch student's absence requests
   const fetchAbsenceRequests = async () => {
     try {
-      console.log('Fetching absence requests...');
       const response = await api.get('/absence-requests/student');
-      console.log('Absence requests response:', response.data);
       if (response.data.success) {
         setRequests(response.data.data.requests);
-        console.log('Absence requests set:', response.data.data.requests);
-        console.log('Absence requests count:', response.data.data.requests.length);
       } else {
         console.error('Absence requests API returned success: false', response.data);
         setRequests([]);
@@ -106,15 +98,12 @@ const AbsenceRequestPage = () => {
   // Initial data fetch
   useEffect(() => {
     const fetchData = async () => {
-      console.log('Starting data fetch...');
       setLoading(true);
       try {
         await Promise.all([
           fetchAvailableSessions(),
           fetchAbsenceRequests()
         ]);
-        console.log('Data fetch completed successfully');
-        console.log('Final state - sessions:', sessions.length, 'requests:', requests.length);
       } catch (error) {
         console.error('Error in data fetch:', error);
       } finally {
@@ -143,29 +132,14 @@ const AbsenceRequestPage = () => {
 
   // Debug effect to log state changes
   useEffect(() => {
-    console.log('State changed - sessions:', sessions.length, 'requests:', requests.length, 'loading:', loading);
-    if (sessions.length > 0) {
-      console.log('Sessions data:', sessions);
-    }
   }, [sessions, requests, loading]);
 
   // Debug effect to log component render
   useEffect(() => {
-    console.log('Component rendered with sessions:', sessions.length, 'loading:', loading);
   });
 
   // Debug effect to log sessions changes
   useEffect(() => {
-    console.log('Sessions changed:', sessions);
-    console.log('Sessions length:', sessions.length);
-    console.log('Sessions type:', typeof sessions);
-    console.log('Sessions is array:', Array.isArray(sessions));
-    if (sessions && sessions.length > 0) {
-      console.log('First session:', sessions[0]);
-      console.log('All sessions:', sessions);
-    } else {
-      console.log('No sessions available');
-    }
   }, [sessions]);
 
   // Debug effect to log loading changes
@@ -195,7 +169,6 @@ const AbsenceRequestPage = () => {
 
   // Debug effect to log error changes
   useEffect(() => {
-    console.log('Error changed:', error);
   }, [error]);
 
   // Debug effect to log success changes
@@ -229,7 +202,6 @@ const AbsenceRequestPage = () => {
 
   // Handle session selection
   const handleSessionSelect = (session) => {
-    console.log('Session selected:', session);
     setSelectedSession(session);
     setFormData(prev => ({
       ...prev,
@@ -273,7 +245,6 @@ const AbsenceRequestPage = () => {
     setError('');
     setSuccess('');
 
-    console.log('Form data:', formData);
 
     if (!formData.session_id || !formData.request_type || !formData.reason.trim()) {
       setError(t('absenceRequest.errors.fillAllFields'));
@@ -338,7 +309,6 @@ const AbsenceRequestPage = () => {
 
     try {
       setSubmitting(true);
-      console.log('Submitting absence request:', formData);
       
       // Create FormData for file upload
       const submitData = new FormData();
@@ -363,7 +333,6 @@ const AbsenceRequestPage = () => {
           'Content-Type': 'multipart/form-data',
         },
       });
-      console.log('Absence request response:', response.data);
       
       if (response.data.success) {
         setSuccess(t('absenceRequest.success.requestSubmitted'));
@@ -394,7 +363,6 @@ const AbsenceRequestPage = () => {
 
   // Get status badge
   const getStatusBadge = (status) => {
-    console.log('Getting status badge for:', status);
     switch (status) {
       case 'pending':
         return <Badge bg="warning">{t('absenceRequest.status.pending')}</Badge>;
@@ -411,7 +379,6 @@ const AbsenceRequestPage = () => {
 
   // Get request type text
   const getRequestTypeText = (type) => {
-    console.log('Getting request type text for:', type);
     switch (type) {
       case 'full_session':
         return t('absenceRequest.requestTypes.fullSession');
@@ -428,7 +395,6 @@ const AbsenceRequestPage = () => {
 
   // Calculate session status
   const calculateSessionStatus = (session) => {
-    console.log('Calculating status for session:', session);
     const now = new Date();
     const sessionStartDate = new Date(session.date);
     const sessionEndDate = session.end_date ? new Date(session.end_date) : sessionStartDate;
@@ -482,14 +448,12 @@ const AbsenceRequestPage = () => {
     }
 
     // Default fallback
-    console.log('Session status calculated: scheduled (fallback) for session:', session.title);
     return 'scheduled';
   };
 
   // Get session status badge
   const getSessionStatusBadge = (session) => {
     const status = calculateSessionStatus(session);
-    console.log('Getting session status badge for:', session.title, 'status:', status);
     switch (status) {
       case 'scheduled':
         return <Badge bg="info">{t('absenceRequest.sessionStatus.scheduled')}</Badge>;

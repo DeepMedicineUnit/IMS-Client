@@ -381,40 +381,8 @@ if (typeof document !== 'undefined') {
   document.head.appendChild(styleSheet);
 }
 
-// Cache constants
-const SESSIONS_CACHE_KEY = 'sessions_cache';
-const SESSIONS_CACHE_TTL = 30 * 60 * 99999; // 30 phút
+// Phân trang: chỉ tải từng trang từ server, không lưu toàn bộ trên trình duyệt
 const SESSIONS_PER_PAGE = 10; // Số buổi học mỗi trang
-const SESSIONS_BATCH_SIZE = 10; // Số buổi học tải mỗi lần
-
-// Helper functions for localStorage cache
-const getSessionsFromCache = () => {
-  try {
-    const cached = localStorage.getItem(SESSIONS_CACHE_KEY);
-    if (!cached) return null;
-    
-    const { data, timestamp, totalLoaded } = JSON.parse(cached);
-    const isExpired = Date.now() - timestamp > SESSIONS_CACHE_TTL;
-    
-    return { data, timestamp, totalLoaded, isExpired };
-  } catch (error) {
-    console.error('Error reading sessions cache:', error);
-    return null;
-  }
-};
-
-const saveSessionsToCache = (sessions, totalLoaded = sessions.length) => {
-  try {
-    const cacheData = {
-      data: sessions,
-      timestamp: Date.now(),
-      totalLoaded
-    };
-    localStorage.setItem(SESSIONS_CACHE_KEY, JSON.stringify(cacheData));
-  } catch (error) {
-    console.error('Error saving sessions cache:', error);
-  }
-};
 
 const SessionList = () => {
   usePageTitle('Danh sách buổi học');
@@ -438,6 +406,7 @@ const SessionList = () => {
   const [classFilter, setClassFilter] = useState(''); // Lọc theo lớp
   const [groupFilter, setGroupFilter] = useState(''); // Lọc theo nhóm
   const [filter, setFilter] = useState('all');
+  const [filterOptions, setFilterOptions] = useState({ locations: [], classes: [], groups: [] }); // Từ API filter-options
   const [pagination, setPagination] = useState({
     page: 1,
     limit: SESSIONS_PER_PAGE,
@@ -710,32 +679,72 @@ const SessionList = () => {
     });
   };
 
-  // Function to fetch sessions from API
-  const fetchSessions = async (page = 1, limit = 99999) => {
+  // Xử lý dữ liệu trả về từ API grouped=1: mỗi phần tử là 1 session đơn hoặc 1 batch (isBatch, batchSessions)
+  const processDisplayRows = (rows) => {
+    if (!Array.isArray(rows)) return [];
+    return rows.map(row => {
+      if (row.isBatch && Array.isArray(row.batchSessions)) {
+        const processedBatch = processSessionData(row.batchSessions);
+        let parsedMonitoringOptions = row.monitoring_options;
+        if (typeof row.monitoring_options === 'string') {
+          try {
+            parsedMonitoringOptions = JSON.parse(row.monitoring_options);
+          } catch (e) {
+            parsedMonitoringOptions = null;
+          }
+        }
+        const statuses = processedBatch.map(s => s.calculatedStatus || calculateSessionStatus(s));
+        const calculatedStatus = statuses.includes('active') ? 'active' : statuses.includes('scheduled') ? 'scheduled' : statuses.includes('ended') ? 'ended' : statuses.includes('cancelled') ? 'cancelled' : 'scheduled';
+        return {
+          ...row,
+          monitoring_options: parsedMonitoringOptions,
+          calculatedStatus: row.calculatedStatus ?? calculatedStatus,
+          batchSessions: processedBatch
+        };
+      }
+      return processSessionData([row])[0];
+    });
+  };
+
+  // Fetch một trang sessions từ API (phân trang phía server, không lưu toàn bộ trên trình duyệt)
+  const fetchSessions = async (page = 1, opts = {}) => {
+    const limit = opts.limit ?? SESSIONS_PER_PAGE;
+    const search = opts.search !== undefined ? opts.search : searchTerm;
+    const location = opts.location !== undefined ? opts.location : locationFilter;
+    const classF = opts.class !== undefined ? opts.class : classFilter;
+    const groupF = opts.group !== undefined ? opts.group : groupFilter;
+    const status = opts.status !== undefined ? opts.status : filter;
+    const studentName = opts.studentName !== undefined ? opts.studentName : studentSearch;
     try {
       setLoading(true);
-      const response = await api.get(`/sessions?page=${page}&limit=${limit}`);
-      
+      const params = new URLSearchParams();
+      params.set('page', String(page));
+      params.set('limit', String(limit));
+      params.set('grouped', '1'); // Phân trang theo dòng hiển thị (sau khi gộp batch), mỗi trang đúng limit dòng
+      if (search && search.trim()) params.set('search', search.trim());
+      if (location) params.set('location', location);
+      if (classF) params.set('class', classF);
+      if (groupF) params.set('group', groupF);
+      if (status && status !== 'all') params.set('status', status);
+      if (studentName && studentName.trim().length >= 2) params.set('studentName', studentName.trim());
+      const response = await api.get(`/sessions?${params.toString()}`);
       if (response.data.success) {
-        const serverSessions = response.data.data || [];
+        const serverRows = response.data.data || [];
         const paginationData = response.data.pagination || {};
-        const processedSessions = processSessionData(serverSessions);
-        
-        setSessions(processedSessions);
-        
-        // Note: Pagination will be updated by useEffect based on filteredSessions
-        // We don't update here to allow client-side filtering to work correctly
-        
-        // Save to cache
-        saveSessionsToCache(serverSessions, paginationData.totalItems || serverSessions.length);
-        
-        console.log(`✅ Loaded ${processedSessions.length} sessions (page ${paginationData?.page || 1} of ${paginationData?.totalPages || 1}, total: ${paginationData?.totalItems || processedSessions.length})`);
-        
-        return processedSessions;
-      } else {
-        showAlert('Không thể tải danh sách buổi học', 'danger');
-        return [];
+        const processedRows = processDisplayRows(serverRows);
+        setSessions(processedRows);
+        setPagination(prev => ({
+          ...prev,
+          page: paginationData.page ?? page,
+          limit: paginationData.limit ?? limit,
+          totalItems: paginationData.totalItems ?? 0,
+          totalPages: paginationData.totalPages ?? 0
+        }));
+        console.log(`✅ Loaded page ${paginationData?.page ?? page}/${paginationData?.totalPages ?? 1} (${processedRows.length} dòng hiển thị, total: ${paginationData?.totalItems ?? 0})`);
+        return processedRows;
       }
+      showAlert('Không thể tải danh sách buổi học', 'danger');
+      return [];
     } catch (error) {
       console.error('Error fetching sessions:', error);
       showAlert('Đã xảy ra lỗi khi tải danh sách buổi học', 'danger');
@@ -745,69 +754,52 @@ const SessionList = () => {
     }
   };
 
-  // Progressive loading với caching
+  // Load filter options (locations, classes, groups) và trang đầu khi vào trang
   useEffect(() => {
     let isMounted = true;
-    
-    const loadSessions = async () => {
-      // Bước 1: Kiểm tra cache và hiển thị ngay lập tức nếu có
-      const cached = getSessionsFromCache();
-      if (cached && cached.data && cached.data.length > 0) {
-        console.log('📦 Loading from cache:', cached.data.length, 'sessions');
-        const processedCache = processSessionData(cached.data);
-        setSessions(processedCache);
-        setLoading(false);
-        
-        // Note: Pagination will be updated by useEffect based on filteredSessions
-        
-        // Nếu cache còn mới (chưa hết hạn), không cần fetch lại ngay
-        if (!cached.isExpired) {
-          console.log('✅ Cache is fresh, skipping server fetch');
-          setAllDataLoaded(true);
-          return;
-        }
-        
-        console.log('⏰ Cache expired, will refresh in background');
-      }
-
-      // Bước 2: Tải sessions từ server (load tất cả để client-side pagination)
-      if (!isMounted) return;
-      
+    const loadFilterOptions = async () => {
       try {
-        setLoading(cached ? false : true);
-        console.log('🔄 Fetching sessions from server...');
-        
-        await fetchSessions(1, 99999); // Load tối đa 99999 sessions
-      } catch (error) {
-        console.error('Error in loadSessions:', error);
+        const res = await api.get('/sessions/filter-options');
+        if (res.data?.success && res.data?.data && isMounted) {
+          setFilterOptions(res.data.data);
+        }
+      } catch (e) {
+        console.error('Error loading session filter options:', e);
       }
     };
+    loadFilterOptions();
+    return () => { isMounted = false; };
+  }, [api]);
 
-    loadSessions();
+  // Khi vào trang hoặc khi thay đổi bộ lọc: load trang 1 (phân trang phía server)
+  useEffect(() => {
+    setPagination(prev => ({ ...prev, page: 1 }));
+    fetchSessions(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, searchTerm, locationFilter, classFilter, groupFilter, filter, studentSearch]);
 
-    // Cập nhật trạng thái mỗi 10 giây
+  // Cập nhật trạng thái calculatedStatus mỗi 10 giây cho trang hiện tại
+  useEffect(() => {
     const intervalId = setInterval(() => {
       setSessions(currentSessions =>
-        currentSessions.map(session => ({
-          ...session,
-          calculatedStatus: calculateSessionStatus(session)
-        }))
+        currentSessions.map(session => {
+          if (session.isBatch && session.batchSessions?.length) {
+            const statuses = session.batchSessions.map(s => calculateSessionStatus(s));
+            const calculatedStatus = statuses.includes('active') ? 'active' : statuses.includes('scheduled') ? 'scheduled' : statuses.includes('ended') ? 'ended' : statuses.includes('cancelled') ? 'cancelled' : 'scheduled';
+            return { ...session, calculatedStatus };
+          }
+          return { ...session, calculatedStatus: calculateSessionStatus(session) };
+        })
       );
     }, 10000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(intervalId);
-    };
-  }, [api]);
+    return () => clearInterval(intervalId);
+  }, []);
 
   // Tự động refresh khi quay lại từ CreateSession
   useEffect(() => {
-    // Check nếu có flag refresh từ location state
     if (location.state?.refresh) {
       console.log('🔄 Refreshing sessions after creating new session...');
-      fetchSessions(1, 99999).then(() => {
-        // Clear the refresh flag để tránh refresh lại khi component re-render
+      fetchSessions(1).then(() => {
         navigate(location.pathname, { replace: true, state: {} });
       });
     }
@@ -1010,11 +1002,8 @@ const SessionList = () => {
         showAlert('Xóa buổi học thành công', 'success');
         setShowDeleteModal(false);
         setSessionNameConfirm('');
-
-        // Refresh sessions list và cập nhật cache
-        const updatedSessions = sessions.filter(s => s.id !== sessionToDelete.id);
-        setSessions(updatedSessions);
-        saveSessionsToCache(updatedSessions, updatedSessions.length);
+        // Tải lại trang hiện tại từ server (phân trang phía server)
+        fetchSessions(pagination.page);
       }
     } catch (error) {
       console.error('Error deleting session:', error);
@@ -1406,20 +1395,17 @@ const SessionList = () => {
         // Reset duty student dates state
         setDutyStudentDates({});
 
-        // Refresh sessions list by refetching data
+        // Refresh sessions list by refetching trang 1
         const refreshSessions = async () => {
           try {
-            // Show loading toast
             showAlert('Đang cập nhật danh sách buổi học...', 'info');
-            
-            // Fetch all sessions
-            await fetchSessions(1, 99999);
+            await fetchSessions(1);
             showAlert('Danh sách buổi học đã được cập nhật', 'success');
           } catch (error) {
             console.error('Error refreshing sessions:', error);
             showAlert('Có lỗi khi cập nhật danh sách buổi học', 'danger');
           } finally {
-            setLoading(false); // Hide loading state
+            setLoading(false);
           }
         };
 
@@ -1465,11 +1451,8 @@ const SessionList = () => {
         setShowBatchDeleteModal(false);
         setShowBatchSessionsModal(false);
         setBatchDeleteConfirm('');
-
-        // Refresh sessions list và cập nhật cache
-        const updatedSessions = sessions.filter(s => !sessionIds.includes(s.id));
-        setSessions(updatedSessions);
-        saveSessionsToCache(updatedSessions, updatedSessions.length);
+        // Tải lại trang hiện tại từ server (phân trang phía server)
+        fetchSessions(pagination.page);
       }
     } catch (error) {
       console.error('Error deleting batch sessions:', error);
@@ -1989,113 +1972,22 @@ const SessionList = () => {
     return result;
   };
 
-  // Extract unique values for filter dropdowns
-  const uniqueLocations = useMemo(() => {
-    const locations = new Set();
-    sessions.forEach(session => {
-      if (session.location) locations.add(session.location);
-    });
-    return Array.from(locations).sort();
-  }, [sessions]);
+  // Filter dropdowns lấy từ API filter-options (không phụ thuộc dữ liệu trang hiện tại)
+  const uniqueLocations = filterOptions.locations || [];
+  const uniqueClasses = filterOptions.classes || [];
+  const uniqueGroups = filterOptions.groups || [];
 
-  const uniqueClasses = useMemo(() => {
-    const classes = new Set();
-    sessions.forEach(session => {
-      // class_names có thể là chuỗi phân cách bằng dấu phẩy
-      if (session.class_names) {
-        session.class_names.split(',').forEach(cls => {
-          const trimmed = cls.trim();
-          if (trimmed) classes.add(trimmed);
-        });
-      }
-    });
-    return Array.from(classes).sort();
-  }, [sessions]);
-
-  const uniqueGroups = useMemo(() => {
-    const groups = new Set();
-    sessions.forEach(session => {
-      // group_names có thể là chuỗi phân cách bằng dấu phẩy
-      if (session.group_names) {
-        session.group_names.split(',').forEach(grp => {
-          const trimmed = grp.trim();
-          if (trimmed) groups.add(trimmed);
-        });
-      }
-    });
-    return Array.from(groups).sort();
-  }, [sessions]);
-
-  const filteredSessions = groupBatchSessions(sessions)
-    .filter(session => {
-      // Filter by status
-      if (filter !== 'all' && session.calculatedStatus !== filter) return false;
-      
-      // Filter by session name
-      if (searchTerm) {
-        const searchLower = searchTerm.toLowerCase();
-        const titleMatch = (session.title || session.name || '').toLowerCase().includes(searchLower);
-        if (!titleMatch) return false;
-      }
-      
-      // Filter by student name (using API search results)
+  // Server đã trả về dữ liệu đã gộp batch và đã lọc theo bộ lọc; chỉ lọc thêm theo studentSearchSessionIds nếu có (badge tìm SV)
+  const filteredSessions = sessions.filter(session => {
       if (studentSearch && studentSearch.trim().length >= 2 && studentSearchSessionIds !== null) {
-        // Check if session ID is in the matching set
         const sessionMatch = studentSearchSessionIds.has(session.id);
-        // For batch sessions, check if any batch session ID is in the matching set
-        const batchMatch = session.isBatch && session.batchSessions?.some(s => 
-          studentSearchSessionIds.has(s.id)
-        );
+        const batchMatch = session.isBatch && session.batchSessions?.some(s => studentSearchSessionIds.has(s.id));
         if (!sessionMatch && !batchMatch) return false;
       }
-      
-      // Filter by location
-      if (locationFilter) {
-        const locationMatch = (session.location || '').toLowerCase() === locationFilter.toLowerCase();
-        const batchLocationMatch = session.isBatch && session.batchSessions?.some(s => 
-          (s.location || '').toLowerCase() === locationFilter.toLowerCase()
-        );
-        if (!locationMatch && !batchLocationMatch) return false;
-      }
-      
-      // Filter by class (class_names có thể là chuỗi phân cách bằng dấu phẩy)
-      if (classFilter) {
-        const classFilterLower = classFilter.toLowerCase();
-        const sessionClasses = (session.class_names || '').toLowerCase().split(',').map(c => c.trim());
-        const classMatch = sessionClasses.some(c => c === classFilterLower);
-        const batchClassMatch = session.isBatch && session.batchSessions?.some(s => {
-          const batchClasses = (s.class_names || '').toLowerCase().split(',').map(c => c.trim());
-          return batchClasses.some(c => c === classFilterLower);
-        });
-        if (!classMatch && !batchClassMatch) return false;
-      }
-      
-      // Filter by group (group_names có thể là chuỗi phân cách bằng dấu phẩy)
-      if (groupFilter) {
-        const groupFilterLower = groupFilter.toLowerCase();
-        const sessionGroups = (session.group_names || '').toLowerCase().split(',').map(g => g.trim());
-        const groupMatch = sessionGroups.some(g => g === groupFilterLower);
-        const batchGroupMatch = session.isBatch && session.batchSessions?.some(s => {
-          const batchGroups = (s.group_names || '').toLowerCase().split(',').map(g => g.trim());
-          return batchGroups.some(g => g === groupFilterLower);
-        });
-        if (!groupMatch && !batchGroupMatch) return false;
-      }
-      
       return true;
     });
 
-  // Update pagination when filteredSessions change
-  useEffect(() => {
-    const totalItems = filteredSessions.length;
-    const totalPages = Math.ceil(totalItems / pagination.limit);
-    setPagination(prev => ({
-      ...prev,
-      totalItems,
-      totalPages,
-      page: prev.page > totalPages && totalPages > 0 ? totalPages : prev.page
-    }));
-  }, [filteredSessions.length, pagination.limit]);
+  // Pagination được cập nhật từ server trong fetchSessions, không tính từ filteredSessions
 
   if (loading) {
     return <Loader text="Đang tải danh sách buổi học..." />;
@@ -2270,7 +2162,6 @@ const SessionList = () => {
                     </thead>
                     <tbody>
                       {filteredSessions
-                        .slice((pagination.page - 1) * pagination.limit, pagination.page * pagination.limit)
                         .map(session => (
                         <tr
                           key={session.id}
@@ -2387,7 +2278,7 @@ const SessionList = () => {
                     <Pagination
                       currentPage={pagination.page}
                       totalPages={pagination.totalPages}
-                      onPageChange={(page) => setPagination(prev => ({ ...prev, page }))}
+                      onPageChange={(page) => fetchSessions(page)}
                       maxVisiblePages={5}
                       showFirstLast={true}
                     />

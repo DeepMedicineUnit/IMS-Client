@@ -432,6 +432,16 @@ const EditSession = () => {
           const filteredStudents = response.data.data;
           setStudents(filteredStudents);
           setTotalStudents(response.data.pagination.totalItems);
+
+          // Khi đang lọc "Đang học", chỉ giữ selectedStudents có trong danh sách hiện tại
+          // để badge và danh sách hiển thị luôn đồng nhất.
+          if (statusFilter === 'Đang học') {
+            const activeStudentIds = new Set(filteredStudents.map(student => student.id));
+            setSelectedStudents(prevSelected =>
+              prevSelected.filter(student => activeStudentIds.has(student.id))
+            );
+            return;
+          }
           
           // Make sure selectedStudents that aren't in the current view are still preserved
           // First, create a map of IDs of the currently visible students

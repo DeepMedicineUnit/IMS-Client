@@ -5,6 +5,8 @@ import { useAlert } from '../../contexts/AlertContext';
 import api, { refreshCSRFToken } from '../../utils/api';
 import io from 'socket.io-client';
 import Pagination from '../../components/Pagination';
+import AuthImage from '../../components/AuthImage';
+import ImageZoomModal from '../../components/ImageZoomModal';
 import usePageTitle from '../../hooks/usePageTitle';
 import RichTextEditor from '../../components/RichTextEditor';
 import '../../styles/user.css';
@@ -144,12 +146,96 @@ const TimeRemainingDisplay = ({ attempt, examDuration }) => {
   );
 };
 
+/** Tìm SV qua GET /lms/students/search (debounce, ≥2 ký tự) */
+function useLmsStudentSearch() {
+  const [input, setInput] = useState('');
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const q = (input || '').trim();
+    if (q.length < 2) {
+      setResults([]);
+      setLoading(false);
+      return undefined;
+    }
+    const t = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const r = await api.get(`/lms/students/search?${new URLSearchParams({ q, limit: '100' })}`);
+        if (!cancelled) setResults(Array.isArray(r.data?.data) ? r.data.data : []);
+      } catch {
+        if (!cancelled) setResults([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [input]);
+  const clear = () => {
+    setInput('');
+    setResults([]);
+  };
+  return { input, setInput, results, loading, clear };
+}
+
+/** Lưu Học kỳ thi / Khoa khi F5 hoặc mở lại trang Danh sách kỳ thi */
+const LS_EXAMS_NAV_PERIOD_ID = 'lms_exams_nav_period_id';
+const LS_EXAMS_NAV_PERIOD_NAME = 'lms_exams_nav_period_name';
+const LS_EXAMS_NAV_DEPARTMENT = 'lms_exams_nav_department';
+const LS_EXAMS_NAV_VIEW = 'lms_exams_nav_view_mode';
+
+function loadExamsHierarchyPersistence() {
+  try {
+    const pid = localStorage.getItem(LS_EXAMS_NAV_PERIOD_ID);
+    const periodName = localStorage.getItem(LS_EXAMS_NAV_PERIOD_NAME) || '';
+    const dept = localStorage.getItem(LS_EXAMS_NAV_DEPARTMENT);
+    const view = localStorage.getItem(LS_EXAMS_NAV_VIEW);
+    const periodId = pid ? parseInt(pid, 10) : null;
+    if (!periodId || Number.isNaN(periodId)) {
+      return { period: null, department: null, viewMode: 'periods' };
+    }
+    const period = { exam_period_id: periodId, period_name: periodName };
+    const department = dept && view === 'exams' ? dept : null;
+    const viewMode = view === 'exams' && department ? 'exams' : 'departments';
+    return { period, department, viewMode };
+  } catch {
+    return { period: null, department: null, viewMode: 'periods' };
+  }
+}
+
+function saveExamsHierarchyPersistence(period, department, viewMode) {
+  try {
+    if (!period?.exam_period_id) {
+      localStorage.removeItem(LS_EXAMS_NAV_PERIOD_ID);
+      localStorage.removeItem(LS_EXAMS_NAV_PERIOD_NAME);
+      localStorage.removeItem(LS_EXAMS_NAV_DEPARTMENT);
+      localStorage.removeItem(LS_EXAMS_NAV_VIEW);
+      return;
+    }
+    localStorage.setItem(LS_EXAMS_NAV_PERIOD_ID, String(period.exam_period_id));
+    localStorage.setItem(LS_EXAMS_NAV_PERIOD_NAME, period.period_name || '');
+    if (viewMode === 'exams' && department) {
+      localStorage.setItem(LS_EXAMS_NAV_DEPARTMENT, department);
+      localStorage.setItem(LS_EXAMS_NAV_VIEW, 'exams');
+    } else {
+      localStorage.removeItem(LS_EXAMS_NAV_DEPARTMENT);
+      localStorage.setItem(LS_EXAMS_NAV_VIEW, 'departments');
+    }
+  } catch (_) { /* ignore */ }
+}
+
 const Exams = () => {
   usePageTitle('Quản lý thi cử');
   const { currentUser } = useAuth();
   const [exams, setExams] = useState([]);
   const [questions, setQuestions] = useState([]);
   const [topics, setTopics] = useState([]);
+  const [loadingQuestions, setLoadingQuestions] = useState(false);
+  const [hasLoadedQuestions, setHasLoadedQuestions] = useState(false);
   const [monitoringData, setMonitoringData] = useState([]);
   const [cheatingLogs, setCheatingLogs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -159,20 +245,30 @@ const Exams = () => {
   const [showWebcamModal, setShowWebcamModal] = useState(false);
   const [selectedExam, setSelectedExam] = useState(null);
   const [selectedAttemptForVideo, setSelectedAttemptForVideo] = useState(null);
-  const [webcamVideoUrl, setWebcamVideoUrl] = useState(null);
+  const [webcamSnapshotsList, setWebcamSnapshotsList] = useState([]); // Danh sách ảnh webcam trong modal
+  const [webcamSnapshotIndex, setWebcamSnapshotIndex] = useState(0); // Frame hiện tại (5 fps)
+  const [webcamVideoPlaying, setWebcamVideoPlaying] = useState(false); // Phát / tạm dừng
+  const [webcamHoverPreviewIndex, setWebcamHoverPreviewIndex] = useState(null); // Index khi hover thanh time → xem trước ảnh
+  const [webcamPlayerFullscreen, setWebcamPlayerFullscreen] = useState(false); // Đang fullscreen để áp dụng CSS thanh điều khiển
+  const [webcamModalKey, setWebcamModalKey] = useState(0); // Key để remount ảnh mỗi lần mở modal
   const [loadingVideo, setLoadingVideo] = useState(false);
+  const webcamPlayerContainerRef = useRef(null); // Container để fullscreen
 
-  // Live webcam streaming states
+  // Live webcam streaming states (ảnh từ server mỗi 0.2s)
   const socketRef = useRef(null);
   const liveWebcamStreams = useRef({}); // { attemptId: imageData }
   const [liveWebcamData, setLiveWebcamData] = useState({}); // { attemptId: imageData }
 
-  // Live webcam fullscreen modal
-  const [showLiveWebcamModal, setShowLiveWebcamModal] = useState(false);
-  const [selectedAttemptForLiveView, setSelectedAttemptForLiveView] = useState(null);
   const [showAnswersDetailModal, setShowAnswersDetailModal] = useState(false);
+  const zoomBlobUrlToRevokeRef = useRef(null); // Blob URL khi mở zoom không phải live (cần revoke khi đóng)
+  const liveZoomBlobUrlRef = useRef(null); // Blob URL tạo khi cập nhật live trong ImageZoomModal (revoke khi thay ảnh hoặc đóng)
+  const [imageZoomLiveAttemptId, setImageZoomLiveAttemptId] = useState(null); // attemptId khi zoom đang xem live → polling cập nhật ảnh
   const [answersDetailData, setAnswersDetailData] = useState(null);
+  const [answersDetailKey, setAnswersDetailKey] = useState(0);
   const [loadingAnswersDetail, setLoadingAnswersDetail] = useState(false);
+  const [imageZoomOpen, setImageZoomOpen] = useState(false);
+  const [imageZoomUrl, setImageZoomUrl] = useState(null);
+  const [imageZoomFileName, setImageZoomFileName] = useState('webcam.png');
   const [currentViewingAttemptId, setCurrentViewingAttemptId] = useState(null);
   const [showBanModal, setShowBanModal] = useState(false);
   const [selectedAttemptForBan, setSelectedAttemptForBan] = useState(null);
@@ -184,6 +280,12 @@ const Exams = () => {
   const [attemptForReset, setAttemptForReset] = useState(null);
   const [showUnbanConfirmModal, setShowUnbanConfirmModal] = useState(false);
   const [attemptForUnban, setAttemptForUnban] = useState(null);
+  const [showProctorMessageModal, setShowProctorMessageModal] = useState(false);
+  const [proctorMessageTargetAttempt, setProctorMessageTargetAttempt] = useState(null);
+  const [proctorMessageText, setProctorMessageText] = useState('');
+  const [sendingProctorMessage, setSendingProctorMessage] = useState(false);
+  const [proctorMessageHistory, setProctorMessageHistory] = useState([]);
+  const [loadingProctorHistory, setLoadingProctorHistory] = useState(false);
   const lastAnsweredCountRef = useRef(null); // Track last answered_questions_count
   const lastUpdateTimeRef = useRef(null); // Track last update time to prevent too frequent updates
   const isUpdatingRef = useRef(false); // Prevent concurrent updates
@@ -245,6 +347,13 @@ const Exams = () => {
   const [pageSize, setPageSize] = useState(70);
   const [totalStudents, setTotalStudents] = useState(0);
 
+  const participantStudentSearch = useLmsStudentSearch();
+  const imsExemptSearch = useLmsStudentSearch();
+  const webcamExemptSearch = useLmsStudentSearch();
+  const faceExemptSearch = useLmsStudentSearch();
+  /** id -> { student_id, full_name, class_name } cho danh sách miễn & sau khi tải từ API */
+  const [exemptStudentLabelCache, setExemptStudentLabelCache] = useState({});
+
   // Filters
   const [filters, setFilters] = useState({
     search: '',
@@ -270,9 +379,29 @@ const Exams = () => {
     totalPages: 0
   });
 
+  // Phân cấp Học kỳ -> Khoa -> Kỳ thi
+  const [examPeriods, setExamPeriods] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const initialExamsNavRef = useRef(null);
+  if (initialExamsNavRef.current === null) {
+    initialExamsNavRef.current = loadExamsHierarchyPersistence();
+  }
+  const initExamsNav = initialExamsNavRef.current;
+  const [selectedPeriod, setSelectedPeriod] = useState(initExamsNav.period);
+  const [selectedDepartment, setSelectedDepartment] = useState(initExamsNav.department);
+  const [viewMode, setViewMode] = useState(initExamsNav.viewMode); // 'periods' | 'departments' | 'exams'
+  const [showPeriodModal, setShowPeriodModal] = useState(false);
+  const [periodModalMode, setPeriodModalMode] = useState('create'); // 'create' | 'edit'
+  const [periodToEdit, setPeriodToEdit] = useState(null);
+  const [showDeletePeriodModal, setShowDeletePeriodModal] = useState(false);
+  const [periodToDelete, setPeriodToDelete] = useState(null);
+  const [periodForm, setPeriodForm] = useState({ period_code: '', period_name: '', description: '', start_date: '', end_date: '' });
+  const [periodsPagination, setPeriodsPagination] = useState({ page: 1, limit: 10, totalItems: 0, totalPages: 0 });
+
   // Form data
   const [examForm, setExamForm] = useState({
     exam_title: '',
+    ma_mh: '',
     exam_description: '',
     exam_type: 'quiz',
     course_id: null,
@@ -294,7 +423,7 @@ const Exams = () => {
     scheduled_start: '',
     scheduled_end: '',
     time_limit_type: 'fixed',
-    proctoring_enabled: true,
+    proctoring_enabled: false,
     proctoring_type: 'none',
     ip_restrictions: '',
     lockdown_browser_required: false,
@@ -382,11 +511,72 @@ const Exams = () => {
   // Initial fetch
   useEffect(() => {
     if (activeTab === 'exams') {
-      fetchExams();
+      if (viewMode === 'periods') fetchExamPeriods();
+      else if (viewMode === 'departments' && selectedPeriod?.exam_period_id) fetchDepartmentsByPeriod(selectedPeriod.exam_period_id);
+      else if (viewMode === 'exams') fetchExams();
     } else if (activeTab === 'monitoring' && selectedExam) {
       fetchMonitoringData();
     }
-  }, [filters, activeTab, selectedExam]);
+  }, [filters, activeTab, selectedExam, viewMode, selectedPeriod?.exam_period_id, selectedDepartment, pagination.page, pagination.limit]);
+
+  // Ghi nhớ Học kỳ thi + Khoa khi tải lại trang (chỉ tab Danh sách kỳ thi)
+  useEffect(() => {
+    if (activeTab !== 'exams') return;
+    saveExamsHierarchyPersistence(selectedPeriod, selectedDepartment, viewMode);
+  }, [activeTab, selectedPeriod, selectedDepartment, viewMode]);
+
+  // Đồng bộ tên học kỳ từ API; nếu học kỳ đã xóa thì quay về danh sách học kỳ
+  useEffect(() => {
+    if (activeTab !== 'exams' || !selectedPeriod?.exam_period_id) return;
+    if (viewMode !== 'exams' && viewMode !== 'departments') return;
+    const pid = Number(selectedPeriod.exam_period_id);
+
+    const applyList = (list) => {
+      const found = list.find((p) => Number(p.exam_period_id) === pid);
+      if (!found) {
+        setSelectedPeriod(null);
+        setSelectedDepartment(null);
+        setViewMode('periods');
+        saveExamsHierarchyPersistence(null, null, 'periods');
+      } else if ((found.period_name || '') !== (selectedPeriod.period_name || '')) {
+        setSelectedPeriod(found);
+      }
+    };
+
+    if (examPeriods.length > 0) {
+      applyList(examPeriods);
+      return;
+    }
+    let cancelled = false;
+    api.get('/lms/exam-periods')
+      .then((res) => {
+        if (cancelled) return;
+        const list = Array.isArray(res.data?.data) ? res.data.data : [];
+        setExamPeriods((prev) => (prev.length > 0 ? prev : list));
+        applyList(list);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeTab, viewMode, selectedPeriod?.exam_period_id, selectedPeriod?.period_name, examPeriods.length]);
+
+  // Load proctor message history when opening modal for an attempt
+  useEffect(() => {
+    if (!showProctorMessageModal || !proctorMessageTargetAttempt?.attempt_id) {
+      setProctorMessageHistory([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingProctorHistory(true);
+    api.get(`/lms/attempts/${proctorMessageTargetAttempt.attempt_id}/proctor-messages`)
+      .then((res) => {
+        if (!cancelled && res.data?.success && Array.isArray(res.data.data)) {
+          setProctorMessageHistory(res.data.data);
+        }
+      })
+      .catch(() => { if (!cancelled) setProctorMessageHistory([]); })
+      .finally(() => { if (!cancelled) setLoadingProctorHistory(false); });
+    return () => { cancelled = true; };
+  }, [showProctorMessageModal, proctorMessageTargetAttempt?.attempt_id]);
 
   // Auto-update total_points when selectedQuestions change (but not when redistributing)
   // Tự động tính tổng điểm từ các mức độ khi blueprint thay đổi (chỉ cho mode on_exam)
@@ -470,6 +660,15 @@ const Exams = () => {
     }
   }, [activeTab, currentUser]);
 
+  // Fetch exam periods when exam modal opens (để chọn học kỳ khi tạo/sửa kỳ thi)
+  useEffect(() => {
+    if (showExamModal && hasLMSQAPermission()) {
+      api.get('/lms/exam-periods').then(r => {
+        if (r.data?.data) setExamPeriods(r.data.data);
+      }).catch(() => {});
+    }
+  }, [showExamModal]);
+
   // Fetch exams when filters change
   useEffect(() => {
     if (activeTab === 'exams' && hasLMSQAPermission()) {
@@ -497,6 +696,10 @@ const Exams = () => {
         if (filters.class_name) params.append('class_name', filters.class_name);
         if (filters.date_from) params.append('date_from', filters.date_from);
         if (filters.date_to) params.append('date_to', filters.date_to);
+        if (selectedPeriod?.exam_period_id) params.append('exam_period_id', selectedPeriod.exam_period_id);
+        if (selectedDepartment) params.append('department_name', selectedDepartment);
+        params.append('page', pagination.page);
+        params.append('limit', pagination.limit);
 
         const response = await api.get(`/lms/exams?${params.toString()}`);
         const examsData = response.data?.data;
@@ -545,7 +748,7 @@ const Exams = () => {
         clearInterval(pollInterval);
       }
     };
-  }, [activeTab, filters.search, filters.exam_type, filters.status, filters.class_name, filters.date_from, filters.date_to]);
+  }, [activeTab, filters.search, filters.exam_type, filters.status, filters.class_name, filters.date_from, filters.date_to, selectedPeriod?.exam_period_id, selectedDepartment, pagination.page, pagination.limit]);
 
   // Update pagination when exams change
   useEffect(() => {
@@ -669,6 +872,7 @@ const Exams = () => {
           const response = await api.get(`/lms/attempts/${currentViewingAttemptId}/answers-detail`);
           if (response.data.success) {
             setAnswersDetailData(response.data.data);
+            setAnswersDetailKey((k) => k + 1);
             lastAnsweredCountRef.current = currentAnsweredCount;
             lastUpdateTimeRef.current = Date.now();
           }
@@ -747,11 +951,22 @@ const Exams = () => {
     socketRef.current.on('exam:webcam_frame', (data) => {
       const { attemptId, frame } = data;
       if (attemptId && frame) {
-        // Update live webcam stream
         liveWebcamStreams.current[attemptId] = frame;
         setLiveWebcamData(prev => ({
           ...prev,
           [attemptId]: frame
+        }));
+      }
+    });
+
+    // Ảnh chụp webcam mỗi 0.2s từ server (sinh viên gửi lên -> server broadcast URL)
+    socketRef.current.on('exam:webcam_snapshot_saved', (data) => {
+      const { attemptId, snapshot_url } = data;
+      if (attemptId && snapshot_url) {
+        liveWebcamStreams.current[attemptId] = snapshot_url;
+        setLiveWebcamData(prev => ({
+          ...prev,
+          [attemptId]: snapshot_url
         }));
       }
     });
@@ -780,6 +995,100 @@ const Exams = () => {
       }
     };
   }, [activeTab, selectedExam?.exam_id]); // Removed monitoringData from dependencies
+
+  // Trong modal Video Webcam: phát theo nút Play/Pause, 5 fps (khớp chụp 0.2s/lần)
+  const webcamFps = 5;
+  const webcamFrameDurationMs = 1000 / webcamFps;
+  useEffect(() => {
+    if (!showWebcamModal || webcamSnapshotsList.length === 0 || !webcamVideoPlaying) return;
+    const interval = setInterval(() => {
+      setWebcamSnapshotIndex((prev) => {
+        if (prev >= webcamSnapshotsList.length - 1) {
+          setWebcamVideoPlaying(false);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, webcamFrameDurationMs);
+    return () => clearInterval(interval);
+  }, [showWebcamModal, webcamSnapshotsList.length, webcamVideoPlaying]);
+
+  // Lắng nghe fullscreenchange để set class CSS (giữ thanh điều khiển khi toàn màn hình)
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setWebcamPlayerFullscreen(!!document.fullscreenElement && document.fullscreenElement === webcamPlayerContainerRef.current);
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
+    };
+  }, []);
+
+  // Polling: lấy ảnh webcam mới nhất từ server mỗi 1.5s (không phụ thuộc socket)
+  const activeAttemptIds = (monitoringData || [])
+    .filter(a => a.attempt_id && !a.submit_time)
+    .map(a => a.attempt_id);
+  const activeAttemptIdsKey = activeAttemptIds.join(',');
+
+  useEffect(() => {
+    if (activeTab !== 'monitoring' || !selectedExam || activeAttemptIds.length === 0) return;
+
+    const pollLatest = () => {
+      activeAttemptIds.forEach((attemptId) => {
+        api.get(`/lms/attempts/${attemptId}/webcam-snapshot/latest`)
+          .then((r) => {
+            if (r.data?.success && r.data?.data?.url) {
+              setLiveWebcamData(prev => ({ ...prev, [attemptId]: r.data.data.url }));
+            }
+          })
+          .catch(() => {});
+      });
+    };
+    pollLatest();
+    const interval = setInterval(pollLatest, 400);
+    return () => clearInterval(interval);
+  }, [activeTab, selectedExam?.exam_id, activeAttemptIdsKey]);
+
+  // Khi mở ImageZoomModal từ cột Live Webcam: polling ảnh mới nhất (tránh chớp: không tick ngay, revoke trễ, polling 800ms)
+  useEffect(() => {
+    if (!imageZoomOpen || !imageZoomLiveAttemptId) return;
+    const attemptId = imageZoomLiveAttemptId;
+    const tick = () => {
+      api.get(`/lms/attempts/${attemptId}/webcam-snapshot/latest`)
+        .then((r) => {
+          if (!r.data?.success || !r.data?.data?.url) return;
+          const snapshotUrl = r.data.data.url;
+          const apiBase = (api.defaults?.baseURL || '').replace(/\/api\/?$/, '') || (typeof window !== 'undefined' ? window.location.origin : '');
+          const fullUrl = snapshotUrl.startsWith('http') ? snapshotUrl : (apiBase + (snapshotUrl.startsWith('/') ? snapshotUrl : '/' + snapshotUrl)) + (snapshotUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
+          return api.get(fullUrl, { responseType: 'blob' });
+        })
+        .then((blobRes) => {
+          if (!blobRes?.data || blobRes.data.size === 0) return;
+          const type = (blobRes.data.type || '').toLowerCase();
+          if (!type.startsWith('image/')) return;
+          const prevBlobUrl = liveZoomBlobUrlRef.current;
+          const blobUrl = URL.createObjectURL(blobRes.data);
+          liveZoomBlobUrlRef.current = blobUrl;
+          setImageZoomUrl(blobUrl);
+          if (prevBlobUrl) {
+            setTimeout(() => URL.revokeObjectURL(prevBlobUrl), 150);
+          }
+        })
+        .catch(() => {});
+    };
+    const interval = setInterval(tick, 800);
+    const firstTickDelay = setTimeout(tick, 800);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(firstTickDelay);
+      if (liveZoomBlobUrlRef.current) {
+        URL.revokeObjectURL(liveZoomBlobUrlRef.current);
+        liveZoomBlobUrlRef.current = null;
+      }
+    };
+  }, [imageZoomOpen, imageZoomLiveAttemptId]);
 
   // Watch new attempts when monitoringData changes (but don't recreate socket)
   useEffect(() => {
@@ -863,6 +1172,13 @@ const Exams = () => {
     socketRef.current.emit('exam:watch_attempt', attemptId);
     watchedAttemptsRef.current.add(attemptId);
     console.log(`👁️ Watching attempt: ${attemptId} (socket connected: ${socketRef.current.connected})`);
+
+    // Gieo ảnh mới nhất từ server (ảnh chụp mỗi 0.2s)
+    api.get(`/lms/attempts/${attemptId}/webcam-snapshot/latest`).then((r) => {
+      if (r.data?.success && r.data?.data?.url) {
+        setLiveWebcamData(prev => ({ ...prev, [attemptId]: r.data.data.url }));
+      }
+    }).catch(() => {});
   };
 
   // Fetch students and filter options
@@ -871,19 +1187,23 @@ const Exams = () => {
       fetchStudents();
       fetchFilterOptions();
       fetchStudentGroups();
-      // Fetch topics and questions when exam modal opens
-      fetchTopics();
-      fetchQuestions();
     }
   }, [showExamModal, classFilter, facultyFilter, majorFilter, statusFilter, sortField, sortOrder, currentPage, pageSize]);
 
   // Fetch topics and questions when questions tab is selected
   useEffect(() => {
     if (showExamModal && examModalTab === 'questions') {
-      fetchTopics();
-      fetchQuestions();
+      // Lazy-load to avoid freezing UI when opening modal
+      if (!topics || topics.length === 0) fetchTopics();
+      // Fetch the full question bank ONLY when needed (on_create modes).
+      // This prevents UI freeze if /lms/questions returns a very large dataset.
+      const mode = examForm.question_selection_mode;
+      const needsQuestionBank = mode === 'first_on_create' || mode === 'random_on_create';
+      if (needsQuestionBank && !hasLoadedQuestions && !loadingQuestions) {
+        fetchQuestions();
+      }
     }
-  }, [showExamModal, examModalTab]);
+  }, [showExamModal, examModalTab, examForm.question_selection_mode, hasLoadedQuestions, loadingQuestions]);
 
   // Fetch students by group when group filter changes
   useEffect(() => {
@@ -903,6 +1223,39 @@ const Exams = () => {
     }
   }, [groupFilter, useGroupMode, showExamModal, editMode]);
 
+  const fetchExamPeriods = async () => {
+    try {
+      setLoading(true);
+      const res = await api.get('/lms/exam-periods'); // Không lọc is_active để hiển thị tất cả
+      const list = Array.isArray(res.data?.data) ? res.data.data : [];
+      setExamPeriods(list);
+      const total = list.length;
+      setPeriodsPagination(prev => ({
+        ...prev,
+        totalItems: total,
+        totalPages: Math.max(1, Math.ceil(total / prev.limit))
+      }));
+    } catch (err) {
+      console.error('fetchExamPeriods:', err);
+      setExamPeriods([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchDepartmentsByPeriod = async (periodId) => {
+    try {
+      setLoading(true);
+      const res = await api.get(`/lms/exam-periods/${periodId}/departments`);
+      setDepartments(res.data?.data || []);
+    } catch (err) {
+      console.error('fetchDepartmentsByPeriod:', err);
+      setDepartments([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fetchExams = async () => {
     try {
       setLoading(true);
@@ -914,13 +1267,19 @@ const Exams = () => {
       if (filters.class_name) params.append('class_name', filters.class_name);
       if (filters.date_from) params.append('date_from', filters.date_from);
       if (filters.date_to) params.append('date_to', filters.date_to);
+      if (selectedPeriod?.exam_period_id) params.append('exam_period_id', selectedPeriod.exam_period_id);
+      if (selectedDepartment) params.append('department_name', selectedDepartment);
+      params.append('page', pagination.page);
+      params.append('limit', pagination.limit);
 
       const response = await api.get(`/lms/exams?${params.toString()}`);
 
       const examsData = response.data?.data;
       let examsList = [];
+      let paginationData = null;
       if (examsData && Array.isArray(examsData.exams)) {
         examsList = examsData.exams;
+        paginationData = examsData.pagination;
       } else if (Array.isArray(examsData)) {
         examsList = examsData;
       }
@@ -932,6 +1291,13 @@ const Exams = () => {
       }));
 
       setExams(mappedExams);
+      if (paginationData) {
+        setPagination(prev => ({
+          ...prev,
+          totalItems: paginationData.total || mappedExams.length,
+          totalPages: paginationData.pages || Math.ceil((paginationData.total || mappedExams.length) / prev.limit)
+        }));
+      }
     } catch (error) {
       console.error('Error fetching exams:', error);
       if (error.response?.status === 403) {
@@ -947,6 +1313,7 @@ const Exams = () => {
 
   const fetchQuestions = async () => {
     try {
+      setLoadingQuestions(true);
       // Only fetch approved questions for exam creation/editing
       const response = await api.get('/lms/questions', {
         params: {
@@ -957,14 +1324,20 @@ const Exams = () => {
       const questionsData = response.data?.data;
       if (Array.isArray(questionsData)) {
         setQuestions(questionsData);
+        setHasLoadedQuestions(true);
       } else if (questionsData && Array.isArray(questionsData.questions)) {
         setQuestions(questionsData.questions);
+        setHasLoadedQuestions(true);
       } else {
         setQuestions([]);
+        setHasLoadedQuestions(false);
       }
     } catch (error) {
       console.error('Error fetching questions:', error);
       setQuestions([]);
+      setHasLoadedQuestions(false);
+    } finally {
+      setLoadingQuestions(false);
     }
   };
 
@@ -1456,46 +1829,32 @@ const Exams = () => {
     }
   };
 
-  const fetchWebcamVideo = async (attemptId) => {
+  // Mở modal Webcam: chỉ dùng danh sách ảnh snapshot
+  const openWebcamModalForAttempt = async (attempt) => {
+    setSelectedAttemptForVideo(attempt);
+    setLoadingVideo(true);
+    setWebcamSnapshotsList([]);
     try {
-      setLoadingVideo(true);
-      setWebcamVideoUrl(null);
-
-      const response = await api.get(`/lms/attempts/${attemptId}/webcam-video-url`);
-
-      if (response.data.success && response.data.data) {
-        const videoData = response.data.data;
-
-        // If it's a local file, construct full URL
-        if (videoData.type === 'local') {
-          // Use the API endpoint directly
-          const baseUrl = window.location.origin;
-          setWebcamVideoUrl(`${baseUrl}${videoData.video_url}`);
-        } else {
-          // Google Drive link - use as is or convert to embed format
-          setWebcamVideoUrl(videoData.video_url);
-        }
-      } else {
-        showAlertMessage('Không tìm thấy video webcam', 'warning');
+      const snapRes = await api.get(`/lms/attempts/${attempt.attempt_id}/webcam-snapshots`);
+      if (snapRes.data.success && snapRes.data.data?.snapshots?.length > 0) {
+        setWebcamSnapshotsList(snapRes.data.data.snapshots);
+        setWebcamSnapshotIndex(0);
+        setWebcamVideoPlaying(false);
       }
-    } catch (error) {
-      console.error('Error fetching webcam video:', error);
-      if (error.response?.status === 404) {
-        showAlertMessage('Không tìm thấy video webcam cho bài làm này', 'warning');
-      } else if (error.response?.status === 403) {
-        showAlertMessage('Bạn không có quyền truy cập video webcam. Chỉ quyền Khảo thí & Đảm bảo chất lượng (lms_qa) và Quản lý LMS (lms_mod) mới có quyền.', 'danger');
-      } else {
-        showAlertMessage('Lỗi khi tải video webcam', 'danger');
-      }
+    } catch (e) {
+      // Bỏ qua
     } finally {
       setLoadingVideo(false);
     }
+    setWebcamModalKey((k) => k + 1);
+    setShowWebcamModal(true);
   };
 
   const handleCreateExam = () => {
     setEditMode(false);
     setExamForm({
       exam_title: '',
+      ma_mh: '',
       exam_description: '',
       exam_type: 'quiz',
       course_id: null,
@@ -1518,7 +1877,7 @@ const Exams = () => {
       scheduled_end: '',
       appeal_deadline_days: 3,
       time_limit_type: 'fixed',
-      proctoring_enabled: true,
+      proctoring_enabled: false,
       proctoring_type: 'none',
       ip_restrictions: '',
       lockdown_browser_required: false,
@@ -1550,7 +1909,9 @@ const Exams = () => {
         exempt_students: [],
         exempt_classes: [],
         exempt_groups: []
-      }
+      },
+      exam_period_id: selectedPeriod?.exam_period_id || null,
+      department_name: selectedDepartment || null
     });
     setSelectedQuestions([]);
     setSelectedStudents([]);
@@ -1562,6 +1923,11 @@ const Exams = () => {
     setMajorFilter('');
     setGroupFilter('');
     setUseGroupMode(false);
+    setExemptStudentLabelCache({});
+    participantStudentSearch.clear();
+    imsExemptSearch.clear();
+    webcamExemptSearch.clear();
+    faceExemptSearch.clear();
     // Reset blueprint
     setBlueprint({
       selected_topic_id: '',
@@ -1591,6 +1957,69 @@ const Exams = () => {
     });
     setExamModalTab('basic'); // Reset về tab đầu tiên
     setShowExamModal(true);
+  };
+
+  const handleSavePeriod = async () => {
+    if (!periodForm.period_code?.trim() || !periodForm.period_name?.trim()) {
+      showAlertMessage('Vui lòng nhập mã và tên học kỳ thi', 'warning');
+      return;
+    }
+    try {
+      if (periodModalMode === 'edit' && periodToEdit?.exam_period_id) {
+        await api.put(`/lms/exam-periods/${periodToEdit.exam_period_id}`, periodForm);
+        showAlertMessage('Đã cập nhật học kỳ thi thành công', 'success');
+      } else {
+        await api.post('/lms/exam-periods', periodForm);
+        showAlertMessage('Đã tạo học kỳ thi thành công', 'success');
+      }
+      setShowPeriodModal(false);
+      setPeriodModalMode('create');
+      setPeriodToEdit(null);
+      fetchExamPeriods();
+    } catch (err) {
+      showAlertMessage(err.response?.data?.message || (periodModalMode === 'edit' ? 'Lỗi khi cập nhật học kỳ thi' : 'Lỗi khi tạo học kỳ thi'), 'danger');
+    }
+  };
+
+  const openCreatePeriodModal = () => {
+    setPeriodModalMode('create');
+    setPeriodToEdit(null);
+    setPeriodForm({ period_code: '', period_name: '', description: '', start_date: '', end_date: '' });
+    setShowPeriodModal(true);
+  };
+
+  const openEditPeriodModal = (p) => {
+    setPeriodModalMode('edit');
+    setPeriodToEdit(p);
+    setPeriodForm({
+      period_code: p?.period_code || '',
+      period_name: p?.period_name || '',
+      description: p?.description || '',
+      start_date: p?.start_date ? String(p.start_date).slice(0, 10) : '',
+      end_date: p?.end_date ? String(p.end_date).slice(0, 10) : ''
+    });
+    setShowPeriodModal(true);
+  };
+
+  const handleDeletePeriod = async () => {
+    if (!periodToDelete?.exam_period_id) return;
+    try {
+      await api.delete(`/lms/exam-periods/${periodToDelete.exam_period_id}`);
+      showAlertMessage('Đã xóa/ẩn học kỳ thi', 'success');
+      setShowDeletePeriodModal(false);
+      const deletedId = Number(periodToDelete.exam_period_id);
+      setPeriodToDelete(null);
+      // Nếu đang đứng trong học kỳ bị xóa/ẩn -> quay lại danh sách học kỳ
+      if (selectedPeriod?.exam_period_id && Number(selectedPeriod.exam_period_id) === deletedId) {
+        setSelectedPeriod(null);
+        setSelectedDepartment(null);
+        setViewMode('periods');
+        saveExamsHierarchyPersistence(null, null, 'periods');
+      }
+      fetchExamPeriods();
+    } catch (err) {
+      showAlertMessage(err.response?.data?.message || 'Lỗi khi xóa học kỳ thi', 'danger');
+    }
   };
 
   const handleEditExam = async (exam) => {
@@ -1660,6 +2089,7 @@ const Exams = () => {
 
       setExamForm({
         exam_title: fullExam.exam_title || '',
+        ma_mh: fullExam.ma_mh != null ? String(fullExam.ma_mh) : '',
         exam_description: fullExam.description || fullExam.exam_description || '', // Map description to exam_description
         exam_type: fullExam.exam_type || 'quiz',
         course_id: fullExam.course_id || null,
@@ -1739,8 +2169,10 @@ const Exams = () => {
         scheduled_start: formatDateTimeForInput(fullExam.available_from || fullExam.scheduled_start),
         scheduled_end: formatDateTimeForInput(fullExam.available_until || fullExam.scheduled_end),
         appeal_deadline_days: fullExam.appeal_deadline_days !== undefined && fullExam.appeal_deadline_days !== null ? fullExam.appeal_deadline_days : 3,
+        exam_period_id: fullExam.exam_period_id || null,
+        department_name: fullExam.department_name || null,
         time_limit_type: fullExam.time_limit_type || 'fixed',
-        proctoring_enabled: fullExam.proctoring_enabled || true,
+        proctoring_enabled: (fullExam.ims_exam_pctu_required === 1 || fullExam.ims_exam_pctu_required === true) ? false : (fullExam.proctoring_enabled === true || fullExam.proctoring_enabled === 1),
         proctoring_type: fullExam.proctoring_type || 'none',
         ip_restrictions: fullExam.ip_restrictions || '',
         lockdown_browser_required: fullExam.lockdown_browser_required || false,
@@ -2107,6 +2539,45 @@ const Exams = () => {
       await fetchFilterOptions();
       await fetchStudentGroups();
 
+      const parseCfg = (raw) => {
+        if (!raw) return {};
+        if (typeof raw === 'string') {
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return {};
+          }
+        }
+        return raw;
+      };
+      const exemptIdSet = new Set();
+      ['ims_exam_pctu_config', 'webcam_config', 'face_verification_config'].forEach((k) => {
+        const c = parseCfg(fullExam[k]);
+        (c.exempt_students || []).forEach((id) => exemptIdSet.add(Number(id)));
+      });
+      const eids = [...exemptIdSet].filter((id) => id > 0);
+      if (eids.length) {
+        const map = {};
+        for (let i = 0; i < eids.length; i += 100) {
+          const chunk = eids.slice(i, i + 100);
+          try {
+            const r = await api.get(`/lms/students/search?ids=${chunk.join(',')}`);
+            (r.data?.data || []).forEach((s) => {
+              map[s.id] = s;
+            });
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        setExemptStudentLabelCache(map);
+      } else {
+        setExemptStudentLabelCache({});
+      }
+      participantStudentSearch.clear();
+      imsExemptSearch.clear();
+      webcamExemptSearch.clear();
+      faceExemptSearch.clear();
+
       setExamModalTab('basic'); // Reset về tab đầu tiên
       setShowExamModal(true);
     } catch (error) {
@@ -2180,19 +2651,17 @@ const Exams = () => {
         total_points: parseFloat(calculatedTotalPoints.toFixed(2))
       };
 
-      // Get student IDs based on selection mode
+      // Danh sách thí sinh: lớp/nhóm chỉ để lọc bảng. Nếu đã tick chọn SV → chỉ gửi đúng người đã chọn.
+      // Muốn gán cả lớp: chọn lớp rồi bấm "Chọn tất cả" (hoặc không chọn ai + có filter lớp → cả lớp đang hiển thị).
       let studentIds = [];
-      if (useGroupMode && groupFilter) {
-        // If using group mode, use all students currently displayed (from the group filter)
-        // This ensures that when group is changed, all students from the new group are included
+      if (selectedStudents.length > 0) {
+        studentIds = selectedStudents.map(s => s.id).filter(id => id);
+      } else if (useGroupMode && groupFilter) {
         studentIds = students.map(s => s.id).filter(id => id);
       } else if (classFilter) {
-        // If class filter is set, use all students currently displayed (from the class filter)
-        // This ensures that when class is changed, all students from the new class are included
         studentIds = students.map(s => s.id).filter(id => id);
       } else {
-        // Otherwise use selected students (manual selection, no filter)
-        studentIds = selectedStudents.map(s => s.id).filter(id => id);
+        studentIds = [];
       }
 
       // Map scheduled_start/scheduled_end to available_from/available_until for backend
@@ -2205,8 +2674,11 @@ const Exams = () => {
 
       const examData = {
         exam_title: finalExamForm.exam_title,
+        ma_mh: (finalExamForm.ma_mh && String(finalExamForm.ma_mh).trim()) || null,
         description: finalExamForm.exam_description, // Map exam_description to description
         exam_type: finalExamForm.exam_type,
+        exam_period_id: finalExamForm.exam_period_id || null,
+        department_name: finalExamForm.department_name || null,
         course_id: finalExamForm.course_id,
         total_points: finalExamForm.total_points,
         duration_minutes: finalExamForm.duration_minutes,
@@ -2596,7 +3068,7 @@ const Exams = () => {
       topic_name: topicName,
       total_questions: 0,
       distribution_type: 'difficulty', // 'difficulty' or 'bloom'
-      random_type: 'all', // 'all' (Random tất cả) or 'fixed' (Random cố định)
+      random_type: 'fixed', // 'all' (Random tất cả) or 'fixed' (Random cố định)
       difficulty_distribution: {
         easy: 0,
         medium: 0,
@@ -2720,9 +3192,11 @@ const Exams = () => {
   };
 
   // Calculate missing questions by category for a topic
+  // Ưu tiên dùng số liệu từ server (topic.easy_count, topic.medium_count, ... từ API question-topics?with_statistics=true)
+  // để tránh báo "Thiếu câu hỏi" sai khi mảng questions chưa được load (chế độ on_exam chỉ load khi mở tab Câu hỏi).
   const calculateMissingQuestionsByCategory = (topicConfig, topic) => {
     if (!topicConfig || !topic) return [];
-    
+
     const topicIdNum = parseInt(topicConfig.topic_id);
     const topicQuestions = questions.filter(q => {
       const qTopicId = parseInt(q.topic_id);
@@ -2730,16 +3204,35 @@ const Exams = () => {
     });
 
     const missing = [];
-    
+
+    const getDifficultyAvailable = (difficulty) => {
+      const fromTopic = topic[`${difficulty}_count`];
+      if (fromTopic !== undefined && fromTopic !== null) {
+        return parseInt(fromTopic, 10) || 0;
+      }
+      return topicQuestions.filter(q => {
+        const d = (q.difficulty_level || q.difficulty || '');
+        return String(d).trim().toLowerCase() === difficulty;
+      }).length;
+    };
+
+    const getBloomAvailable = (bloomLevel) => {
+      const fromTopic = topic[`${bloomLevel}_count`];
+      if (fromTopic !== undefined && fromTopic !== null) {
+        return parseInt(fromTopic, 10) || 0;
+      }
+      return topicQuestions.filter(q => {
+        const b = (q.bloom_level || '');
+        return String(b).trim().toLowerCase() === bloomLevel;
+      }).length;
+    };
+
     if (topicConfig.distribution_type === 'difficulty') {
       const difficultyLabels = { easy: 'Dễ', medium: 'Trung bình', hard: 'Khó', expert: 'Chuyên gia' };
       ['easy', 'medium', 'hard', 'expert'].forEach(difficulty => {
         const required = topicConfig.difficulty_distribution?.[difficulty] || 0;
         if (required > 0) {
-          const available = topicQuestions.filter(q => {
-            const questionDifficulty = q.difficulty_level || q.difficulty;
-            return questionDifficulty === difficulty;
-          }).length;
+          const available = getDifficultyAvailable(difficulty);
           const missingCount = Math.max(0, required - available);
           if (missingCount > 0) {
             missing.push(`${difficultyLabels[difficulty]}: thiếu ${missingCount}/${required}`);
@@ -2758,7 +3251,7 @@ const Exams = () => {
       ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create'].forEach(bloomLevel => {
         const required = topicConfig.bloom_distribution?.[bloomLevel] || 0;
         if (required > 0) {
-          const available = topicQuestions.filter(q => q.bloom_level === bloomLevel).length;
+          const available = getBloomAvailable(bloomLevel);
           const missingCount = Math.max(0, required - available);
           if (missingCount > 0) {
             missing.push(`${bloomLabels[bloomLevel]}: thiếu ${missingCount}/${required}`);
@@ -2766,7 +3259,7 @@ const Exams = () => {
         }
       });
     }
-    
+
     return missing;
   };
 
@@ -3053,8 +3546,19 @@ const Exams = () => {
 
   // Cache kết quả preview questions để tránh tính toán lại nhiều lần
   const previewQuestions = useMemo(() => {
+    const mode = examForm.question_selection_mode;
+    if (mode === 'first_on_exam' || mode === 'random_on_exam') {
+      return { selected: [], currentPoints: 0 };
+    }
+    if (!hasLoadedQuestions) {
+      return { selected: [], currentPoints: 0 };
+    }
     return getPreviewQuestions();
-  }, [blueprint, questions, examForm.question_selection_mode]);
+  }, [blueprint, questions, examForm.question_selection_mode, hasLoadedQuestions]);
+
+  const questionsById = useMemo(() => {
+    return new Map((questions || []).map(q => [q.question_id, q]));
+  }, [questions]);
 
   const handleAddQuestionsByBlueprint = () => {
     const { selected, currentPoints } = getPreviewQuestions();
@@ -3336,6 +3840,11 @@ const Exams = () => {
   };
 
   const getStatusBadge = (exam) => {
+    const isApproved = exam.is_approved === 1 || exam.is_approved === true;
+    if (!isApproved) {
+      return <Badge bg="warning" text="dark">Chưa duyệt</Badge>;
+    }
+
     const now = new Date();
     const start = (exam.available_from || exam.scheduled_start) ? new Date(exam.available_from || exam.scheduled_start) : null;
     const end = (exam.available_until || exam.scheduled_end) ? new Date(exam.available_until || exam.scheduled_end) : null;
@@ -3376,9 +3885,37 @@ const Exams = () => {
       {/* Header */}
       <div className="session-header">
         <div className="header-content">
-          <div className="header-title">
-            <h1>Quản lý Kỳ thi & Kiểm tra</h1>
-            <p className="header-subtitle">Tạo đề thi theo ma trận, chống gian lận, chấm tự động</p>
+          <div className="header-title d-flex flex-wrap align-items-center gap-2">
+            <div>
+              <h1>Quản lý Kỳ thi & Kiểm tra</h1>
+              <p className="header-subtitle">Tạo đề thi theo ma trận, chống gian lận, chấm tự động</p>
+            </div>
+            {/* Breadcrumb phân cấp - chỉ khi tab Danh sách kỳ thi và đã chọn học kỳ */}
+            {activeTab === 'exams' && (viewMode === 'departments' || viewMode === 'exams') && (
+              <div className="d-flex align-items-center flex-wrap gap-2 ms-3 ps-3 border-start">
+                <button type="button" className="btn btn-sm btn-outline-light" onClick={() => { setViewMode('periods'); setSelectedPeriod(null); setSelectedDepartment(null); }}>
+                  <i className="fas fa-folder me-1"></i>Học kỳ thi
+                </button>
+                {selectedPeriod && (
+                  <>
+                    <span className="text-muted">/</span>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-light"
+                      onClick={() => { setViewMode('departments'); setSelectedDepartment(null); setExams([]); }}
+                    >
+                      {selectedPeriod.period_name}
+                    </button>
+                  </>
+                )}
+                {selectedDepartment && viewMode === 'exams' && (
+                  <>
+                    <span className="text-muted">/</span>
+                    <span className="badge bg-primary">{selectedDepartment}</span>
+                  </>
+                )}
+              </div>
+            )}
           </div>
           <div className="header-actions">
             {hasLMSQAPermission() && (
@@ -3386,9 +3923,16 @@ const Exams = () => {
                 <i className="fas fa-gavel me-2"></i>Quy chế thi
               </Button>
             )}
-            <Button variant="light" className="create-session-btn" onClick={handleCreateExam}>
-              <i className="fas fa-plus me-2"></i>Tạo kỳ thi mới
-            </Button>
+            {activeTab === 'exams' && hasLMSQAPermission() && (
+              <Button variant="light" className="me-2" onClick={openCreatePeriodModal}>
+                <i className="fas fa-folder-plus me-2"></i>Tạo học kỳ thi
+              </Button>
+            )}
+            {activeTab === 'exams' && (viewMode === 'departments' || viewMode === 'exams') && (
+              <Button variant="light" className="create-session-btn" onClick={handleCreateExam}>
+                <i className="fas fa-plus me-2"></i>Tạo kỳ thi mới
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -3403,7 +3947,9 @@ const Exams = () => {
               Danh sách kỳ thi
             </span>
           }>
-            {/* Filters */}
+
+            {/* Filters - chỉ hiện khi xem danh sách kỳ thi */}
+            {viewMode === 'exams' && (
             <div className="session-list-controls">
               <div className="search-controls">
                 <div className="search-input" style={{ minWidth: '250px', flex: '1' }}>
@@ -3472,8 +4018,9 @@ const Exams = () => {
                 />
               </div>
             </div>
+            )}
 
-            {/* Exams Table */}
+            {/* Exams Table / Periods Table / Departments Table */}
             <div className="session-table-container">
               {loading ? (
                 <div className="text-center p-5">
@@ -3481,6 +4028,149 @@ const Exams = () => {
                     <span className="visually-hidden">Đang tải...</span>
                   </div>
                 </div>
+              ) : viewMode === 'periods' ? (
+                <>
+                  <div className="table-responsive-mobile">
+                    <table className="session-table">
+                      <thead>
+                        <tr>
+                          <th>Mã</th>
+                          <th>Tên học kỳ thi</th>
+                          <th>Thời gian</th>
+                          <th>Số khoa</th>
+                          <th>Số kỳ thi</th>
+                          <th style={{ width: 110 }}>Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {examPeriods.length === 0 ? (
+                          <tr>
+                            <td colSpan="6" className="text-center p-4">
+                              <i className="fas fa-folder-open fa-3x text-muted mb-3"></i>
+                              <p className="text-muted">Chưa có học kỳ thi. Nhấn "Tạo học kỳ thi" để bắt đầu.</p>
+                              <Button variant="outline-primary" size="sm" className="mt-2" onClick={() => { setViewMode('exams'); setSelectedPeriod(null); setSelectedDepartment(null); }}>
+                                Xem tất cả kỳ thi
+                              </Button>
+                            </td>
+                          </tr>
+                        ) : (
+                          <>
+                            <tr
+                              onClick={() => { setSelectedPeriod(null); setSelectedDepartment(null); setViewMode('exams'); setPagination(prev => ({ ...prev, page: 1 })); }}
+                              style={{ cursor: 'pointer', backgroundColor: '#f0f7ff' }}
+                              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#e3f2fd'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f0f7ff'; }}
+                            >
+                              <td><i className="fas fa-list me-1"></i><strong>Tất cả</strong></td>
+                              <td>Tất cả kỳ thi (không lọc theo học kỳ)</td>
+                              <td>-</td>
+                              <td>-</td>
+                              <td>-</td>
+                              <td />
+                            </tr>
+                            {examPeriods
+                            .slice((periodsPagination.page - 1) * periodsPagination.limit, periodsPagination.page * periodsPagination.limit)
+                            .map((p) => (
+                              <tr
+                                key={p.exam_period_id}
+                                onClick={() => { setSelectedPeriod(p); setViewMode('departments'); setSelectedDepartment(null); }}
+                                style={{ cursor: 'pointer' }}
+                                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f8f9fa'; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = ''; }}
+                              >
+                                <td><strong>{p.period_code}</strong></td>
+                                <td>
+                                  <div className="d-flex align-items-center gap-2">
+                                    <span>{p.period_name}</span>
+                                    {(p.is_active === 0 || p.is_active === false) && (
+                                      <Badge bg="secondary">Ẩn</Badge>
+                                    )}
+                                  </div>
+                                </td>
+                                <td>
+                                  {p.start_date && p.end_date
+                                    ? `${new Date(p.start_date).toLocaleDateString('vi-VN')} - ${new Date(p.end_date).toLocaleDateString('vi-VN')}`
+                                    : '-'}
+                                </td>
+                                <td><Badge bg="info">{p.departments_count || 0}</Badge></td>
+                                <td><Badge bg="success">{p.exams_count || 0}</Badge></td>
+                                <td onClick={(e) => e.stopPropagation()}>
+                                  <div className="d-flex gap-2 justify-content-end">
+                                    <Button
+                                      variant="light"
+                                      size="sm"
+                                      className="btn-icon text-primary"
+                                      title="Chỉnh sửa"
+                                      onClick={() => openEditPeriodModal(p)}
+                                    >
+                                      <i className="fas fa-edit"></i>
+                                    </Button>
+                                    <Button
+                                      variant="light"
+                                      size="sm"
+                                      className="btn-icon text-danger"
+                                      title="Xóa"
+                                      onClick={() => { setPeriodToDelete(p); setShowDeletePeriodModal(true); }}
+                                    >
+                                      <i className="fas fa-trash"></i>
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  {examPeriods.length > 0 && periodsPagination.totalPages > 1 && (
+                    <div className="mt-3">
+                      <Pagination
+                        currentPage={periodsPagination.page}
+                        totalPages={periodsPagination.totalPages}
+                        onPageChange={(page) => setPeriodsPagination(prev => ({ ...prev, page }))}
+                        maxVisiblePages={5}
+                        showFirstLast={true}
+                      />
+                    </div>
+                  )}
+                </>
+              ) : viewMode === 'departments' ? (
+                <>
+                  <div className="table-responsive-mobile">
+                    <table className="session-table">
+                      <thead>
+                        <tr>
+                          <th>Khoa</th>
+                          <th>Số kỳ thi</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {departments.length === 0 ? (
+                          <tr>
+                            <td colSpan="2" className="text-center p-4">
+                              <i className="fas fa-inbox fa-3x text-muted mb-3"></i>
+                              <p className="text-muted">Chưa có kỳ thi nào trong học kỳ này.</p>
+                            </td>
+                          </tr>
+                        ) : (
+                          departments.map((d, idx) => (
+                            <tr
+                              key={idx}
+                              onClick={() => { setSelectedDepartment(d.department_name); setViewMode('exams'); setPagination(prev => ({ ...prev, page: 1 })); }}
+                              style={{ cursor: 'pointer' }}
+                              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f8f9fa'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = ''; }}
+                            >
+                              <td><strong>{d.department_name}</strong></td>
+                              <td><Badge bg="primary">{d.exams_count || 0}</Badge></td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               ) : (
                 <>
                   <div className="table-responsive-mobile">
@@ -3501,7 +4191,7 @@ const Exams = () => {
                       <tbody>
                         {!Array.isArray(exams) || exams.length === 0 ? (
                           <tr>
-                            <td colSpan={getLMSRole() !== null ? 8 : 7} className="text-center p-4">
+                            <td colSpan={getLMSRole() !== null ? 9 : 8} className="text-center p-4">
                               <i className="fas fa-inbox fa-3x text-muted mb-3"></i>
                               <p className="text-muted">Chưa có kỳ thi nào. Nhấn "Tạo kỳ thi mới" để bắt đầu.</p>
                             </td>
@@ -3784,6 +4474,7 @@ const Exams = () => {
                                                 const response = await api.get(`/lms/attempts/${attempt.attempt_id}/answers-detail`);
                                                 if (response.data.success) {
                                                   setAnswersDetailData(response.data.data);
+                                                  setAnswersDetailKey((k) => k + 1);
                                                   setShowAnswersDetailModal(true);
                                                 }
                                               } catch (error) {
@@ -3824,7 +4515,6 @@ const Exams = () => {
                                     {(() => {
                                       const isActive = !attempt.submit_time;
                                       const liveFrame = liveWebcamData[attempt.attempt_id];
-                                      const isWatching = watchedAttemptsRef.current.has(attempt.attempt_id);
 
                                       if (!isActive) {
                                         return (
@@ -3835,17 +4525,8 @@ const Exams = () => {
                                             <Button
                                               size="sm"
                                               variant="outline-primary"
-                                              onClick={async () => {
-                                                try {
-                                                  setSelectedAttemptForVideo(attempt);
-                                                  await fetchWebcamVideo(attempt.attempt_id);
-                                                  setShowWebcamModal(true);
-                                                } catch (error) {
-                                                  console.error('Error fetching webcam video:', error);
-                                                  // Error đã được xử lý trong fetchWebcamVideo (showAlertMessage)
-                                                }
-                                              }}
-                                              title="Xem video webcam đã ghi"
+                                              onClick={() => openWebcamModalForAttempt(attempt)}
+                                              title="Xem ảnh webcam"
                                               style={{ fontSize: '11px', padding: '2px 8px' }}
                                               disabled={loadingVideo}
                                             >
@@ -3856,8 +4537,8 @@ const Exams = () => {
                                                 </>
                                               ) : (
                                                 <>
-                                                  <i className="fas fa-video me-1"></i>
-                                                  Xem video
+                                                  <i className="fas fa-camera me-1"></i>
+                                                  Xem webcam
                                                 </>
                                               )}
                                             </Button>
@@ -3880,8 +4561,24 @@ const Exams = () => {
                                               transition: 'transform 0.2s',
                                             }}
                                             onClick={() => {
-                                              setSelectedAttemptForLiveView(attempt);
-                                              setShowLiveWebcamModal(true);
+                                              if (liveZoomBlobUrlRef.current) {
+                                                URL.revokeObjectURL(liveZoomBlobUrlRef.current);
+                                                liveZoomBlobUrlRef.current = null;
+                                              }
+                                              const apiBase = (api.defaults?.baseURL || '').replace(/\/api\/?$/, '') || (typeof window !== 'undefined' ? window.location.origin : '');
+                                              const fullUrl = liveFrame.startsWith('http') ? liveFrame : (apiBase + (liveFrame.startsWith('/') ? liveFrame : '/' + liveFrame)) + (liveFrame.includes('?') ? '&' : '?') + '_t=' + Date.now();
+                                              api.get(fullUrl, { responseType: 'blob' })
+                                                .then((res) => {
+                                                  if (res.data && res.data.size > 0 && (res.data.type || '').startsWith('image/')) {
+                                                    const blobUrl = URL.createObjectURL(res.data);
+                                                    liveZoomBlobUrlRef.current = blobUrl;
+                                                    setImageZoomUrl(blobUrl);
+                                                    setImageZoomFileName(`webcam-live-${attempt.attempt_id}.jpg`);
+                                                    setImageZoomLiveAttemptId(attempt.attempt_id);
+                                                    setImageZoomOpen(true);
+                                                  }
+                                                })
+                                                .catch(() => {});
                                             }}
                                             onMouseEnter={(e) => {
                                               e.currentTarget.style.transform = 'scale(1.05)';
@@ -3891,15 +4588,21 @@ const Exams = () => {
                                               e.currentTarget.style.transform = 'scale(1)';
                                               e.currentTarget.style.boxShadow = 'none';
                                             }}
-                                            title="Click để xem toàn màn hình"
+                                            title="Click để xem phóng to"
                                           >
-                                            <img
+                                            <AuthImage
                                               src={liveFrame}
                                               alt="Live webcam"
                                               style={{
                                                 width: '100%',
                                                 height: '100%',
                                                 objectFit: 'cover'
+                                              }}
+                                              onImageClick={(blobUrl) => {
+                                                setImageZoomUrl(blobUrl);
+                                                setImageZoomFileName(`webcam-live-${attempt.attempt_id}.jpg`);
+                                                setImageZoomLiveAttemptId(attempt.attempt_id);
+                                                setImageZoomOpen(true);
                                               }}
                                             />
                                             <Badge
@@ -3918,36 +4621,40 @@ const Exams = () => {
                                         );
                                       }
 
-                                      if (isWatching) {
-                                        return (
-                                          <div className="text-muted small">
-                                            <Spinner size="sm" animation="border" variant="primary" />
-                                            <span className="ms-1">Đang chờ stream...</span>
-                                          </div>
-                                        );
-                                      }
-
+                                      // Đang thi nhưng chưa có ảnh (polling sẽ cập nhật khi sinh viên gửi ảnh lên)
                                       return (
                                         <div className="text-muted small">
-                                          <i className="fas fa-video-slash"></i> Chưa kết nối
+                                          <Spinner size="sm" animation="border" variant="primary" />
+                                          <span className="ms-1">Đang chờ ảnh...</span>
                                         </div>
                                       );
                                     })()}
                                   </td>
                                   <td>
-                                    <div className="d-flex gap-1">
-                                      {attempt.webcam_video_path && (
+                                    <div className="d-flex gap-1 flex-wrap">
+                                      {attempt.status === 'in_progress' && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline-info"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setProctorMessageTargetAttempt(attempt);
+                                            setProctorMessageText('');
+                                            setShowProctorMessageModal(true);
+                                          }}
+                                          title="Gửi thông báo trực tiếp đến sinh viên đang thi"
+                                        >
+                                          <i className="fas fa-comment-dots"></i>
+                                        </Button>
+                                      )}
+                                      {attempt.attempt_id && (
                                         <Button
                                           size="sm"
                                           variant="outline-danger"
-                                          onClick={async () => {
-                                            setSelectedAttemptForVideo(attempt);
-                                            await fetchWebcamVideo(attempt.attempt_id);
-                                            setShowWebcamModal(true);
-                                          }}
-                                          title="Xem video webcam đã ghi"
+                                          onClick={(e) => { e.stopPropagation(); openWebcamModalForAttempt(attempt); }}
+                                          title="Xem ảnh webcam"
                                         >
-                                          <i className="fas fa-video"></i>
+                                          <i className="fas fa-camera"></i>
                                         </Button>
                                       )}
                                       {attempt.status === 'in_progress' && (attempt.resume_allowed === 0 || attempt.resume_allowed === false || !attempt.resume_allowed) ? (
@@ -4056,9 +4763,185 @@ const Exams = () => {
       </div>
 
       {/* Exam Modal */}
+      {/* Modal Tạo học kỳ thi */}
+      <Modal
+        show={showPeriodModal}
+        onHide={() => {
+          setShowPeriodModal(false);
+          setPeriodModalMode('create');
+          setPeriodToEdit(null);
+        }}
+        size="lg"
+        className="student-detail-modal"
+      >
+        <Modal.Header closeButton className="student-detail-header">
+          <Modal.Title className="student-detail-title">
+            <div className="student-avatar">
+              <i className={periodModalMode === 'edit' ? 'fas fa-edit' : 'fas fa-folder-plus'}></i>
+            </div>
+            <div>
+              <h4 className="mb-0">{periodModalMode === 'edit' ? 'Chỉnh sửa học kỳ thi' : 'Tạo học kỳ thi'}</h4>
+              <p className="mb-0 student-subtitle">{periodModalMode === 'edit' ? 'Cập nhật thông tin học kỳ thi' : 'Tạo học kỳ thi mới trong hệ thống'}</p>
+            </div>
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="student-detail-body">
+          <div className="student-detail-container">
+            <div className="session-card mb-3">
+              <div className="card-header-modern">
+                <div className="header-icon">
+                  <i className="fas fa-folder"></i>
+                </div>
+                <h6 className="mb-0">Thông tin học kỳ thi</h6>
+              </div>
+              <div className="card-body-modern">
+                <Row>
+                  <Col md={6}>
+                    <Form.Group className="mb-3">
+                      <Form.Label className="info-label">
+                        <i className="fas fa-hashtag me-2"></i>
+                        Mã học kỳ *
+                      </Form.Label>
+                      <Form.Control
+                        type="text"
+                        placeholder="VD: HK1-2024"
+                        value={periodForm.period_code}
+                        onChange={(e) => setPeriodForm({ ...periodForm, period_code: e.target.value })}
+                        className="form-control-modern"
+                      />
+                    </Form.Group>
+                  </Col>
+                  <Col md={6}>
+                    <Form.Group className="mb-3">
+                      <Form.Label className="info-label">
+                        <i className="fas fa-tag me-2"></i>
+                        Tên học kỳ *
+                      </Form.Label>
+                      <Form.Control
+                        type="text"
+                        placeholder="VD: Học kỳ 1 - 2024-2025"
+                        value={periodForm.period_name}
+                        onChange={(e) => setPeriodForm({ ...periodForm, period_name: e.target.value })}
+                        className="form-control-modern"
+                      />
+                    </Form.Group>
+                  </Col>
+                </Row>
+
+                <Form.Group className="mb-3">
+                  <Form.Label className="info-label">
+                    <i className="fas fa-align-left me-2"></i>
+                    Mô tả
+                  </Form.Label>
+                  <Form.Control
+                    as="textarea"
+                    rows={2}
+                    value={periodForm.description}
+                    onChange={(e) => setPeriodForm({ ...periodForm, description: e.target.value })}
+                    className="form-control-modern"
+                  />
+                </Form.Group>
+
+                <Row>
+                  <Col md={6}>
+                    <Form.Group className="mb-0">
+                      <Form.Label className="info-label">
+                        <i className="fas fa-calendar-alt me-2"></i>
+                        Từ ngày
+                      </Form.Label>
+                      <Form.Control
+                        type="date"
+                        value={periodForm.start_date}
+                        onChange={(e) => setPeriodForm({ ...periodForm, start_date: e.target.value })}
+                        className="form-control-modern"
+                      />
+                    </Form.Group>
+                  </Col>
+                  <Col md={6}>
+                    <Form.Group className="mb-0">
+                      <Form.Label className="info-label">
+                        <i className="fas fa-calendar-check me-2"></i>
+                        Đến ngày
+                      </Form.Label>
+                      <Form.Control
+                        type="date"
+                        value={periodForm.end_date}
+                        onChange={(e) => setPeriodForm({ ...periodForm, end_date: e.target.value })}
+                        className="form-control-modern"
+                      />
+                    </Form.Group>
+                  </Col>
+                </Row>
+              </div>
+            </div>
+          </div>
+        </Modal.Body>
+        <Modal.Footer className="student-detail-footer">
+          <Button
+            variant="outline-secondary"
+            onClick={() => {
+              setShowPeriodModal(false);
+              setPeriodModalMode('create');
+              setPeriodToEdit(null);
+            }}
+            className="btn-cancel"
+          >
+            Hủy
+          </Button>
+          <Button variant="primary" onClick={handleSavePeriod}>
+            <i className="fas fa-save me-1"></i>
+            {periodModalMode === 'edit' ? 'Cập nhật' : 'Lưu'}
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* Modal Xóa học kỳ thi */}
+      <Modal
+        show={showDeletePeriodModal}
+        onHide={() => { setShowDeletePeriodModal(false); setPeriodToDelete(null); }}
+        size="md"
+        className="student-detail-modal"
+        centered
+      >
+        <Modal.Header closeButton className="student-detail-header">
+          <Modal.Title className="student-detail-title">
+            <div className="student-avatar">
+              <i className="fas fa-trash"></i>
+            </div>
+            <div>
+              <h4 className="mb-0">Xóa học kỳ thi</h4>
+              <p className="mb-0 student-subtitle">Hành động này có thể ẩn nếu còn kỳ thi liên kết</p>
+            </div>
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="student-detail-body">
+          <div className="student-detail-container">
+            <Alert variant="warning" className="mb-0">
+              Bạn có chắc muốn xóa học kỳ thi <strong>{periodToDelete?.period_name || periodToDelete?.period_code || 'này'}</strong>?
+              <div className="mt-2 text-muted">
+                Nếu học kỳ còn kỳ thi liên kết, hệ thống sẽ <strong>ẩn</strong> học kỳ (không xóa cứng).
+              </div>
+            </Alert>
+          </div>
+        </Modal.Body>
+        <Modal.Footer className="student-detail-footer">
+          <Button variant="outline-secondary" className="btn-cancel" onClick={() => { setShowDeletePeriodModal(false); setPeriodToDelete(null); }}>
+            Hủy
+          </Button>
+          <Button variant="danger" onClick={handleDeletePeriod}>
+            <i className="fas fa-trash me-1"></i>Xóa
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
       <Modal show={showExamModal} onHide={() => {
         setShowExamModal(false);
-        setExamModalTab('basic'); // Reset tab khi đóng modal
+        setExamModalTab('basic');
+        setExemptStudentLabelCache({});
+        participantStudentSearch.clear();
+        imsExemptSearch.clear();
+        webcamExemptSearch.clear();
+        faceExemptSearch.clear();
       }} size="xl" className="student-detail-modal" style={{ maxWidth: '95%', width: '95%' }}>
         <Modal.Header closeButton className="student-detail-header">
           <Modal.Title className="student-detail-title">
@@ -4079,6 +4962,8 @@ const Exams = () => {
                 className="mb-3"
                 fill
                 variant="pills"
+                mountOnEnter
+                unmountOnExit
               >
                 {/* Basic Info Tab */}
                 <Tab eventKey="basic" title={
@@ -4088,15 +4973,31 @@ const Exams = () => {
                   </span>
                 }>
                   <div className="p-3">
-                    <Form.Group className="mb-3">
-                      <Form.Label>Tên *</Form.Label>
-                      <Form.Control
-                        type="text"
-                        value={examForm.exam_title}
-                        onChange={(e) => setExamForm({ ...examForm, exam_title: e.target.value })}
-                        required
-                      />
-                    </Form.Group>
+                    <div className="row">
+                      <div className="col-md-8">
+                        <Form.Group className="mb-3">
+                          <Form.Label>Tên *</Form.Label>
+                          <Form.Control
+                            type="text"
+                            value={examForm.exam_title}
+                            onChange={(e) => setExamForm({ ...examForm, exam_title: e.target.value })}
+                            required
+                          />
+                        </Form.Group>
+                      </div>
+                      <div className="col-md-4">
+                        <Form.Group className="mb-3">
+                          <Form.Label>Mã MH</Form.Label>
+                          <Form.Control
+                            type="text"
+                            placeholder="Mã môn học"
+                            maxLength={100}
+                            value={examForm.ma_mh || ''}
+                            onChange={(e) => setExamForm({ ...examForm, ma_mh: e.target.value })}
+                          />
+                        </Form.Group>
+                      </div>
+                    </div>
 
                     <Form.Group className="mb-3">
                       <Form.Label>Mô tả</Form.Label>
@@ -4107,6 +5008,45 @@ const Exams = () => {
                         onChange={(e) => setExamForm({ ...examForm, exam_description: e.target.value })}
                       />
                     </Form.Group>
+
+                    <div className="row">
+                      <div className="col-md-6">
+                        <Form.Group className="mb-3">
+                          <Form.Label>Học kỳ thi</Form.Label>
+                          <Form.Select
+                            value={examForm.exam_period_id || ''}
+                            onChange={(e) => setExamForm({ ...examForm, exam_period_id: e.target.value ? parseInt(e.target.value) : null })}
+                          >
+                            <option value="">-- Không chọn --</option>
+                            {examPeriods.map((p) => (
+                              <option key={p.exam_period_id} value={p.exam_period_id}>{p.period_name}</option>
+                            ))}
+                          </Form.Select>
+                        </Form.Group>
+                      </div>
+                      <div className="col-md-6">
+                        <Form.Group className="mb-3">
+                          <Form.Label>Khoa</Form.Label>
+                          <Form.Select
+                            value={examForm.department_name || ''}
+                            onChange={(e) => setExamForm({ ...examForm, department_name: e.target.value ? e.target.value : null })}
+                          >
+                            <option value="">-- Chọn khoa --</option>
+                            {examForm.department_name &&
+                              !faculties.some((f) => f === examForm.department_name) && (
+                                <option value={examForm.department_name}>
+                                  {examForm.department_name} (đang lưu)
+                                </option>
+                              )}
+                            {faculties.map((faculty, index) => (
+                              <option key={index} value={faculty}>
+                                {faculty}
+                              </option>
+                            ))}
+                          </Form.Select>
+                        </Form.Group>
+                      </div>
+                    </div>
 
                     <div className="row">
                       <div className="col-md-6">
@@ -4267,13 +5207,16 @@ const Exams = () => {
 
                     <Form.Check
                       type="switch"
-                      label="Bật giám sát (Proctoring)"
+                      label="Giám sát (Proctoring)"
                       checked={examForm.proctoring_enabled}
+                      disabled={examForm.ims_exam_pctu_required}
                       onChange={(e) => setExamForm({ ...examForm, proctoring_enabled: e.target.checked })}
                       className="mb-3"
                     />
                     <Form.Text className="text-muted mb-3 d-block">
-                      Khi bật, hệ thống sẽ tự động phát hiện các hành vi gian lận như: chuyển tab, mất focus cửa sổ, cố gắng thoát trang.
+                      {examForm.ims_exam_pctu_required
+                        ? 'Đang dùng IMS EXAM PCTU — phần mềm đã chặn các hành vi gian lận (chuyển tab, mất focus, thoát trang), không cần ghi log Proctoring.'
+                        : 'Khi bật, hệ thống sẽ tự động phát hiện các hành vi gian lận như: chuyển tab, mất focus cửa sổ, cố gắng thoát trang.'}
                     </Form.Text>
 
                     <hr />
@@ -4283,15 +5226,25 @@ const Exams = () => {
                       label={
                         <span>
                           <i className="fas fa-lock me-2 text-warning"></i>
-                          Sử dụng hệ thống an toàn IMS EXAM PCTU
+                          Bắt buộc thi bằng IMS EXAM PCTU (không cho thi web)
                         </span>
                       }
                       checked={examForm.ims_exam_pctu_required}
-                      onChange={(e) => setExamForm({ ...examForm, ims_exam_pctu_required: e.target.checked })}
+                      onChange={(e) => {
+                        const imsOn = e.target.checked;
+                        setExamForm({
+                          ...examForm,
+                          ims_exam_pctu_required: imsOn,
+                          // Khi bật IMS EXAM PCTU: tự tắt Giám sát (Proctoring), vì phần mềm đã chặn gian lận
+                          ...(imsOn ? { proctoring_enabled: false } : {})
+                        });
+                      }}
                       className="mb-3"
                     />
                     <Form.Text className="text-muted mb-3 d-block">
-                      Khi bật, sinh viên bắt buộc phải mở phần mềm IMS EXAM PCTU mới được vào thi. Phần mềm sẽ khóa các tính năng hệ thống để đảm bảo môi trường thi an toàn.
+                      {examForm.ims_exam_pctu_required
+                        ? 'Bật: chỉ phần mềm IMS EXAM PCTU (desktop) được phép vào thi; truy cập từ trình duyệt web sẽ bị từ chối.'
+                        : 'Tắt: cho phép sinh viên thi trực tiếp trên web như bình thường.'}
                     </Form.Text>
 
                     {examForm.ims_exam_pctu_required && (
@@ -4331,19 +5284,78 @@ const Exams = () => {
                           </Form.Text>
                         </Form.Group>
 
-                        {/* Show exempt students selection */}
+                        {/* Show exempt students selection — tìm qua API */}
                         {examForm.ims_exam_pctu_config?.exempt_type === 'students' && (
                           <div className="mt-3">
-                            <Form.Label className="fw-bold">Danh sách sinh viên được miễn:</Form.Label>
-                            <div className="border rounded p-2" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                            <Form.Label className="fw-bold">Tìm sinh viên được miễn IMS EXAM PCTU</Form.Label>
+                            <Form.Label className="fw-bold small text-primary mb-1 d-block">
+                              <i className="fas fa-user-check me-1"></i>
+                              Sinh viên đã chọn tham gia kỳ thi ({selectedStudents.length})
+                            </Form.Label>
+                            <div className="border rounded p-2 mb-2 bg-white" style={{ maxHeight: '220px', overflowY: 'auto' }}>
                               {selectedStudents.length === 0 ? (
-                                <Alert variant="warning" className="mb-0">
-                                  <i className="fas fa-exclamation-triangle me-2"></i>
-                                  Vui lòng chọn sinh viên trong tab "Sinh viên" trước, sau đó chọn những người được miễn ở đây.
-                                </Alert>
+                                <div className="text-muted small py-2 px-1">
+                                  Chưa có — chọn sinh viên ở tab <strong>Sinh viên</strong> (hoặc khi sửa kỳ thi, danh sách thí sinh đã lưu sẽ hiển thị sau khi tải).
+                                </div>
                               ) : (
-                                <div>
-                                  {selectedStudents.map(student => {
+                                selectedStudents.map((student) => {
+                                  const isExempt = examForm.ims_exam_pctu_config?.exempt_students?.includes(student.id);
+                                  return (
+                                    <div key={`roster-ims-${student.id}`} className="d-flex align-items-center mb-2 p-2 border-bottom">
+                                      <Form.Check
+                                        type="checkbox"
+                                        id={`ims-exempt-roster-${student.id}`}
+                                        checked={isExempt || false}
+                                        onChange={(e) => {
+                                          const currentExempt = examForm.ims_exam_pctu_config?.exempt_students || [];
+                                          if (e.target.checked) {
+                                            setExemptStudentLabelCache((prev) => ({ ...prev, [student.id]: student }));
+                                            setExamForm({
+                                              ...examForm,
+                                              ims_exam_pctu_config: {
+                                                ...examForm.ims_exam_pctu_config,
+                                                exempt_students: currentExempt.includes(student.id) ? currentExempt : [...currentExempt, student.id]
+                                              }
+                                            });
+                                          } else {
+                                            setExamForm({
+                                              ...examForm,
+                                              ims_exam_pctu_config: {
+                                                ...examForm.ims_exam_pctu_config,
+                                                exempt_students: currentExempt.filter((id) => id !== student.id)
+                                              }
+                                            });
+                                          }
+                                        }}
+                                      />
+                                      <label htmlFor={`ims-exempt-roster-${student.id}`} className="ms-2 mb-0 flex-grow-1" style={{ cursor: 'pointer' }}>
+                                        <strong>{student.student_id}</strong> — {student.full_name}
+                                        <span className="text-muted ms-2">{student.class_name}</span>
+                                      </label>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                            <Form.Label className="fw-bold small mt-2 mb-1 d-block">Tìm thêm (tên, mã SV, email — ≥2 ký tự)</Form.Label>
+                            <InputGroup className="mb-2">
+                              <InputGroup.Text><i className="fas fa-search"></i></InputGroup.Text>
+                              <Form.Control
+                                placeholder="Tên, mã SV, email (≥2 ký tự)"
+                                value={imsExemptSearch.input}
+                                onChange={(e) => imsExemptSearch.setInput(e.target.value)}
+                                autoComplete="off"
+                              />
+                              {imsExemptSearch.loading && (
+                                <InputGroup.Text><Spinner animation="border" size="sm" /></InputGroup.Text>
+                              )}
+                            </InputGroup>
+                            {imsExemptSearch.input.trim().length >= 2 && (
+                              <div className="border rounded p-2 mb-2" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                                {imsExemptSearch.results.length === 0 && !imsExemptSearch.loading ? (
+                                  <span className="text-muted small">Không tìm thấy</span>
+                                ) : (
+                                  imsExemptSearch.results.map((student) => {
                                     const isExempt = examForm.ims_exam_pctu_config?.exempt_students?.includes(student.id);
                                     return (
                                       <div key={student.id} className="d-flex align-items-center mb-2 p-2 border-bottom">
@@ -4354,6 +5366,7 @@ const Exams = () => {
                                           onChange={(e) => {
                                             const currentExempt = examForm.ims_exam_pctu_config?.exempt_students || [];
                                             if (e.target.checked) {
+                                              setExemptStudentLabelCache((prev) => ({ ...prev, [student.id]: student }));
                                               setExamForm({
                                                 ...examForm,
                                                 ims_exam_pctu_config: {
@@ -4366,28 +5379,55 @@ const Exams = () => {
                                                 ...examForm,
                                                 ims_exam_pctu_config: {
                                                   ...examForm.ims_exam_pctu_config,
-                                                  exempt_students: currentExempt.filter(id => id !== student.id)
+                                                  exempt_students: currentExempt.filter((id) => id !== student.id)
                                                 }
                                               });
                                             }
                                           }}
                                         />
                                         <label htmlFor={`ims-exempt-student-${student.id}`} className="ms-2 mb-0" style={{ cursor: 'pointer', flex: 1 }}>
-                                          Mã SV: <strong>{student.student_id}</strong> - Họ và tên: <strong>{student.full_name}</strong>
-                                          <span className="text-muted ms-2">- Lớp: <strong>{student.class_name}</strong></span>
+                                          <strong>{student.student_id}</strong> — {student.full_name}
+                                          <span className="text-muted ms-2">{student.class_name}</span>
                                         </label>
                                       </div>
                                     );
-                                  })}
-                                </div>
+                                  })
+                                )}
+                              </div>
+                            )}
+                            <Form.Label className="fw-bold small">Đã chọn miễn ({examForm.ims_exam_pctu_config?.exempt_students?.length || 0})</Form.Label>
+                            <div className="d-flex flex-wrap gap-1 border rounded p-2 mb-2" style={{ minHeight: '42px' }}>
+                              {(examForm.ims_exam_pctu_config?.exempt_students || []).length === 0 ? (
+                                <span className="text-muted small">Chưa có — tick trong danh sách kỳ thi hoặc tìm bên dưới</span>
+                              ) : (
+                                (examForm.ims_exam_pctu_config.exempt_students || []).map((id) => {
+                                  const student = exemptStudentLabelCache[id] || selectedStudents.find((st) => st.id === id);
+                                  return (
+                                    <Badge key={id} bg="secondary" className="d-inline-flex align-items-center gap-1 py-1 px-2" style={{ fontWeight: 'normal' }}>
+                                      {student ? `${student.student_id} — ${student.full_name}` : `SV #${id}`}
+                                      <Button
+                                        type="button"
+                                        variant="link"
+                                        className="text-white p-0 lh-1"
+                                        style={{ fontSize: '16px', textDecoration: 'none' }}
+                                        onClick={() => {
+                                          setExamForm({
+                                            ...examForm,
+                                            ims_exam_pctu_config: {
+                                              ...examForm.ims_exam_pctu_config,
+                                              exempt_students: (examForm.ims_exam_pctu_config?.exempt_students || []).filter((x) => x !== id)
+                                            }
+                                          });
+                                        }}
+                                        aria-label="Xóa"
+                                      >
+                                        ×
+                                      </Button>
+                                    </Badge>
+                                  );
+                                })
                               )}
                             </div>
-                            {examForm.ims_exam_pctu_config?.exempt_students?.length > 0 && (
-                              <Alert variant="success" className="mt-2 mb-0">
-                                <i className="fas fa-check-circle me-2"></i>
-                                Đã chọn {examForm.ims_exam_pctu_config.exempt_students.length} sinh viên được miễn sử dụng IMS EXAM PCTU
-                              </Alert>
-                            )}
                           </div>
                         )}
 
@@ -4569,19 +5609,78 @@ const Exams = () => {
                           </Form.Text>
                         </Form.Group>
 
-                        {/* Show exempt students selection */}
+                        {/* Show exempt students selection — tìm qua API */}
                         {examForm.webcam_config?.exempt_type === 'students' && (
                           <div className="mt-3">
-                            <Form.Label className="fw-bold">Danh sách sinh viên được miễn:</Form.Label>
-                            <div className="border rounded p-2" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                            <Form.Label className="fw-bold">Tìm sinh viên được miễn webcam</Form.Label>
+                            <Form.Label className="fw-bold small text-primary mb-1 d-block">
+                              <i className="fas fa-user-check me-1"></i>
+                              Sinh viên đã chọn tham gia kỳ thi ({selectedStudents.length})
+                            </Form.Label>
+                            <div className="border rounded p-2 mb-2 bg-white" style={{ maxHeight: '220px', overflowY: 'auto' }}>
                               {selectedStudents.length === 0 ? (
-                                <Alert variant="warning" className="mb-0">
-                                  <i className="fas fa-exclamation-triangle me-2"></i>
-                                  Vui lòng chọn sinh viên trong tab "Sinh viên" trước, sau đó chọn những người được miễn ở đây.
-                                </Alert>
+                                <div className="text-muted small py-2 px-1">
+                                  Chưa có — chọn sinh viên ở tab <strong>Sinh viên</strong> (hoặc khi sửa kỳ thi, danh sách thí sinh đã lưu sẽ hiển thị sau khi tải).
+                                </div>
                               ) : (
-                                <div>
-                                  {selectedStudents.map(student => {
+                                selectedStudents.map((student) => {
+                                  const isExempt = examForm.webcam_config?.exempt_students?.includes(student.id);
+                                  return (
+                                    <div key={`roster-webcam-${student.id}`} className="d-flex align-items-center mb-2 p-2 border-bottom">
+                                      <Form.Check
+                                        type="checkbox"
+                                        id={`webcam-exempt-roster-${student.id}`}
+                                        checked={isExempt || false}
+                                        onChange={(e) => {
+                                          const currentExempt = examForm.webcam_config?.exempt_students || [];
+                                          if (e.target.checked) {
+                                            setExemptStudentLabelCache((prev) => ({ ...prev, [student.id]: student }));
+                                            setExamForm({
+                                              ...examForm,
+                                              webcam_config: {
+                                                ...examForm.webcam_config,
+                                                exempt_students: currentExempt.includes(student.id) ? currentExempt : [...currentExempt, student.id]
+                                              }
+                                            });
+                                          } else {
+                                            setExamForm({
+                                              ...examForm,
+                                              webcam_config: {
+                                                ...examForm.webcam_config,
+                                                exempt_students: currentExempt.filter((id) => id !== student.id)
+                                              }
+                                            });
+                                          }
+                                        }}
+                                      />
+                                      <label htmlFor={`webcam-exempt-roster-${student.id}`} className="ms-2 mb-0 flex-grow-1" style={{ cursor: 'pointer' }}>
+                                        <strong>{student.student_id}</strong> — {student.full_name}
+                                        <span className="text-muted ms-2">{student.class_name}</span>
+                                      </label>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                            <Form.Label className="fw-bold small mt-2 mb-1 d-block">Tìm thêm (tên, mã SV, email — ≥2 ký tự)</Form.Label>
+                            <InputGroup className="mb-2">
+                              <InputGroup.Text><i className="fas fa-search"></i></InputGroup.Text>
+                              <Form.Control
+                                placeholder="Tên, mã SV, email (≥2 ký tự)"
+                                value={webcamExemptSearch.input}
+                                onChange={(e) => webcamExemptSearch.setInput(e.target.value)}
+                                autoComplete="off"
+                              />
+                              {webcamExemptSearch.loading && (
+                                <InputGroup.Text><Spinner animation="border" size="sm" /></InputGroup.Text>
+                              )}
+                            </InputGroup>
+                            {webcamExemptSearch.input.trim().length >= 2 && (
+                              <div className="border rounded p-2 mb-2" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                                {webcamExemptSearch.results.length === 0 && !webcamExemptSearch.loading ? (
+                                  <span className="text-muted small">Không tìm thấy</span>
+                                ) : (
+                                  webcamExemptSearch.results.map((student) => {
                                     const isExempt = examForm.webcam_config?.exempt_students?.includes(student.id);
                                     return (
                                       <div key={student.id} className="d-flex align-items-center mb-2 p-2 border-bottom">
@@ -4592,6 +5691,7 @@ const Exams = () => {
                                           onChange={(e) => {
                                             const currentExempt = examForm.webcam_config?.exempt_students || [];
                                             if (e.target.checked) {
+                                              setExemptStudentLabelCache((prev) => ({ ...prev, [student.id]: student }));
                                               setExamForm({
                                                 ...examForm,
                                                 webcam_config: {
@@ -4604,28 +5704,55 @@ const Exams = () => {
                                                 ...examForm,
                                                 webcam_config: {
                                                   ...examForm.webcam_config,
-                                                  exempt_students: currentExempt.filter(id => id !== student.id)
+                                                  exempt_students: currentExempt.filter((id) => id !== student.id)
                                                 }
                                               });
                                             }
                                           }}
                                         />
                                         <label htmlFor={`webcam-exempt-student-${student.id}`} className="ms-2 mb-0" style={{ cursor: 'pointer', flex: 1 }}>
-                                          Mã SV: <strong>{student.student_id}</strong> - Họ và tên: <strong>{student.full_name}</strong>
-                                          <span className="text-muted ms-2">- Lớp: <strong>{student.class_name}</strong></span>
+                                          <strong>{student.student_id}</strong> — {student.full_name}
+                                          <span className="text-muted ms-2">{student.class_name}</span>
                                         </label>
                                       </div>
                                     );
-                                  })}
-                                </div>
+                                  })
+                                )}
+                              </div>
+                            )}
+                            <Form.Label className="fw-bold small">Đã chọn miễn ({examForm.webcam_config?.exempt_students?.length || 0})</Form.Label>
+                            <div className="d-flex flex-wrap gap-1 border rounded p-2 mb-2" style={{ minHeight: '42px' }}>
+                              {(examForm.webcam_config?.exempt_students || []).length === 0 ? (
+                                <span className="text-muted small">Chưa có — tick trong danh sách kỳ thi hoặc tìm bên dưới</span>
+                              ) : (
+                                (examForm.webcam_config.exempt_students || []).map((id) => {
+                                  const student = exemptStudentLabelCache[id] || selectedStudents.find((st) => st.id === id);
+                                  return (
+                                    <Badge key={id} bg="secondary" className="d-inline-flex align-items-center gap-1 py-1 px-2" style={{ fontWeight: 'normal' }}>
+                                      {student ? `${student.student_id} — ${student.full_name}` : `SV #${id}`}
+                                      <Button
+                                        type="button"
+                                        variant="link"
+                                        className="text-white p-0 lh-1"
+                                        style={{ fontSize: '16px', textDecoration: 'none' }}
+                                        onClick={() => {
+                                          setExamForm({
+                                            ...examForm,
+                                            webcam_config: {
+                                              ...examForm.webcam_config,
+                                              exempt_students: (examForm.webcam_config?.exempt_students || []).filter((x) => x !== id)
+                                            }
+                                          });
+                                        }}
+                                        aria-label="Xóa"
+                                      >
+                                        ×
+                                      </Button>
+                                    </Badge>
+                                  );
+                                })
                               )}
                             </div>
-                            {examForm.webcam_config?.exempt_students?.length > 0 && (
-                              <Alert variant="success" className="mt-2 mb-0">
-                                <i className="fas fa-check-circle me-2"></i>
-                                Đã chọn {examForm.webcam_config.exempt_students.length} sinh viên được miễn webcam
-                              </Alert>
-                            )}
                           </div>
                         )}
 
@@ -4837,29 +5964,89 @@ const Exams = () => {
                           </Form.Text>
                         </Form.Group>
 
-                        {/* Show exempt students selection */}
+                        {/* Show exempt students selection — tìm qua API */}
                         {examForm.face_verification_config?.exempt_type === 'students' && (
                           <div className="mt-3">
-                            <Form.Label className="fw-bold">Danh sách sinh viên được miễn:</Form.Label>
-                            <div className="border rounded p-2" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                            <Form.Label className="fw-bold">Tìm sinh viên được miễn nhận diện khuôn mặt</Form.Label>
+                            <Form.Label className="fw-bold small text-primary mb-1 d-block">
+                              <i className="fas fa-user-check me-1"></i>
+                              Sinh viên đã chọn tham gia kỳ thi ({selectedStudents.length})
+                            </Form.Label>
+                            <div className="border rounded p-2 mb-2 bg-white" style={{ maxHeight: '220px', overflowY: 'auto' }}>
                               {selectedStudents.length === 0 ? (
-                                <Alert variant="warning" className="mb-0">
-                                  <i className="fas fa-exclamation-triangle me-2"></i>
-                                  Vui lòng chọn sinh viên trong tab "Sinh viên" trước, sau đó chọn những người được miễn ở đây.
-                                </Alert>
+                                <div className="text-muted small py-2 px-1">
+                                  Chưa có — chọn sinh viên ở tab <strong>Sinh viên</strong> (hoặc khi sửa kỳ thi, danh sách thí sinh đã lưu sẽ hiển thị sau khi tải).
+                                </div>
                               ) : (
-                                <div>
-                                  {selectedStudents.map(student => {
+                                selectedStudents.map((student) => {
+                                  const isExempt = examForm.face_verification_config?.exempt_students?.includes(student.id);
+                                  return (
+                                    <div key={`roster-face-${student.id}`} className="d-flex align-items-center mb-2 p-2 border-bottom">
+                                      <Form.Check
+                                        type="checkbox"
+                                        id={`face-exempt-roster-${student.id}`}
+                                        checked={isExempt || false}
+                                        onChange={(e) => {
+                                          const currentExempt = examForm.face_verification_config?.exempt_students || [];
+                                          if (e.target.checked) {
+                                            setExemptStudentLabelCache((prev) => ({ ...prev, [student.id]: student }));
+                                            setExamForm({
+                                              ...examForm,
+                                              face_verification_config: {
+                                                ...examForm.face_verification_config,
+                                                exempt_students: currentExempt.includes(student.id) ? currentExempt : [...currentExempt, student.id]
+                                              }
+                                            });
+                                          } else {
+                                            setExamForm({
+                                              ...examForm,
+                                              face_verification_config: {
+                                                ...examForm.face_verification_config,
+                                                exempt_students: currentExempt.filter((id) => id !== student.id)
+                                              }
+                                            });
+                                          }
+                                        }}
+                                      />
+                                      <label htmlFor={`face-exempt-roster-${student.id}`} className="ms-2 mb-0 flex-grow-1" style={{ cursor: 'pointer' }}>
+                                        <strong>{student.student_id}</strong> — {student.full_name}
+                                        <span className="text-muted ms-2">{student.class_name}</span>
+                                      </label>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                            <Form.Label className="fw-bold small mt-2 mb-1 d-block">Tìm thêm (tên, mã SV, email — ≥2 ký tự)</Form.Label>
+                            <InputGroup className="mb-2">
+                              <InputGroup.Text><i className="fas fa-search"></i></InputGroup.Text>
+                              <Form.Control
+                                placeholder="Tên, mã SV, email (≥2 ký tự)"
+                                value={faceExemptSearch.input}
+                                onChange={(e) => faceExemptSearch.setInput(e.target.value)}
+                                autoComplete="off"
+                              />
+                              {faceExemptSearch.loading && (
+                                <InputGroup.Text><Spinner animation="border" size="sm" /></InputGroup.Text>
+                              )}
+                            </InputGroup>
+                            {faceExemptSearch.input.trim().length >= 2 && (
+                              <div className="border rounded p-2 mb-2" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                                {faceExemptSearch.results.length === 0 && !faceExemptSearch.loading ? (
+                                  <span className="text-muted small">Không tìm thấy</span>
+                                ) : (
+                                  faceExemptSearch.results.map((student) => {
                                     const isExempt = examForm.face_verification_config?.exempt_students?.includes(student.id);
                                     return (
                                       <div key={student.id} className="d-flex align-items-center mb-2 p-2 border-bottom">
                                         <Form.Check
                                           type="checkbox"
-                                          id={`exempt-student-${student.id}`}
+                                          id={`face-exempt-student-${student.id}`}
                                           checked={isExempt || false}
                                           onChange={(e) => {
                                             const currentExempt = examForm.face_verification_config?.exempt_students || [];
                                             if (e.target.checked) {
+                                              setExemptStudentLabelCache((prev) => ({ ...prev, [student.id]: student }));
                                               setExamForm({
                                                 ...examForm,
                                                 face_verification_config: {
@@ -4872,28 +6059,55 @@ const Exams = () => {
                                                 ...examForm,
                                                 face_verification_config: {
                                                   ...examForm.face_verification_config,
-                                                  exempt_students: currentExempt.filter(id => id !== student.id)
+                                                  exempt_students: currentExempt.filter((id) => id !== student.id)
                                                 }
                                               });
                                             }
                                           }}
                                         />
-                                        <label htmlFor={`exempt-student-${student.id}`} className="ms-2 mb-0" style={{ cursor: 'pointer', flex: 1 }}>
-                                          Mã SV: <strong>{student.student_id}</strong> - Họ và tên: <strong>{student.full_name}</strong>
-                                          <span className="text-muted ms-2">- Lớp: <strong>{student.class_name}</strong></span>
+                                        <label htmlFor={`face-exempt-student-${student.id}`} className="ms-2 mb-0" style={{ cursor: 'pointer', flex: 1 }}>
+                                          <strong>{student.student_id}</strong> — {student.full_name}
+                                          <span className="text-muted ms-2">{student.class_name}</span>
                                         </label>
                                       </div>
                                     );
-                                  })}
-                                </div>
+                                  })
+                                )}
+                              </div>
+                            )}
+                            <Form.Label className="fw-bold small">Đã chọn miễn ({examForm.face_verification_config?.exempt_students?.length || 0})</Form.Label>
+                            <div className="d-flex flex-wrap gap-1 border rounded p-2 mb-2" style={{ minHeight: '42px' }}>
+                              {(examForm.face_verification_config?.exempt_students || []).length === 0 ? (
+                                <span className="text-muted small">Chưa có — tick trong danh sách kỳ thi hoặc tìm bên dưới</span>
+                              ) : (
+                                (examForm.face_verification_config.exempt_students || []).map((id) => {
+                                  const student = exemptStudentLabelCache[id] || selectedStudents.find((st) => st.id === id);
+                                  return (
+                                    <Badge key={id} bg="secondary" className="d-inline-flex align-items-center gap-1 py-1 px-2" style={{ fontWeight: 'normal' }}>
+                                      {student ? `${student.student_id} — ${student.full_name}` : `SV #${id}`}
+                                      <Button
+                                        type="button"
+                                        variant="link"
+                                        className="text-white p-0 lh-1"
+                                        style={{ fontSize: '16px', textDecoration: 'none' }}
+                                        onClick={() => {
+                                          setExamForm({
+                                            ...examForm,
+                                            face_verification_config: {
+                                              ...examForm.face_verification_config,
+                                              exempt_students: (examForm.face_verification_config?.exempt_students || []).filter((x) => x !== id)
+                                            }
+                                          });
+                                        }}
+                                        aria-label="Xóa"
+                                      >
+                                        ×
+                                      </Button>
+                                    </Badge>
+                                  );
+                                })
                               )}
                             </div>
-                            {examForm.face_verification_config?.exempt_students?.length > 0 && (
-                              <Alert variant="success" className="mt-2 mb-0">
-                                <i className="fas fa-check-circle me-2"></i>
-                                Đã chọn {examForm.face_verification_config.exempt_students.length} sinh viên được miễn nhận diện khuôn mặt
-                              </Alert>
-                            )}
                           </div>
                         )}
 
@@ -5584,6 +6798,79 @@ const Exams = () => {
                   </span>
                 }>
                   <div className="p-3">
+                    <Alert variant="info" className="py-2 small mb-3">
+                      <i className="fas fa-info-circle me-1"></i>
+                      <strong>Tìm theo tên</strong> (ô bên dưới)— tìm được trong toàn bộ sinh viên. Lọc lớp chỉ hiển thị tối đa {pageSize} SV/trang.
+                      Chỉ SV <strong>đã tick</strong> mới vào kỳ thi; <strong>Chọn tất cả</strong> = cả trang đang lọc.
+                    </Alert>
+                    <Form.Group className="mb-3">
+                      <Form.Label className="fw-bold">
+                        <i className="fas fa-search me-1 text-primary"></i>
+                        Tìm sinh viên (tên, mã SV, email…)
+                      </Form.Label>
+                      <InputGroup>
+                        <InputGroup.Text><i className="fas fa-user-graduate"></i></InputGroup.Text>
+                        <Form.Control
+                          placeholder="Nhập ít nhất 2 ký tự — tìm trên toàn hệ thống"
+                          value={participantStudentSearch.input}
+                          onChange={(e) => participantStudentSearch.setInput(e.target.value)}
+                          autoComplete="off"
+                        />
+                        {participantStudentSearch.loading && (
+                          <InputGroup.Text>
+                            <Spinner animation="border" size="sm" />
+                          </InputGroup.Text>
+                        )}
+                      </InputGroup>
+                      <Form.Text>Tối đa 100 kết quả mỗi lần tìm.</Form.Text>
+                    </Form.Group>
+                    {participantStudentSearch.input.trim().length >= 2 && (
+                      <div className="table-responsive border rounded mb-3" style={{ maxHeight: '240px', overflowY: 'auto' }}>
+                        <Table striped size="sm" className="mb-0">
+                          <thead className="table-light" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                            <tr>
+                              <th style={{ width: 48 }} />
+                              <th>Mã SV</th>
+                              <th>Họ và tên</th>
+                              <th>Lớp</th>
+                              <th>Khoa</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {!participantStudentSearch.loading && participantStudentSearch.results.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} className="text-center text-muted py-3">Không tìm thấy sinh viên</td>
+                              </tr>
+                            ) : (
+                              participantStudentSearch.results.map((s) => (
+                                <tr key={s.id} className={selectedStudents.some((x) => x.id === s.id) ? 'table-active' : ''}>
+                                  <td className="text-center">
+                                    <Form.Check
+                                      type="checkbox"
+                                      checked={selectedStudents.some((x) => x.id === s.id)}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          if (!selectedStudents.some((x) => x.id === s.id)) {
+                                            setSelectedStudents([...selectedStudents, s]);
+                                          }
+                                        } else {
+                                          setSelectedStudents(selectedStudents.filter((x) => x.id !== s.id));
+                                        }
+                                      }}
+                                    />
+                                  </td>
+                                  <td>{s.student_id}</td>
+                                  <td>{s.full_name}</td>
+                                  <td>{s.class_name}</td>
+                                  <td>{s.faculty_name}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </Table>
+                      </div>
+                    )}
+                    <div className="small text-muted mb-2 fw-bold">Danh sách theo lớp / nhóm (phân trang)</div>
                     <Row className="mb-3">
                       <Col md={12}>
                         <div className="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -5797,15 +7084,13 @@ const Exams = () => {
                                     t.topic_id === topic.topic_id || t.topic_id === parseInt(topic.topic_id)
                                   );
                                   // Sử dụng approved_count từ API (số câu hỏi đã duyệt) nếu có, nếu không thì đếm từ mảng questions (chỉ lấy approved)
-                                  const approvedCount = topic.approved_count !== undefined 
-                                    ? (topic.approved_count || 0)
-                                    : (() => {
-                                        const topicIdNum = parseInt(topic.topic_id);
-                                        return questions.filter(q => {
-                                          const qTopicId = parseInt(q.topic_id);
-                                          return !isNaN(qTopicId) && !isNaN(topicIdNum) && qTopicId === topicIdNum;
-                                        }).length;
-                                      })();
+                                  // IMPORTANT: Avoid scanning the whole `questions` array in render (can freeze UI).
+                                  // Prefer server-provided statistics.
+                                  const approvedCount =
+                                    topic.approved_count !== undefined ? (topic.approved_count || 0)
+                                      : topic.questions_count !== undefined ? (topic.questions_count || 0)
+                                        : topic.question_count !== undefined ? (topic.question_count || 0)
+                                          : 0;
                                   // Lấy số lượng chưa duyệt nếu có
                                   const unapprovedCount = topic.unapproved_count !== undefined 
                                     ? (topic.unapproved_count || 0)
@@ -5890,17 +7175,29 @@ const Exams = () => {
                                   return (
                                     <Accordion.Item key={topicConfig.topic_id || topicIndex} eventKey={topicIndex.toString()}>
                                       <Accordion.Header>
-                                        <div className="d-flex justify-content-between align-items-center w-100 me-3">
-                                          <div>
+                                        <div className="d-flex justify-content-between align-items-center w-100 me-3 flex-wrap gap-2">
+                                          <div className="d-flex align-items-center gap-2 flex-wrap">
                                             <strong>
                                               <i className="fas fa-folder-open me-2"></i>
                                               {topicConfig.topic_name || topic.topic_name || topic.topic_code}
                                             </strong>
-                                            {topicConfig.total_questions > 0 && (
-                                              <Badge bg="info" className="ms-2">
-                                                {topicConfig.total_questions} câu
-                                              </Badge>
-                                            )}
+                                            <div className="d-flex align-items-center ms-3" onClick={(e) => e.stopPropagation()}>
+                                              <span className="text-nowrap me-1" style={{ fontSize: '13px' }}>
+                                                <i className="fas fa-list-ol me-1"></i>Số lượng câu hỏi:
+                                              </span>
+                                              <Form.Control
+                                                type="number"
+                                                size="sm"
+                                                min="0"
+                                                style={{ width: '70px' }}
+                                                value={topicConfig.total_questions || 0}
+                                                onChange={(e) => {
+                                                  const total = parseInt(e.target.value) || 0;
+                                                  updateTopicConfig(topicConfig.topic_id, { total_questions: total });
+                                                }}
+                                                className="form-control-modern d-inline-block"
+                                              />
+                                            </div>
                                           </div>
                                           <Button
                                             size="sm"
@@ -5916,83 +7213,70 @@ const Exams = () => {
                                         </div>
                                       </Accordion.Header>
                                       <Accordion.Body>
-                                        {/* Số lượng câu hỏi */}
-                                        <Form.Group className="mb-3">
-                                          <Form.Label className="info-label" style={{ fontSize: '13px', marginBottom: '4px' }}>
-                                            <i className="fas fa-list-ol me-2"></i>
-                                            Số lượng câu hỏi
-                                          </Form.Label>
-                                          <Form.Control
-                                            type="number"
-                                            size="sm"
-                                            min="0"
-                                            value={topicConfig.total_questions || 0}
-                                            onChange={(e) => {
-                                              const total = parseInt(e.target.value) || 0;
-                                              updateTopicConfig(topicConfig.topic_id, { total_questions: total });
-                                            }}
-                                            className="form-control-modern"
-                                          />
-                                          <Form.Text className="text-muted" style={{ fontSize: '12px' }}>
-                                            Tổng số câu hỏi sẽ được lấy từ chủ đề này. Phân bố chi tiết ở dưới phải bằng với số này.
-                                          </Form.Text>
-                                        </Form.Group>
+                                        <Form.Text className="text-muted d-block mb-3" style={{ fontSize: '12px' }}>
+                                          Tổng số câu hỏi sẽ được lấy từ chủ đề này. Phân bố chi tiết ở dưới phải bằng với số này.
+                                        </Form.Text>
 
-                                        {/* Phương thức phân bố */}
-                                        <Form.Group className="mb-3">
-                                          <Form.Label className="info-label" style={{ fontSize: '13px', marginBottom: '8px' }}>
-                                            <i className="fas fa-sliders-h me-2"></i>
-                                            Phương thức phân bố
-                                          </Form.Label>
-                                          <div>
-                                            <Form.Check
-                                              type="radio"
-                                              id={`exam-dist-difficulty-${topicConfig.topic_id}`}
-                                              label="Phân bố theo độ khó"
-                                              checked={topicConfig.distribution_type === 'difficulty'}
-                                              onChange={() => updateTopicConfig(topicConfig.topic_id, { distribution_type: 'difficulty' })}
-                                              className="mb-2"
-                                            />
-                                            <Form.Check
-                                              type="radio"
-                                              id={`exam-dist-bloom-${topicConfig.topic_id}`}
-                                              label="Phân bố theo Bloom's Taxonomy"
-                                              checked={topicConfig.distribution_type === 'bloom'}
-                                              onChange={() => updateTopicConfig(topicConfig.topic_id, { distribution_type: 'bloom' })}
-                                            />
+                                        <div className="row">
+                                          {/* Phương thức phân bố - cột 1 */}
+                                          <div className="col-md-6">
+                                            <Form.Group className="mb-3">
+                                              <Form.Label className="info-label" style={{ fontSize: '13px', marginBottom: '8px' }}>
+                                                <i className="fas fa-sliders-h me-2"></i>
+                                                Phương thức phân bố
+                                              </Form.Label>
+                                              <div>
+                                                <Form.Check
+                                                  type="radio"
+                                                  id={`exam-dist-difficulty-${topicConfig.topic_id}`}
+                                                  label="Phân bố theo độ khó"
+                                                  checked={topicConfig.distribution_type === 'difficulty'}
+                                                  onChange={() => updateTopicConfig(topicConfig.topic_id, { distribution_type: 'difficulty' })}
+                                                  className="mb-2"
+                                                />
+                                                <Form.Check
+                                                  type="radio"
+                                                  id={`exam-dist-bloom-${topicConfig.topic_id}`}
+                                                  label="Phân bố theo Bloom's Taxonomy"
+                                                  checked={topicConfig.distribution_type === 'bloom'}
+                                                  onChange={() => updateTopicConfig(topicConfig.topic_id, { distribution_type: 'bloom' })}
+                                                />
+                                              </div>
+                                            </Form.Group>
                                           </div>
-                                        </Form.Group>
-
-                                        {/* Kiểu Random - Chỉ hiển thị khi random_on_exam */}
-                                        {examForm.question_selection_mode === 'random_on_exam' && (
-                                          <Form.Group className="mb-3">
-                                            <Form.Label className="info-label" style={{ fontSize: '13px', marginBottom: '8px' }}>
-                                              <i className="fas fa-random me-2"></i>
-                                              Kiểu Random
-                                            </Form.Label>
-                                            <div>
-                                              <Form.Check
-                                                type="radio"
-                                                id={`exam-random-all-${topicConfig.topic_id}`}
-                                                label="Random tất cả - Mỗi lần thi sẽ random lại câu hỏi từ chủ đề"
-                                                checked={(topicConfig.random_type || 'all') === 'all'}
-                                                onChange={() => updateTopicConfig(topicConfig.topic_id, { random_type: 'all' })}
-                                                className="mb-2"
-                                              />
-                                              <Form.Check
-                                                type="radio"
-                                                id={`exam-random-fixed-${topicConfig.topic_id}`}
-                                                label="Random cố định - Random một lần khi tạo đề, sau đó giữ nguyên cho tất cả thí sinh"
-                                                checked={topicConfig.random_type === 'fixed'}
-                                                onChange={() => updateTopicConfig(topicConfig.topic_id, { random_type: 'fixed' })}
-                                              />
-                                            </div>
-                                            <Form.Text className="text-muted" style={{ fontSize: '12px' }}>
-                                              <i className="fas fa-info-circle me-1"></i>
-                                              Random tất cả: Mỗi thí sinh sẽ nhận bộ câu hỏi khác nhau. Random cố định: Tất cả thí sinh cùng một bộ câu hỏi đã được random trước.
-                                            </Form.Text>
-                                          </Form.Group>
-                                        )}
+                                          {/* Kiểu Random - cột 2 */}
+                                          <div className="col-md-6">
+                                            {examForm.question_selection_mode === 'random_on_exam' ? (
+                                              <Form.Group className="mb-3">
+                                                <Form.Label className="info-label" style={{ fontSize: '13px', marginBottom: '8px' }}>
+                                                  <i className="fas fa-random me-2"></i>
+                                                  Kiểu Random
+                                                </Form.Label>
+                                                <div>
+                                                  <Form.Check
+                                                    type="radio"
+                                                    id={`exam-random-all-${topicConfig.topic_id}`}
+                                                    label="Random tất cả - Mỗi lần thi sẽ random lại câu hỏi từ chủ đề"
+                                                    checked={(topicConfig.random_type || 'all') === 'all'}
+                                                    onChange={() => updateTopicConfig(topicConfig.topic_id, { random_type: 'all' })}
+                                                    className="mb-2"
+                                                  />
+                                                  <Form.Check
+                                                    type="radio"
+                                                    id={`exam-random-fixed-${topicConfig.topic_id}`}
+                                                    label="Random cố định - Random một lần khi tạo đề, sau đó giữ nguyên cho tất cả thí sinh"
+                                                    checked={topicConfig.random_type === 'fixed'}
+                                                    onChange={() => updateTopicConfig(topicConfig.topic_id, { random_type: 'fixed' })}
+                                                  />
+                                                </div>
+                                                <Form.Text className="text-muted" style={{ fontSize: '12px' }}>
+                                                  <i className="fas fa-info-circle me-1"></i>
+                                                  Random tất cả: Mỗi thí sinh sẽ nhận bộ câu hỏi khác nhau. Random cố định: Tất cả thí sinh cùng một bộ câu hỏi đã được random trước.
+                                                </Form.Text>
+                                              </Form.Group>
+                                            ) : null}
+                                          </div>
+                                        </div>
 
                                         {/* Phân bố theo độ khó */}
                                         {topicConfig.distribution_type === 'difficulty' && (
@@ -6831,17 +8115,29 @@ const Exams = () => {
                         return (
                           <Accordion.Item key={topicConfig.topic_id || topicIndex} eventKey={topicIndex.toString()}>
                             <Accordion.Header>
-                              <div className="d-flex justify-content-between align-items-center w-100 me-3">
-                                <div>
+                              <div className="d-flex justify-content-between align-items-center w-100 me-3 flex-wrap gap-2">
+                                <div className="d-flex align-items-center gap-2 flex-wrap">
                                   <strong>
                                     <i className="fas fa-folder-open me-2"></i>
                                     {topicConfig.topic_name || topic.topic_name || topic.topic_code}
                                   </strong>
-                                  {topicConfig.total_questions > 0 && (
-                                    <Badge bg="info" className="ms-2">
-                                      {topicConfig.total_questions} câu
-                                    </Badge>
-                                  )}
+                                  <div className="d-flex align-items-center ms-3" onClick={(e) => e.stopPropagation()}>
+                                    <span className="text-nowrap me-1" style={{ fontSize: '13px' }}>
+                                      <i className="fas fa-list-ol me-1"></i>Số lượng câu hỏi:
+                                    </span>
+                                    <Form.Control
+                                      type="number"
+                                      size="sm"
+                                      min="0"
+                                      style={{ width: '70px' }}
+                                      value={topicConfig.total_questions || 0}
+                                      onChange={(e) => {
+                                        const total = parseInt(e.target.value) || 0;
+                                        updateTopicConfig(topicConfig.topic_id, { total_questions: total });
+                                      }}
+                                      className="form-control-modern d-inline-block"
+                                    />
+                                  </div>
                                 </div>
                                 <Button
                                   size="sm"
@@ -6857,83 +8153,70 @@ const Exams = () => {
                               </div>
                             </Accordion.Header>
                             <Accordion.Body>
-                              {/* Số lượng câu hỏi */}
-                              <Form.Group className="mb-3">
-                                <Form.Label className="info-label" style={{ fontSize: '13px', marginBottom: '4px' }}>
-                                  <i className="fas fa-list-ol me-2"></i>
-                                  Số lượng câu hỏi
-                                </Form.Label>
-                                <Form.Control
-                                  type="number"
-                                  size="sm"
-                                  min="0"
-                                  value={topicConfig.total_questions || 0}
-                                  onChange={(e) => {
-                                    const total = parseInt(e.target.value) || 0;
-                                    updateTopicConfig(topicConfig.topic_id, { total_questions: total });
-                                  }}
-                                  className="form-control-modern"
-                                />
-                                <Form.Text className="text-muted" style={{ fontSize: '12px' }}>
-                                  Tổng số câu hỏi sẽ được lấy từ chủ đề này. Phân bố chi tiết ở dưới phải bằng với số này.
-                                </Form.Text>
-                              </Form.Group>
+                              <Form.Text className="text-muted d-block mb-3" style={{ fontSize: '12px' }}>
+                                Tổng số câu hỏi sẽ được lấy từ chủ đề này. Phân bố chi tiết ở dưới phải bằng với số này.
+                              </Form.Text>
 
-                              {/* Phương thức phân bố */}
-                              <Form.Group className="mb-3">
-                                <Form.Label className="info-label" style={{ fontSize: '13px', marginBottom: '8px' }}>
-                                  <i className="fas fa-sliders-h me-2"></i>
-                                  Phương thức phân bố
-                                </Form.Label>
-                                <div>
-                                  <Form.Check
-                                    type="radio"
-                                    id={`dist-difficulty-${topicConfig.topic_id}`}
-                                    label="Phân bố theo độ khó"
-                                    checked={topicConfig.distribution_type === 'difficulty'}
-                                    onChange={() => updateTopicConfig(topicConfig.topic_id, { distribution_type: 'difficulty' })}
-                                    className="mb-2"
-                                  />
-                                  <Form.Check
-                                    type="radio"
-                                    id={`dist-bloom-${topicConfig.topic_id}`}
-                                    label="Phân bố theo Bloom's Taxonomy"
-                                    checked={topicConfig.distribution_type === 'bloom'}
-                                    onChange={() => updateTopicConfig(topicConfig.topic_id, { distribution_type: 'bloom' })}
-                                  />
+                              <div className="row">
+                                {/* Phương thức phân bố - cột 1 */}
+                                <div className="col-md-6">
+                                  <Form.Group className="mb-3">
+                                    <Form.Label className="info-label" style={{ fontSize: '13px', marginBottom: '8px' }}>
+                                      <i className="fas fa-sliders-h me-2"></i>
+                                      Phương thức phân bố
+                                    </Form.Label>
+                                    <div>
+                                      <Form.Check
+                                        type="radio"
+                                        id={`dist-difficulty-${topicConfig.topic_id}`}
+                                        label="Phân bố theo độ khó"
+                                        checked={topicConfig.distribution_type === 'difficulty'}
+                                        onChange={() => updateTopicConfig(topicConfig.topic_id, { distribution_type: 'difficulty' })}
+                                        className="mb-2"
+                                      />
+                                      <Form.Check
+                                        type="radio"
+                                        id={`dist-bloom-${topicConfig.topic_id}`}
+                                        label="Phân bố theo Bloom's Taxonomy"
+                                        checked={topicConfig.distribution_type === 'bloom'}
+                                        onChange={() => updateTopicConfig(topicConfig.topic_id, { distribution_type: 'bloom' })}
+                                      />
+                                    </div>
+                                  </Form.Group>
                                 </div>
-                              </Form.Group>
-
-                              {/* Kiểu Random - Chỉ hiển thị khi random_on_exam */}
-                              {examForm.question_selection_mode === 'random_on_exam' && (
-                                <Form.Group className="mb-3">
-                                  <Form.Label className="info-label" style={{ fontSize: '13px', marginBottom: '8px' }}>
-                                    <i className="fas fa-random me-2"></i>
-                                    Kiểu Random
-                                  </Form.Label>
-                                  <div>
-                                    <Form.Check
-                                      type="radio"
-                                      id={`modal-random-all-${topicConfig.topic_id}`}
-                                      label="Random tất cả - Mỗi lần thi sẽ random lại câu hỏi từ chủ đề"
-                                      checked={(topicConfig.random_type || 'all') === 'all'}
-                                      onChange={() => updateTopicConfig(topicConfig.topic_id, { random_type: 'all' })}
-                                      className="mb-2"
-                                    />
-                                    <Form.Check
-                                      type="radio"
-                                      id={`modal-random-fixed-${topicConfig.topic_id}`}
-                                      label="Random cố định - Random một lần khi tạo đề, sau đó giữ nguyên cho tất cả thí sinh"
-                                      checked={topicConfig.random_type === 'fixed'}
-                                      onChange={() => updateTopicConfig(topicConfig.topic_id, { random_type: 'fixed' })}
-                                    />
-                                  </div>
-                                  <Form.Text className="text-muted" style={{ fontSize: '12px' }}>
-                                    <i className="fas fa-info-circle me-1"></i>
-                                    Random tất cả: Mỗi thí sinh sẽ nhận bộ câu hỏi khác nhau. Random cố định: Tất cả thí sinh cùng một bộ câu hỏi đã được random trước.
-                                  </Form.Text>
-                                </Form.Group>
-                              )}
+                                {/* Kiểu Random - cột 2 */}
+                                <div className="col-md-6">
+                                  {examForm.question_selection_mode === 'random_on_exam' ? (
+                                    <Form.Group className="mb-3">
+                                      <Form.Label className="info-label" style={{ fontSize: '13px', marginBottom: '8px' }}>
+                                        <i className="fas fa-random me-2"></i>
+                                        Kiểu Random
+                                      </Form.Label>
+                                      <div>
+                                        <Form.Check
+                                          type="radio"
+                                          id={`modal-random-all-${topicConfig.topic_id}`}
+                                          label="Random tất cả - Mỗi lần thi sẽ random lại câu hỏi từ chủ đề"
+                                          checked={(topicConfig.random_type || 'all') === 'all'}
+                                          onChange={() => updateTopicConfig(topicConfig.topic_id, { random_type: 'all' })}
+                                          className="mb-2"
+                                        />
+                                        <Form.Check
+                                          type="radio"
+                                          id={`modal-random-fixed-${topicConfig.topic_id}`}
+                                          label="Random cố định - Random một lần khi tạo đề, sau đó giữ nguyên cho tất cả thí sinh"
+                                          checked={topicConfig.random_type === 'fixed'}
+                                          onChange={() => updateTopicConfig(topicConfig.topic_id, { random_type: 'fixed' })}
+                                        />
+                                      </div>
+                                      <Form.Text className="text-muted" style={{ fontSize: '12px' }}>
+                                        <i className="fas fa-info-circle me-1"></i>
+                                        Random tất cả: Mỗi thí sinh sẽ nhận bộ câu hỏi khác nhau. Random cố định: Tất cả thí sinh cùng một bộ câu hỏi đã được random trước.
+                                      </Form.Text>
+                                    </Form.Group>
+                                  ) : null}
+                                </div>
+                              </div>
 
                               {/* Phân bố theo độ khó */}
                               {topicConfig.distribution_type === 'difficulty' && (
@@ -7460,7 +8743,7 @@ const Exams = () => {
                           </thead>
                           <tbody>
                             {selected.map((q, index) => {
-                              const fullQuestion = questions.find(qu => qu.question_id === q.question_id) || q;
+                              const fullQuestion = questionsById.get(q.question_id) || q;
                               return (
                                 <tr key={q.question_id}>
                                   <td className="text-center">{index + 1}</td>
@@ -7647,139 +8930,70 @@ const Exams = () => {
         </Modal.Footer>
       </Modal>
 
-      {/* Webcam Video Modal */}
+      {/* Webcam Video Modal — fullscreen, chỉ header + session-card, không footer */}
       <Modal show={showWebcamModal} onHide={() => {
+        setWebcamVideoPlaying(false);
+        setWebcamPlayerFullscreen(false);
         setShowWebcamModal(false);
         setWebcamVideoUrl(null);
+        setWebcamSnapshotsList([]);
+        setWebcamSnapshotIndex(0);
         setSelectedAttemptForVideo(null);
-      }} size="xl" className="student-detail-modal">
+      }} fullscreen className="student-detail-modal" dialogClassName="fullscreen-modal">
         <Modal.Header closeButton className="student-detail-header">
           <Modal.Title className="student-detail-title">
             <div className="student-avatar">
-              <i className="fas fa-video"></i>
+              <i className="fas fa-camera"></i>
             </div>
             <div>
-              <h4 className="mb-0">Video Webcam Giám sát</h4>
-              {selectedAttemptForVideo && (
-                <p className="mb-0 student-subtitle">
-                  {selectedAttemptForVideo.student_name} ({selectedAttemptForVideo.student_id})
-                </p>
-              )}
+              <h4 className="mb-0">Ảnh Webcam Giám sát</h4>
             </div>
           </Modal.Title>
         </Modal.Header>
-        <Modal.Body className="student-detail-body">
-          <div className="student-detail-container">
-            {loadingVideo ? (
-              <div className="text-center p-5">
-                <Spinner animation="border" variant="primary" />
-                <p className="mt-3">Đang tải video...</p>
-              </div>
-            ) : webcamVideoUrl ? (
-              <div className="session-card">
-                <div className="card-header-modern mb-3">
-                  <div className="header-icon">
-                    <i className="fas fa-video"></i>
-                  </div>
-                  <h6 className="mb-0">Video ghi lại từ webcam</h6>
-                </div>
-                <div className="card-body-modern">
-                  {selectedAttemptForVideo && (
-                    <div className="mb-3">
-                      <div className="info-item">
-                        <div className="info-label">
-                          <i className="fas fa-user me-2"></i>
-                          <span>Sinh viên:</span>
-                        </div>
-                        <div className="info-value">
-                          <strong>{selectedAttemptForVideo.student_name}</strong> ({selectedAttemptForVideo.student_id})
-                        </div>
-                      </div>
-                      <div className="info-item">
-                        <div className="info-label">
-                          <i className="fas fa-clock me-2"></i>
-                          <span>Thời gian bắt đầu:</span>
-                        </div>
-                        <div className="info-value">
-                          {new Date(selectedAttemptForVideo.start_time).toLocaleString('vi-VN')}
-                        </div>
-                      </div>
-                      {selectedAttemptForVideo.submit_time && (
-                        <div className="info-item">
-                          <div className="info-label">
-                            <i className="fas fa-check-circle me-2"></i>
-                            <span>Thời gian nộp:</span>
-                          </div>
-                          <div className="info-value">
-                            {new Date(selectedAttemptForVideo.submit_time).toLocaleString('vi-VN')}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="video-container" style={{
-                    position: 'relative',
-                    width: '100%',
-                    paddingBottom: '56.25%', // 16:9 aspect ratio
-                    height: 0,
-                    backgroundColor: '#000',
-                    borderRadius: '8px',
-                    overflow: 'hidden'
-                  }}>
-                    {webcamVideoUrl.startsWith('https://drive.google.com') || webcamVideoUrl.startsWith('http://drive.google.com') ? (
-                      // Google Drive video - embed using iframe
-                      (() => {
-                        // Extract file ID from Google Drive URL
-                        // Format: https://drive.google.com/file/d/{FILE_ID}/view?usp=sharing
-                        const fileIdMatch = webcamVideoUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-                        const fileId = fileIdMatch ? fileIdMatch[1] : null;
-
-                        if (fileId) {
-                          // Use Google Drive embed URL
-                          const embedUrl = `https://drive.google.com/file/d/${fileId}/preview`;
-                          return (
-                            <iframe
-                              src={embedUrl}
-                              style={{
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                width: '100%',
-                                height: '100%',
-                                border: 'none'
-                              }}
-                              allow="autoplay"
-                              allowFullScreen
-                              title="Video webcam giám sát"
-                            />
-                          );
-                        } else {
-                          // Fallback if file ID cannot be extracted
-                          return (
-                            <div className="text-center p-5">
-                              <Alert variant="warning">
-                                <Alert.Heading>Không thể embed video</Alert.Heading>
-                                <p>Không thể trích xuất file ID từ Google Drive URL. Vui lòng mở video bằng liên kết bên dưới:</p>
-                                <Button
-                                  variant="primary"
-                                  href={webcamVideoUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  <i className="fas fa-external-link-alt me-2"></i>
-                                  Mở video trên Google Drive
-                                </Button>
-                              </Alert>
-                            </div>
-                          );
-                        }
-                      })()
-                    ) : (
-                      // Local video - use HTML5 video player
-                      <video
-                        controls
-                        autoPlay
+        <Modal.Body className="student-detail-body webcam-modal-body" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '16px' }}>
+          {loadingVideo ? (
+            <div className="text-center p-5">
+              <Spinner animation="border" variant="primary" />
+              <p className="mt-3">Đang tải ảnh webcam...</p>
+            </div>
+          ) : webcamSnapshotsList.length > 0 ? (
+            <div className="session-card webcam-modal-session-card" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div className="card-body-modern p-0" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                  <div
+                    ref={webcamPlayerContainerRef}
+                    className={`webcam-video-player${webcamPlayerFullscreen ? ' webcam-video-player--fullscreen' : ''}`}
+                    style={{
+                      position: 'relative',
+                      width: '100%',
+                      flex: 1,
+                      minHeight: 0,
+                      backgroundColor: '#000',
+                      borderRadius: '8px',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}
+                  >
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      style={{
+                        position: 'relative',
+                        width: '100%',
+                        paddingBottom: '56.25%',
+                        height: 0,
+                        overflow: 'hidden',
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => setWebcamVideoPlaying((p) => !p)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setWebcamVideoPlaying((p) => !p); } }}
+                      title={webcamVideoPlaying ? 'Tạm dừng' : 'Phát'}
+                      aria-label={webcamVideoPlaying ? 'Tạm dừng' : 'Phát'}
+                    >
+                      <AuthImage
+                        key={`webcam-video-${webcamModalKey}`}
+                        src={webcamSnapshotsList[webcamSnapshotIndex]?.url}
+                        alt="Webcam giám sát"
                         style={{
                           position: 'absolute',
                           top: 0,
@@ -7788,49 +9002,141 @@ const Exams = () => {
                           height: '100%',
                           objectFit: 'contain'
                         }}
-                        src={webcamVideoUrl}
-                      >
-                        Trình duyệt của bạn không hỗ trợ video HTML5.
-                      </video>
-                    )}
-                  </div>
-
-                  {!webcamVideoUrl.startsWith('https://drive.google.com') && !webcamVideoUrl.startsWith('http://drive.google.com') && (
-                    <div className="mt-3 text-center">
-                      <Button
-                        variant="outline-primary"
-                        href={webcamVideoUrl}
-                        target="_blank"
-                        download
-                      >
-                        <i className="fas fa-download me-2"></i>
-                        Tải video về
-                      </Button>
+                      />
                     </div>
-                  )}
+                    <div className="webcam-video-controls-yt__gradient-overlay" aria-hidden="true" />
+                    <div className="webcam-video-controls-yt">
+                      <div className="webcam-video-controls-yt__progress-row">
+                        <div
+                          className="webcam-video-controls-yt__progress-area"
+                          onMouseMove={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const x = e.clientX - rect.left;
+                            const pct = Math.max(0, Math.min(1, x / rect.width));
+                            const idx = Math.min(
+                              webcamSnapshotsList.length - 1,
+                              Math.floor(pct * webcamSnapshotsList.length)
+                            );
+                            setWebcamHoverPreviewIndex(idx >= 0 ? idx : null);
+                          }}
+                          onMouseLeave={() => setWebcamHoverPreviewIndex(null)}
+                          onClick={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const x = e.clientX - rect.left;
+                            const pct = Math.max(0, Math.min(1, x / rect.width));
+                            const idx = Math.floor(pct * Math.max(0, webcamSnapshotsList.length - 1));
+                            setWebcamSnapshotIndex(idx);
+                          }}
+                        >
+                          {webcamHoverPreviewIndex != null && webcamSnapshotsList[webcamHoverPreviewIndex] && (
+                            <div
+                              className="webcam-video-controls-yt__hover-preview"
+                              style={{
+                                left: `${webcamSnapshotsList.length > 0 ? (100 * (webcamHoverPreviewIndex + 0.5)) / webcamSnapshotsList.length : 0}%`
+                              }}
+                            >
+                              <div className="webcam-video-controls-yt__hover-preview-img">
+                                <AuthImage
+                                  src={webcamSnapshotsList[webcamHoverPreviewIndex].url}
+                                  alt=""
+                                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                />
+                              </div>
+                              <span className="webcam-video-controls-yt__hover-preview-time">
+                                {(() => {
+                                  const sec = Math.floor(webcamHoverPreviewIndex / webcamFps);
+                                  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+                                })()}
+                              </span>
+                            </div>
+                          )}
+                          <div className="webcam-video-controls-yt__progress-track">
+                            <div
+                              className="webcam-video-controls-yt__progress-played"
+                              style={{
+                                width: `${webcamSnapshotsList.length > 0 ? (100 * (webcamSnapshotIndex + 1)) / webcamSnapshotsList.length : 0}%`
+                              }}
+                            >
+                              <div className="webcam-video-controls-yt__progress-thumb" />
+                            </div>
+                          </div>
+                          {(() => {
+                            const len = webcamSnapshotsList.length;
+                            if (!len) return null;
+                            const seen = new Set();
+                            const drops = [];
+                            webcamSnapshotsList.forEach((s, idx) => {
+                              const q = s?.question_order;
+                              if (q != null && q !== '' && !seen.has(q)) {
+                                seen.add(q);
+                                drops.push({ question_order: q, index: idx });
+                              }
+                            });
+                            return drops.map(({ question_order: q, index }) => (
+                              <div
+                                key={`q-${q}`}
+                                className="webcam-video-controls-yt__question-drop"
+                                style={{
+                                  left: `${(100 * (index + 0.5)) / len}%`
+                                }}
+                              >
+                                <span>Câu {q}</span>
+                              </div>
+                            ));
+                          })()}
+                        </div>
+                      </div>
+                      <div className="webcam-video-controls-yt__chrome">
+                        <div className="webcam-video-controls-yt__left">
+                          <button
+                            type="button"
+                            className="webcam-video-controls-yt__btn"
+                            onClick={() => setWebcamVideoPlaying((p) => !p)}
+                            title={webcamVideoPlaying ? 'Tạm dừng' : 'Phát'}
+                            aria-label={webcamVideoPlaying ? 'Tạm dừng' : 'Phát'}
+                          >
+                            <i className={`fas ${webcamVideoPlaying ? 'fa-pause' : 'fa-play'}`} />
+                          </button>
+                          <span className="webcam-video-controls-yt__time">
+                            {(() => {
+                              const totalSec = Math.floor(webcamSnapshotsList.length / webcamFps);
+                              const currentSec = Math.floor(webcamSnapshotIndex / webcamFps);
+                              const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+                              return `${fmt(currentSec)} / ${fmt(totalSec)}`;
+                            })()}
+                          </span>
+                        </div>
+                        <div className="webcam-video-controls-yt__right">
+                          <button
+                            type="button"
+                            className="webcam-video-controls-yt__btn"
+                            onClick={() => {
+                              const el = webcamPlayerContainerRef.current;
+                              if (!el) return;
+                              if (document.fullscreenElement) document.exitFullscreen?.();
+                              else el.requestFullscreen?.().catch(() => {});
+                            }}
+                            title="Toàn màn hình"
+                            aria-label="Toàn màn hình"
+                          >
+                            <i className="fas fa-expand" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : (
               <div className="session-card">
                 <div className="card-body-modern text-center p-5">
-                  <i className="fas fa-video-slash fa-4x text-muted mb-3"></i>
-                  <h5>Không có video</h5>
-                  <p className="text-muted mb-0">Không tìm thấy video webcam cho bài làm này</p>
+                  <i className="fas fa-images fa-4x text-muted mb-3"></i>
+                  <h5>Chưa có ảnh webcam</h5>
+                  <p className="text-muted mb-0">Không có ảnh chụp webcam cho bài làm này</p>
                 </div>
               </div>
             )}
-          </div>
         </Modal.Body>
-        <Modal.Footer className="student-detail-footer">
-          <Button variant="outline-secondary" onClick={() => {
-            setShowWebcamModal(false);
-            setWebcamVideoUrl(null);
-            setSelectedAttemptForVideo(null);
-          }} className="btn-cancel">
-            <i className="fas fa-times me-2"></i>
-            Đóng
-          </Button>
-        </Modal.Footer>
       </Modal>
 
       {/* Ban Student Modal */}
@@ -7967,157 +9273,6 @@ const Exams = () => {
         </Modal.Footer>
       </Modal>
 
-      {/* Live Webcam Fullscreen Modal */}
-      <Modal
-        show={showLiveWebcamModal}
-        onHide={() => {
-          setShowLiveWebcamModal(false);
-          setSelectedAttemptForLiveView(null);
-        }}
-        size="xl"
-        fullscreen="lg-down"
-        className="student-detail-modal"
-      >
-        <Modal.Header closeButton className="student-detail-header">
-          <Modal.Title className="student-detail-title">
-            <div className="student-avatar">
-              <i className="fas fa-video"></i>
-            </div>
-            <div>
-              <h4 className="mb-0">
-                Live Webcam Giám sát
-                {selectedAttemptForLiveView && (
-                  <Badge bg="danger" className="ms-2">
-                    LIVE
-                  </Badge>
-                )}
-              </h4>
-              {selectedAttemptForLiveView && (
-                <p className="mb-0 student-subtitle">
-                  {selectedAttemptForLiveView.student_name} ({selectedAttemptForLiveView.student_id})
-                </p>
-              )}
-            </div>
-          </Modal.Title>
-        </Modal.Header>
-        <Modal.Body className="student-detail-body" style={{ padding: 0 }}>
-          <div className="student-detail-container" style={{ padding: '20px' }}>
-            {selectedAttemptForLiveView && (
-              <>
-                <div className="session-card mb-3">
-                  <div className="card-body-modern">
-                    <Row>
-                      <Col md={6}>
-                        <div className="info-item">
-                          <div className="info-label">
-                            <i className="fas fa-user me-2"></i>
-                            <span>Sinh viên:</span>
-                          </div>
-                          <div className="info-value">
-                            <strong>{selectedAttemptForLiveView.student_name}</strong> ({selectedAttemptForLiveView.student_id})
-                          </div>
-                        </div>
-                      </Col>
-                      <Col md={6}>
-                        <div className="info-item">
-                          <div className="info-label">
-                            <i className="fas fa-clock me-2"></i>
-                            <span>Thời gian bắt đầu:</span>
-                          </div>
-                          <div className="info-value">
-                            {new Date(selectedAttemptForLiveView.start_time).toLocaleString('vi-VN')}
-                          </div>
-                        </div>
-                      </Col>
-                    </Row>
-                  </div>
-                </div>
-
-                <div className="session-card">
-                  <div className="card-header-modern mb-3">
-                    <div className="header-icon">
-                      <i className="fas fa-video"></i>
-                    </div>
-                    <h6 className="mb-0">Live Webcam Stream</h6>
-                  </div>
-                  <div className="card-body-modern">
-                    {(() => {
-                      const liveFrame = liveWebcamData[selectedAttemptForLiveView.attempt_id];
-
-                      if (liveFrame) {
-                        return (
-                          <div style={{
-                            position: 'relative',
-                            width: '100%',
-                            paddingBottom: '56.25%', // 16:9 aspect ratio
-                            height: 0,
-                            backgroundColor: '#000',
-                            borderRadius: '8px',
-                            overflow: 'hidden',
-                            border: '3px solid #dc3545'
-                          }}>
-                            <img
-                              src={liveFrame}
-                              alt="Live webcam stream"
-                              style={{
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                width: '100%',
-                                height: '100%',
-                                objectFit: 'contain',
-                                imageRendering: 'auto'
-                              }}
-                            />
-                            <Badge
-                              bg="danger"
-                              style={{
-                                position: 'absolute',
-                                top: '10px',
-                                right: '10px',
-                                fontSize: '14px',
-                                padding: '6px 12px',
-                                animation: 'pulse 2s infinite'
-                              }}
-                            >
-                              <i className="fas fa-circle me-1" style={{ fontSize: '8px' }}></i>
-                              LIVE
-                            </Badge>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div className="text-center p-5">
-                          <Spinner animation="border" variant="primary" size="lg" />
-                          <p className="mt-3">Đang chờ stream từ sinh viên...</p>
-                          <p className="text-muted small">
-                            Nếu không có video sau vài giây, có thể sinh viên chưa bật webcam hoặc đã ngắt kết nối.
-                          </p>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </Modal.Body>
-        <Modal.Footer className="student-detail-footer">
-          <Button
-            variant="outline-secondary"
-            onClick={() => {
-              setShowLiveWebcamModal(false);
-              setSelectedAttemptForLiveView(null);
-            }}
-            className="btn-cancel"
-          >
-            <i className="fas fa-times me-2"></i>
-            Đóng
-          </Button>
-        </Modal.Footer>
-      </Modal>
-
       {/* Answers Detail Modal */}
       <Modal
         show={showAnswersDetailModal}
@@ -8146,16 +9301,17 @@ const Exams = () => {
           </Modal.Title>
         </Modal.Header>
         <Modal.Body className="student-detail-body">
-          <div className="student-detail-container">
+          {!showAnswersDetailModal ? null : (
+          <div className="student-detail-container" key={`answers-content-${answersDetailKey}`}>
             {loadingAnswersDetail ? (
               <div className="text-center p-5">
                 <Spinner animation="border" variant="primary" />
                 <p className="mt-3">Đang tải chi tiết đáp án...</p>
               </div>
             ) : answersDetailData && answersDetailData.questions && answersDetailData.questions.length > 0 ? (
-              <div>
+              <div key={`answers-detail-${answersDetailKey}`}>
                 {answersDetailData.questions.map((question, index) => (
-                  <div key={question.question_id} className="card mb-3" style={{ border: '1px solid #e9ecef', borderRadius: '8px' }}>
+                  <div key={`${answersDetailKey}-${question.question_id}`} className="card mb-3" style={{ border: '1px solid #e9ecef', borderRadius: '8px' }}>
                     <div className="card-header" style={{ background: '#f8f9fa', borderBottom: '1px solid #e9ecef' }}>
                       <div className="d-flex justify-content-between align-items-center">
                         <h6 className="mb-0">
@@ -8182,60 +9338,85 @@ const Exams = () => {
                       </div>
                     </div>
                     <div className="card-body">
-                      {/* Question Text */}
-                      <div className="mb-3">
-                        <div 
-                          dangerouslySetInnerHTML={{ __html: question.question_html || question.question_text || 'N/A' }}
-                          style={{ fontSize: '15px', lineHeight: '1.6' }}
-                        />
-                      </div>
-
-                      {/* Options */}
-                      {question.options && question.options.length > 0 && (
-                        <div className="mb-3">
-                          <strong className="text-muted small">Các lựa chọn:</strong>
-                          <div className="mt-2">
-                            {question.options.map((option, optIndex) => {
-                              const isSelected = Array.isArray(question.answer) 
-                                ? question.answer.includes(String(option.option_id))
-                                : String(question.answer) === String(option.option_id);
-                              
-                              return (
-                                <div
-                                  key={option.option_id || optIndex}
-                                  className={`p-2 mb-2 rounded ${isSelected ? 'bg-success bg-opacity-10 border border-success' : 'bg-light'}`}
-                                  style={{ borderLeft: isSelected ? '4px solid #28a745' : '4px solid transparent' }}
-                                >
-                                  <div className="d-flex align-items-start">
-                                    <div className="me-2">
-                                      {isSelected ? (
-                                        <i className="fas fa-check-circle text-success"></i>
-                                      ) : (
-                                        <i className="far fa-circle text-muted"></i>
-                                      )}
-                                    </div>
-                                    <div className="flex-grow-1">
-                                      <span>{option.option_text || 'N/A'}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
+                      <Row className="g-2">
+                        {/* Cột trái: Nội dung câu hỏi — chiếm hết chỗ còn lại, sát cột ảnh */}
+                        <Col className={question.webcam_snapshot_url ? 'flex-grow-1' : ''} md={question.webcam_snapshot_url ? undefined : 12} style={question.webcam_snapshot_url ? { minWidth: 0, flex: '1 1 0%' } : {}}>
+                          <div className="mb-3">
+                            <div 
+                              dangerouslySetInnerHTML={{ __html: question.question_html || question.question_text || 'N/A' }}
+                              style={{ fontSize: '15px', lineHeight: '1.6' }}
+                            />
                           </div>
-                        </div>
-                      )}
 
-                      {/* Answer for text-based questions */}
-                      {(!question.options || question.options.length === 0) && question.answer && (
-                        <div className="mb-3">
-                          <strong className="text-muted small">Đáp án đã chọn:</strong>
-                          <div className="mt-2 p-3 bg-light rounded border">
-                            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                              {typeof question.answer === 'string' ? question.answer : JSON.stringify(question.answer)}
+                          {question.options && question.options.length > 0 && (
+                            <div className="mb-3">
+                              <strong className="text-muted small">Các lựa chọn:</strong>
+                              <div className="mt-2">
+                                {question.options.map((option, optIndex) => {
+                                  const optIdStr = option.option_id != null ? String(option.option_id) : '';
+                                  const isSelected = Array.isArray(question.answer)
+                                    ? question.answer.some(a => a != null && String(a) === optIdStr)
+                                    : (question.answer != null && question.answer !== '' && String(question.answer) === optIdStr);
+                                  return (
+                                    <div
+                                      key={option.option_id || optIndex}
+                                      className={`p-2 mb-2 rounded ${isSelected ? 'bg-success bg-opacity-10 border border-success' : 'bg-light'}`}
+                                      style={{ borderLeft: isSelected ? '4px solid #28a745' : '4px solid transparent' }}
+                                    >
+                                      <div className="d-flex align-items-start">
+                                        <div className="me-2">
+                                          {isSelected ? (
+                                            <i className="fas fa-check-circle text-success"></i>
+                                          ) : (
+                                            <i className="far fa-circle text-muted"></i>
+                                          )}
+                                        </div>
+                                        <div className="flex-grow-1">
+                                          <span>{option.option_text || 'N/A'}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      )}
+                          )}
+
+                          {(!question.options || question.options.length === 0) && question.answer && (
+                            <div className="mb-3">
+                              <strong className="text-muted small">Đáp án đã chọn:</strong>
+                              <div className="mt-2 p-3 bg-light rounded border">
+                                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                  {typeof question.answer === 'string' ? question.answer : JSON.stringify(question.answer)}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </Col>
+
+                        {/* Cột phải: Ảnh webcam — độ rộng cố định, đẩy sát bên phải */}
+                        {question.webcam_snapshot_url && (
+                          <Col className="ms-auto" style={{ width: '320px', maxWidth: '320px', flex: '0 0 320px' }}>
+                            <strong className="text-muted small d-block mb-2">
+                              <i className="fas fa-camera me-1"></i>
+                              Hình ảnh webcam khi làm câu này
+                            </strong>
+                            <div style={{ width: '100%', borderRadius: '8px', overflow: 'hidden', border: '1px solid #dee2e6' }}>
+                              <AuthImage
+                                key={`webcam-q-${answersDetailKey}-${question.question_id}`}
+                                src={question.webcam_snapshot_url}
+                                alt="Webcam khi làm câu"
+                                style={{ width: '100%', height: 'auto', display: 'block' }}
+                                onImageClick={(blobUrl) => {
+                                  setImageZoomUrl(blobUrl);
+                                  setImageZoomFileName(`webcam-cau-${question.question_order ?? index + 1}.jpg`);
+                                  setImageZoomOpen(true);
+                                }}
+                              />
+                            </div>
+                          </Col>
+                        )}
+                      </Row>
                     </div>
                   </div>
                 ))}
@@ -8247,6 +9428,7 @@ const Exams = () => {
               </div>
             )}
           </div>
+          )}
         </Modal.Body>
         <Modal.Footer className="student-detail-footer">
           <Button
@@ -8435,6 +9617,107 @@ const Exams = () => {
           }} className="btn-success">
             <i className="fas fa-check me-2"></i>
             Xác nhận cấp quyền
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* Proctor message to student - Chat thông báo trực tiếp, lưu lịch sử theo sinh viên */}
+      <Modal show={showProctorMessageModal} onHide={() => {
+        setShowProctorMessageModal(false);
+        setProctorMessageTargetAttempt(null);
+        setProctorMessageText('');
+        setProctorMessageHistory([]);
+      }} size="lg" className="student-detail-modal">
+        <Modal.Header closeButton className="student-detail-header">
+          <Modal.Title className="student-detail-title">
+            <div className="student-avatar">
+              <i className="fas fa-comment-dots"></i>
+            </div>
+            <div>
+              <h4 className="mb-0">Gửi thông báo đến sinh viên đang thi</h4>
+            </div>
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="student-detail-body">
+          {proctorMessageTargetAttempt && (
+            <div className="student-detail-container">
+              <div className="session-card mb-3">
+                <div className="card-body-modern">
+                  <div className="info-item">
+                    <div className="info-label"><i className="fas fa-user me-2"></i><span>Sinh viên:</span></div>
+                    <div className="info-value"><strong>{proctorMessageTargetAttempt.student_name}</strong> ({proctorMessageTargetAttempt.student_id})</div>
+                  </div>
+                </div>
+              </div>
+              {/* Lịch sử thông báo đã gửi cho sinh viên này */}
+              <div className="mb-3">
+                <Form.Label className="d-flex align-items-center">
+                  <i className="fas fa-history me-2"></i>
+                  Các thông báo đã gửi
+                  {proctorMessageHistory.length > 0 && (
+                    <Badge bg="secondary" className="ms-2">{proctorMessageHistory.length}</Badge>
+                  )}
+                </Form.Label>
+                <div className="border rounded p-2 bg-light" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                  {loadingProctorHistory ? (
+                    <div className="text-center py-2"><Spinner size="sm" animation="border" /> Đang tải...</div>
+                  ) : proctorMessageHistory.length === 0 ? (
+                    <div className="text-muted small py-2">Chưa có thông báo nào.</div>
+                  ) : (
+                    <ul className="list-unstyled mb-0 small">
+                      {proctorMessageHistory.map((item) => (
+                        <li key={item.id} className="py-2 border-bottom border-light">
+                          <div className="text-muted" style={{ fontSize: '11px' }}>
+                            {item.sent_at ? new Date(item.sent_at).toLocaleString('vi-VN') : ''}
+                          </div>
+                          <div className="mt-1" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.message}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+              <Form.Group>
+                <Form.Label><i className="fas fa-envelope me-2"></i>Nội dung thông báo mới</Form.Label>
+                <Form.Control
+                  as="textarea"
+                  rows={3}
+                  placeholder="Nhập thông báo sẽ hiển thị trực tiếp trên giao diện thi của sinh viên..."
+                  value={proctorMessageText}
+                  onChange={(e) => setProctorMessageText(e.target.value)}
+                  className="form-control-modern"
+                />
+              </Form.Group>
+            </div>
+          )}
+        </Modal.Body>
+        <Modal.Footer className="student-detail-footer">
+          <Button variant="outline-secondary" onClick={() => {
+            setShowProctorMessageModal(false);
+            setProctorMessageTargetAttempt(null);
+            setProctorMessageText('');
+            setProctorMessageHistory([]);
+          }} className="btn-cancel">
+            <i className="fas fa-times me-2"></i>
+            Hủy
+          </Button>
+          <Button variant="primary" disabled={sendingProctorMessage || !(proctorMessageText || '').trim()} onClick={async () => {
+            if (!proctorMessageTargetAttempt || !(proctorMessageText || '').trim()) return;
+            setSendingProctorMessage(true);
+            try {
+              const res = await api.post(`/lms/attempts/${proctorMessageTargetAttempt.attempt_id}/proctor-message`, { message: proctorMessageText.trim() });
+              showAlertMessage('Đã gửi thông báo đến sinh viên', 'success');
+              const newMsg = res.data?.data?.proctor_message;
+              if (newMsg) setProctorMessageHistory((prev) => [...prev, newMsg]);
+              setProctorMessageText('');
+            } catch (error) {
+              showAlertMessage(error.response?.data?.message || 'Lỗi khi gửi thông báo', 'danger');
+            } finally {
+              setSendingProctorMessage(false);
+            }
+          }} className="btn-success">
+            {sendingProctorMessage ? <Spinner size="sm" animation="border" className="me-2" /> : <i className="fas fa-paper-plane me-2"></i>}
+            Gửi
           </Button>
         </Modal.Footer>
       </Modal>
@@ -8977,6 +10260,7 @@ const Exams = () => {
                                     <th>Họ và tên</th>
                                     <th>Email</th>
                                     <th>Lớp</th>
+                                    <th>Bài thi</th>
                                     <th>Thời gian bắt đầu đọc</th>
                                     <th>Thời gian xác nhận</th>
                                     <th>Trạng thái</th>
@@ -9002,6 +10286,18 @@ const Exams = () => {
                                         <td>{confirmation.email || '-'}</td>
                                         <td>
                                           <span className="badge bg-info">{confirmation.class_name || '-'}</span>
+                                        </td>
+                                        <td>
+                                          {confirmation.exam_name ? (
+                                            <div>
+                                              <div className="fw-bold">{confirmation.exam_name}</div>
+                                              {confirmation.exam_code && (
+                                                <small className="text-muted">({confirmation.exam_code})</small>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <span className="text-muted">-</span>
+                                          )}
                                         </td>
                                         <td>{startTime}</td>
                                         <td>{confirmTime}</td>
@@ -9094,6 +10390,26 @@ const Exams = () => {
           )}
         </Modal.Footer>
       </Modal>
+
+      <ImageZoomModal
+        isOpen={imageZoomOpen}
+        imageUrl={imageZoomUrl}
+        preserveZoomOnUrlChange={!!imageZoomLiveAttemptId}
+        onClose={() => {
+          if (liveZoomBlobUrlRef.current) {
+            URL.revokeObjectURL(liveZoomBlobUrlRef.current);
+            liveZoomBlobUrlRef.current = null;
+          }
+          if (zoomBlobUrlToRevokeRef.current) {
+            URL.revokeObjectURL(zoomBlobUrlToRevokeRef.current);
+            zoomBlobUrlToRevokeRef.current = null;
+          }
+          setImageZoomLiveAttemptId(null);
+          setImageZoomOpen(false);
+          setImageZoomUrl(null);
+        }}
+        downloadFileName={imageZoomFileName}
+      />
     </div>
   );
 };

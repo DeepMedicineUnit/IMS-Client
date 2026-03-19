@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { Bell, Moon, Sun, User, Settings, LogOut, ChevronDown, CreditCard, FileText, Shield, Users, Eye, PenTool, Mail, CheckSquare, Ticket } from 'lucide-react';
+import { getUploadsBaseURL, getApiBaseURL } from '../utils/api';
 import './TopHeader.css';
 
 const TopHeader = () => {
@@ -41,6 +42,14 @@ const TopHeader = () => {
   const [faceUpdateRequestsCount, setFaceUpdateRequestsCount] = useState(0); // Count of face update requests
   const [showAllNotificationsModal, setShowAllNotificationsModal] = useState(false); // Show all notifications modal
   const [allNotifications, setAllNotifications] = useState([]); // All notifications for modal
+  const [emergencyAnnouncement, setEmergencyAnnouncement] = useState(null); // Emergency announcement for banner
+  const [showEmergencyBanner, setShowEmergencyBanner] = useState(true); // Show/hide emergency banner
+  const [announcementNotifications, setAnnouncementNotifications] = useState([]); // Announcement notifications
+  const [announcementNotificationsCount, setAnnouncementNotificationsCount] = useState(0); // Count of announcement notifications
+  const [evidenceNotifications, setEvidenceNotifications] = useState([]); // Evidence (minh chứng) notifications
+  const [evidenceNotificationsUnreadCount, setEvidenceNotificationsUnreadCount] = useState(0); // Unread evidence count
+  const [activeIncidents, setActiveIncidents] = useState([]); // Sự cố module (từ Status page)
+  const notificationListsRefetchedRef = useRef(false);
 
   const handleLogoutClick = () => {
     setShowProfileDropdown(false); // Close profile dropdown
@@ -261,6 +270,105 @@ const TopHeader = () => {
     }
   };
 
+  // Fetch emergency announcement for banner
+  const fetchEmergencyAnnouncement = async () => {
+    try {
+      const response = await api.get('/announcements/emergency');
+      if (response.data.success && response.data.data) {
+        setEmergencyAnnouncement(response.data.data);
+        // Check if user has dismissed this announcement
+        const dismissedAnnouncements = JSON.parse(localStorage.getItem('dismissedAnnouncements') || '[]');
+        setShowEmergencyBanner(!dismissedAnnouncements.includes(response.data.data.id));
+      } else {
+        setEmergencyAnnouncement(null);
+        setShowEmergencyBanner(false);
+      }
+    } catch (error) {
+      // Silently fail if no announcements
+      setEmergencyAnnouncement(null);
+      setShowEmergencyBanner(false);
+    }
+  };
+
+  // Fetch active incidents (module down - từ Status page)
+  // credentials: 'omit' vì khi dùng 'include' mà server trả access-control-allow-origin: *
+  // thì trình duyệt chặn không cho đọc body. API /api/status là public, không cần auth.
+  const fetchActiveIncidents = async () => {
+    const base = getApiBaseURL();
+    const url = base ? `${base.replace(/\/+$/, '')}/status` : '/api/status';
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        credentials: 'omit',
+        headers: { 'Accept': 'application/json' }
+      });
+      if (!res.ok) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[TopHeader] fetchActiveIncidents:', res.status, res.statusText);
+        }
+        setActiveIncidents([]);
+        return;
+      }
+      if (res.status === 204 || res.headers.get('content-length') === '0') {
+        setActiveIncidents([]);
+        return;
+      }
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[TopHeader] fetchActiveIncidents: response not JSON');
+        }
+        setActiveIncidents([]);
+        return;
+      }
+      const modules = data?.modules || data?.data?.modules;
+      const externalServices = data?.externalServices || data?.data?.externalServices;
+      if (data?.success) {
+        const fromModules = (modules && typeof modules === 'object')
+          ? Object.entries(modules)
+              .filter(([, m]) => m && m.status === 'down')
+              .map(([key, m]) => ({
+                id: `module-${key}`,
+                title: `Module ${m.name || key} không hoạt động`,
+                description: `Module ${m.name || key} đã ngừng phản hồi. Hệ thống đang tự động theo dõi và sẽ cập nhật khi module hoạt động trở lại.`,
+                affected_modules: [key],
+                status: 'investigating'
+              }))
+          : [];
+        const fromExternal = (externalServices && typeof externalServices === 'object')
+          ? Object.entries(externalServices)
+              .filter(([, s]) => s && s.status === 'down')
+              .map(([key, s]) => ({
+                id: `external-${key}`,
+                title: `Dịch vụ ${s.name || key} không hoạt động`,
+                description: `Dịch vụ bên thứ 3 ${s.name || key} đã ngừng phản hồi. Hệ thống đang tự động theo dõi và sẽ cập nhật khi dịch vụ hoạt động trở lại.`,
+                affected_modules: [key],
+                status: 'investigating'
+              }))
+          : [];
+        const combined = [...fromModules, ...fromExternal];
+        setActiveIncidents(combined);
+      } else if (data?.status === 'major_outage' && (!modules || Object.keys(modules || {}).length === 0)) {
+        setActiveIncidents([{
+          id: 'outage',
+          title: 'Một số module đang gặp sự cố',
+          description: 'Hệ thống đang tự động theo dõi và sẽ cập nhật khi các module hoạt động trở lại.',
+          affected_modules: [],
+          status: 'investigating'
+        }]);
+      } else {
+        setActiveIncidents([]);
+      }
+    } catch (error) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[TopHeader] fetchActiveIncidents failed:', error?.message || error);
+      }
+      setActiveIncidents([]);
+    }
+  };
+
   // Fetch pending documents list (documents with active routes assigned to user)
   const fetchPendingDocuments = async (skipUnreadCalculation = false) => {
     try {
@@ -422,6 +530,51 @@ const TopHeader = () => {
     setUnreadActivatedSignaturesCount(0);
   };
 
+  // Fetch announcement notifications count
+  const fetchAnnouncementNotificationsCount = async () => {
+    try {
+      const response = await api.get('/announcements/notifications/unread-count');
+      if (response.data && response.data.success) {
+        setAnnouncementNotificationsCount(response.data.count || 0);
+      } else {
+        setAnnouncementNotificationsCount(0);
+      }
+    } catch (error) {
+      setAnnouncementNotificationsCount(0);
+    }
+  };
+
+  // Fetch announcement notifications list (chỉ cập nhật state khi thành công; lỗi không xóa list)
+  const fetchAnnouncementNotifications = async () => {
+    try {
+      const response = await api.get('/announcements/notifications?limit=10');
+      if (response.data && response.data.success) {
+        const list = response.data.data ?? response.data.notifications ?? [];
+        setAnnouncementNotifications(Array.isArray(list) ? list : []);
+      } else {
+        setAnnouncementNotifications([]);
+      }
+    } catch (error) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('fetchAnnouncementNotifications failed:', error?.response?.status || error?.message);
+      }
+      // Không set [] khi lỗi - giữ list cũ để tránh badge 15 nhưng dropdown trống
+    }
+  };
+
+  // Mark announcement notification as read
+  const markAnnouncementNotificationAsRead = async (notificationId) => {
+    try {
+      await api.put(`/announcements/notifications/${notificationId}/read`);
+      // Refresh count after marking as read
+      await fetchAnnouncementNotificationsCount();
+      // Refresh notifications list
+      await fetchAnnouncementNotifications();
+    } catch (error) {
+      console.error('Error marking announcement notification as read:', error);
+    }
+  };
+
   // Mark ticket notifications as viewed
   const markTicketNotificationsAsViewed = () => {
     const now = new Date();
@@ -430,15 +583,80 @@ const TopHeader = () => {
     setUnreadTicketNotificationsCount(0);
   };
 
+  const hasEvidenceAccess = () => {
+    if (!currentUser) return false;
+    if (currentUser.role === 'superadmin') return true;
+    let roles = currentUser.module_roles;
+    if (typeof roles === 'string') {
+      try {
+        roles = JSON.parse(roles);
+      } catch (e) {
+        return false;
+      }
+    }
+    if (!Array.isArray(roles)) return false;
+    return roles.includes('qualityassurance_admin') || roles.includes('evidence_mod') || roles.includes('evidence_staff');
+  };
+
+  // Fetch evidence (minh chứng) notifications unread count - gọi cho mọi user đăng nhập, 403 thì để 0
+  const fetchEvidenceNotificationsCount = async () => {
+    if (!isLoggedIn) return;
+    try {
+      const response = await api.get('/quality-assurance/notifications/unread-count');
+      if (response.data?.success && response.data?.data != null) {
+        const raw = response.data.data;
+        const count = typeof raw.count !== 'undefined' ? raw.count : raw;
+        setEvidenceNotificationsUnreadCount(typeof count === 'number' ? count : parseInt(count, 10) || 0);
+      } else {
+        setEvidenceNotificationsUnreadCount(0);
+      }
+    } catch (error) {
+      setEvidenceNotificationsUnreadCount(0);
+    }
+  };
+
+  // Fetch evidence notifications list - gọi cho mọi user đăng nhập; lỗi không xóa list
+  const fetchEvidenceNotifications = async () => {
+    if (!isLoggedIn) return;
+    try {
+      const response = await api.get('/quality-assurance/notifications?limit=10');
+      if (response.data?.success) {
+        const data = response.data.data;
+        const list = Array.isArray(data) ? data : (data && data.list ? data.list : []);
+        setEvidenceNotifications(list);
+      } else {
+        setEvidenceNotifications([]);
+      }
+    } catch (error) {
+      // Không set [] khi lỗi - giữ list cũ để tránh badge có số nhưng dropdown trống
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('fetchEvidenceNotifications failed:', error?.response?.status || error?.message);
+      }
+    }
+  };
+
+  const markEvidenceNotificationAsRead = async (id) => {
+    try {
+      await api.put(`/quality-assurance/notifications/${id}/read`);
+      setEvidenceNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+      await fetchEvidenceNotificationsCount();
+    } catch (e) {
+      console.error('Error marking evidence notification read:', e);
+    }
+  };
+
   // Fetch all notifications for modal
   const fetchAllNotifications = async () => {
     try {
-      const [docsResponse, signaturesResponse, activatedSigsResponse, ticketsResponse, faceRequestsResponse] = await Promise.all([
+      const evidencePromise = api.get('/quality-assurance/notifications?limit=100').catch(() => ({ data: { success: false, data: [] } }));
+      const [docsResponse, signaturesResponse, activatedSigsResponse, ticketsResponse, announcementResponse, faceRequestsResponse, evidenceResponse] = await Promise.all([
         api.get('/documents/pending?limit=100').catch(() => ({ data: { success: false, documents: [] } })),
         api.get('/documents/signatures/pending?limit=100').catch(() => ({ data: { success: false, signatures: [] } })),
         api.get('/documents/signatures/activated?limit=100').catch(() => ({ data: { success: false, signatures: [] } })),
         api.get('/tickets/notifications?limit=100').catch(() => ({ data: { success: false, data: [] } })),
-        api.get('/face-management/my-pending-requests').catch(() => ({ data: { success: false, data: [] } }))
+        api.get('/announcements/notifications?limit=100').catch(() => ({ data: { success: false, data: [] } })),
+        api.get('/face-management/my-pending-requests').catch(() => ({ data: { success: false, data: [] } })),
+        evidencePromise
       ]);
 
       const allNotifs = [];
@@ -482,6 +700,42 @@ const TopHeader = () => {
           });
         });
       }
+
+      // Add announcement notifications
+      if (announcementResponse.data.success && announcementResponse.data.data) {
+        announcementResponse.data.data.forEach(notification => {
+          allNotifs.push({
+            type: 'announcement',
+            id: `announcement-${notification.id}`,
+            title: notification.type === 'like' 
+              ? `${notification.actor_name || notification.actor_username || 'Người dùng'} đã thích thông báo của bạn`
+              : notification.type === 'comment'
+              ? `${notification.actor_name || notification.actor_username || 'Người dùng'} đã bình luận`
+              : `${notification.actor_name || notification.actor_username || 'Người dùng'} đã trả lời bình luận của bạn`,
+            description: notification.announcement_title,
+            details: notification.comment_content,
+            timestamp: notification.created_at,
+            data: notification,
+            action: () => navigate('/announcements')
+          });
+        });
+      }
+
+      // Add evidence (minh chứng) notifications
+      const evidenceList = evidenceResponse?.data?.success && Array.isArray(evidenceResponse.data.data) ? evidenceResponse.data.data : [];
+      evidenceList.forEach(notification => {
+        const navPath = notification.type === 'submission' ? '/quality-assurance/evidence-storage' : '/quality-assurance/staff';
+        allNotifs.push({
+          type: 'evidence',
+          id: `evidence-${notification.id}`,
+          title: notification.title,
+          description: notification.message,
+          details: null,
+          timestamp: notification.created_at,
+          data: notification,
+          action: () => navigate(navPath)
+        });
+      });
 
       // Add activated signatures
       if (activatedSigsResponse.data.success && activatedSigsResponse.data.signatures) {
@@ -566,11 +820,17 @@ const TopHeader = () => {
   // Fetch initial data after timestamps are loaded
   useEffect(() => {
     const fetchInitialData = async () => {
+      await fetchEmergencyAnnouncement();
+      await fetchActiveIncidents();
       await fetchOnlineUsers();
       await fetchPendingDocumentsCount();
       await fetchPendingSignaturesCount();
       await fetchActivatedSignaturesCount();
       await fetchTicketNotificationsCount();
+      await fetchAnnouncementNotificationsCount();
+      await fetchAnnouncementNotifications();
+      await fetchEvidenceNotificationsCount();
+      await fetchEvidenceNotifications();
       await fetchFaceUpdateRequests();
       // Fetch pending documents and signatures to calculate unread count
       // Note: timestamps might still be null here, but that's okay - it will be handled in fetch functions
@@ -588,6 +848,46 @@ const TopHeader = () => {
     
     return () => clearTimeout(timeout);
   }, []); // Only run once on mount
+
+  // Refetch header banner when superadmin creates/updates announcement with "Hiển thị banner trên header"
+  useEffect(() => {
+    const handler = () => fetchEmergencyAnnouncement();
+    window.addEventListener('announcements-banner-updated', handler);
+    return () => window.removeEventListener('announcements-banner-updated', handler);
+  }, []);
+
+  // Khi đóng dropdown, cho phép refetch lại lần sau khi mở (nếu vẫn count > 0 mà list trống)
+  useEffect(() => {
+    if (!showNotificationsDropdown) notificationListsRefetchedRef.current = false;
+  }, [showNotificationsDropdown]);
+
+  // Khi dropdown mở mà badge > 0 nhưng tất cả list trống → refetch một lần để đồng bộ
+  const totalUnread = unreadDocumentsCount + unreadSignaturesCount + unreadActivatedSignaturesCount + unreadTicketNotificationsCount + announcementNotificationsCount + evidenceNotificationsUnreadCount + faceUpdateRequestsCount;
+  const allNotificationListsEmpty = pendingDocuments.length === 0 && pendingSignatures.length === 0 && activatedSignatures.length === 0 && ticketNotifications.length === 0 && announcementNotifications.length === 0 && evidenceNotifications.length === 0 && faceUpdateRequests.length === 0;
+  useEffect(() => {
+    if (!showNotificationsDropdown || totalUnread <= 0 || !allNotificationListsEmpty || notificationListsRefetchedRef.current) return;
+    notificationListsRefetchedRef.current = true;
+    (async () => {
+      await fetchPendingDocuments();
+      await fetchPendingSignatures();
+      await fetchActivatedSignatures();
+      await fetchTicketNotifications();
+      await fetchAnnouncementNotifications();
+      await fetchEvidenceNotifications();
+      await fetchFaceUpdateRequests();
+    })();
+  }, [showNotificationsDropdown, totalUnread, allNotificationListsEmpty]);
+
+  // Poll for announcement notifications every 30 seconds
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    
+    const interval = setInterval(() => {
+      fetchAnnouncementNotificationsCount();
+    }, 30000); // Poll every 30 seconds
+    
+    return () => clearInterval(interval);
+  }, [isLoggedIn]);
 
   // Recalculate unread count when lastViewedAt changes (after marking as viewed)
   useEffect(() => {
@@ -719,11 +1019,14 @@ const TopHeader = () => {
 
       try {
         await Promise.all([
+          fetchEmergencyAnnouncement(),
+          fetchActiveIncidents(),
           fetchOnlineUsers(),
           fetchPendingDocumentsCount(),
           fetchPendingSignaturesCount(),
           fetchActivatedSignaturesCount(),
           fetchTicketNotificationsCount(),
+          fetchEvidenceNotificationsCount(),
           fetchFaceUpdateRequests(),
           // Refresh pending documents and signatures to recalculate unread count
           fetchPendingDocuments(),
@@ -847,8 +1150,6 @@ const TopHeader = () => {
         return 'https://flagcdn.com/w40/vn.png';
       case 'en':
         return 'https://flagcdn.com/w40/gb.png';
-      case 'hi':
-        return 'https://flagcdn.com/w40/in.png';
       default:
         return 'https://flagcdn.com/w40/vn.png';
     }
@@ -862,8 +1163,6 @@ const TopHeader = () => {
         return 'Tiếng Việt';
       case 'en':
         return 'English';
-      case 'hi':
-        return 'हिन्दी';
       default:
         return 'Tiếng Việt';
     }
@@ -876,16 +1175,106 @@ const TopHeader = () => {
     };
   }, []);
 
+  // Add/remove class to body when emergency banner is shown/hidden
+  useEffect(() => {
+    if (emergencyAnnouncement && showEmergencyBanner) {
+      document.body.classList.add('has-emergency-banner');
+    } else {
+      document.body.classList.remove('has-emergency-banner');
+    }
+    
+    return () => {
+      document.body.classList.remove('has-emergency-banner');
+    };
+  }, [emergencyAnnouncement, showEmergencyBanner]);
+
   // Don't render if user is not logged in
   if (!isLoggedIn) {
     return null;
   }
 
   return (
-    <header className="top-header">
-      <div className="header-left">
-        {/* Logo or title can go here */}
-      </div>
+    <>
+      {/* Banner sự cố module: hiển thị khi có incident đang investigating/identified/monitoring */}
+      {activeIncidents.length > 0 && (
+        <div className="emergency-banner incidents-banner">
+          <div className="emergency-banner-content">
+            <div className="emergency-banner-icon">
+              <i className="bi bi-exclamation-triangle-fill"></i>
+            </div>
+            <Link
+              to="/status"
+              className="emergency-banner-text"
+              style={{ textDecoration: 'none', color: 'inherit' }}
+            >
+              <strong>{activeIncidents[0].title}</strong>
+              <span className="mx-2">•</span>
+              <span>
+                {activeIncidents[0].description ||
+                  `Module ${Array.isArray(activeIncidents[0].affected_modules) ? activeIncidents[0].affected_modules.join(', ') : 'N/A'} đã ngừng phản hồi. Hệ thống đang tự động theo dõi và sẽ cập nhật khi module hoạt động trở lại.`}
+              </span>
+              {activeIncidents.length > 1 && (
+                <span className="mx-2">• Có thêm {activeIncidents.length - 1} sự cố khác</span>
+              )}
+            </Link>
+            <Link to="/status" className="emergency-banner-view-all">
+              Xem trạng thái
+              <i className="bi bi-arrow-right"></i>
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Header banner: Khẩn cấp / Tin tức / Bảo trì (chỉ khi không có sự cố module - sự cố module có mức cao nhất) */}
+      {emergencyAnnouncement && showEmergencyBanner && activeIncidents.length === 0 && (
+        <div className="emergency-banner">
+          <div className="emergency-banner-content">
+            <div className="emergency-banner-icon">
+              <i className={`bi bi-${(emergencyAnnouncement.type === 'news' && 'newspaper') || (emergencyAnnouncement.type === 'maintenance' && 'tools') || 'exclamation-triangle-fill'}`}></i>
+            </div>
+            <Link 
+              to={`/announcements/${emergencyAnnouncement.id}`}
+              className="emergency-banner-text"
+              style={{ textDecoration: 'none', color: 'inherit' }}
+            >
+              <strong>{emergencyAnnouncement.title}</strong>
+              <span className="mx-2">•</span>
+              <span>{emergencyAnnouncement.content}</span>
+            </Link>
+            <Link 
+              to="/announcements"
+              className="emergency-banner-view-all"
+              onClick={(e) => {
+                // If already on announcements page, prevent navigation
+                if (window.location.pathname === '/announcements') {
+                  e.preventDefault();
+                }
+              }}
+            >
+              Xem tất cả
+              <i className="bi bi-arrow-right"></i>
+            </Link>
+            <button 
+              className="emergency-banner-close"
+              onClick={() => {
+                setShowEmergencyBanner(false);
+                // Store dismissed announcement in localStorage
+                const dismissedAnnouncements = JSON.parse(localStorage.getItem('dismissedAnnouncements') || '[]');
+                dismissedAnnouncements.push(emergencyAnnouncement.id);
+                localStorage.setItem('dismissedAnnouncements', JSON.stringify(dismissedAnnouncements));
+              }}
+              title="Đóng"
+            >
+              <i className="bi bi-x-lg"></i>
+            </button>
+          </div>
+        </div>
+      )}
+      
+      <header className="top-header">
+        <div className="header-left">
+          {/* Logo or title can go here */}
+        </div>
       
       <div className="header-right">
         {/* Online Users Display */}
@@ -911,7 +1300,7 @@ const TopHeader = () => {
                       {/* Profile Picture */}
                       {user.profile_picture ? (
                         <img 
-                          src={user.profile_picture.startsWith('http') ? user.profile_picture : `${window.location.origin}${user.profile_picture}`}
+                          src={user.profile_picture.startsWith('http') ? user.profile_picture : `${getUploadsBaseURL()}${user.profile_picture}`}
                           alt={lastName}
                           className="online-user-avatar"
                           onError={(e) => {
@@ -1018,21 +1407,6 @@ const TopHeader = () => {
                   <span>English</span>
                   {i18n.language === 'en' && <span className="check-mark">✓</span>}
                 </button>
-                <button
-                  className={`language-option ${i18n.language === 'hi' ? 'active' : ''}`}
-                  onClick={() => changeLanguage('hi')}
-                >
-                  <img 
-                    src="https://flagcdn.com/w40/in.png" 
-                    alt="हिन्दी" 
-                    className="flag-icon-small"
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                    }}
-                  />
-                  <span>हिन्दी</span>
-                  {i18n.language === 'hi' && <span className="check-mark">✓</span>}
-                </button>
               </div>
             </div>
           )}
@@ -1054,10 +1428,10 @@ const TopHeader = () => {
           <button 
             className="header-icon-btn notification-btn" 
             title={
-              (unreadDocumentsCount + unreadSignaturesCount + unreadActivatedSignaturesCount + unreadTicketNotificationsCount + faceUpdateRequestsCount) > 0 
-                ? `${unreadDocumentsCount + unreadSignaturesCount + unreadActivatedSignaturesCount + unreadTicketNotificationsCount + faceUpdateRequestsCount} ${t('header.newNotifications')}` 
-                : (pendingDocumentsCount + pendingSignaturesCount + activatedSignaturesCount + ticketNotificationsCount + faceUpdateRequestsCount) > 0 
-                  ? `${pendingDocumentsCount + pendingSignaturesCount + activatedSignaturesCount + ticketNotificationsCount + faceUpdateRequestsCount} ${t('header.notifications')}` 
+              (unreadDocumentsCount + unreadSignaturesCount + unreadActivatedSignaturesCount + unreadTicketNotificationsCount + announcementNotificationsCount + evidenceNotificationsUnreadCount + faceUpdateRequestsCount) > 0 
+                ? `${unreadDocumentsCount + unreadSignaturesCount + unreadActivatedSignaturesCount + unreadTicketNotificationsCount + announcementNotificationsCount + evidenceNotificationsUnreadCount + faceUpdateRequestsCount} ${t('header.newNotifications')}` 
+                : (pendingDocumentsCount + pendingSignaturesCount + activatedSignaturesCount + ticketNotificationsCount + announcementNotificationsCount + evidenceNotifications.length + faceUpdateRequestsCount) > 0 
+                  ? `${pendingDocumentsCount + pendingSignaturesCount + activatedSignaturesCount + ticketNotificationsCount + announcementNotificationsCount + evidenceNotifications.length + faceUpdateRequestsCount} ${t('header.notifications')}` 
                   : t('header.notifications')
             }
             onClick={async () => {
@@ -1067,19 +1441,19 @@ const TopHeader = () => {
                 await fetchPendingSignatures();
                 await fetchActivatedSignatures();
                 await fetchTicketNotifications();
+                await fetchAnnouncementNotifications();
+                await fetchAnnouncementNotificationsCount();
+                await fetchEvidenceNotifications();
+                await fetchEvidenceNotificationsCount();
                 await fetchFaceUpdateRequests();
-                // Mark as viewed when opening dropdown
-                markNotificationsAsViewed();
-                markSignatureNotificationsAsViewed();
-                markActivatedSignatureNotificationsAsViewed();
-                markTicketNotificationsAsViewed();
+                // Note: Don't mark as viewed automatically - let users click to mark as read
               }
               setShowNotificationsDropdown(!showNotificationsDropdown);
             }}
           >
             <Bell size={20} />
-            {(unreadDocumentsCount + unreadSignaturesCount + unreadActivatedSignaturesCount + unreadTicketNotificationsCount + faceUpdateRequestsCount) > 0 && (
-              <span className="notification-badge">{unreadDocumentsCount + unreadSignaturesCount + unreadActivatedSignaturesCount + unreadTicketNotificationsCount + faceUpdateRequestsCount}</span>
+            {(unreadDocumentsCount + unreadSignaturesCount + unreadActivatedSignaturesCount + unreadTicketNotificationsCount + announcementNotificationsCount + evidenceNotificationsUnreadCount + faceUpdateRequestsCount) > 0 && (
+              <span className="notification-badge">{unreadDocumentsCount + unreadSignaturesCount + unreadActivatedSignaturesCount + unreadTicketNotificationsCount + announcementNotificationsCount + evidenceNotificationsUnreadCount + faceUpdateRequestsCount}</span>
             )}
           </button>
 
@@ -1088,16 +1462,16 @@ const TopHeader = () => {
             <div className="notifications-dropdown-menu">
               <div className="dropdown-header">
                 <h6>{t('header.notifications')}</h6>
-                {(unreadDocumentsCount + unreadSignaturesCount + unreadActivatedSignaturesCount + unreadTicketNotificationsCount + faceUpdateRequestsCount) > 0 && (
-                  <span className="notification-count-text">{unreadDocumentsCount + unreadSignaturesCount + unreadActivatedSignaturesCount + unreadTicketNotificationsCount + faceUpdateRequestsCount} {t('header.newNotifications')}</span>
+                {(unreadDocumentsCount + unreadSignaturesCount + unreadActivatedSignaturesCount + unreadTicketNotificationsCount + announcementNotificationsCount + evidenceNotificationsUnreadCount + faceUpdateRequestsCount) > 0 && (
+                  <span className="notification-count-text">{unreadDocumentsCount + unreadSignaturesCount + unreadActivatedSignaturesCount + unreadTicketNotificationsCount + announcementNotificationsCount + evidenceNotificationsUnreadCount + faceUpdateRequestsCount} {t('header.newNotifications')}</span>
                 )}
               </div>
               <div className="dropdown-divider"></div>
               <div className="notifications-list">
-                {pendingDocuments.length === 0 && pendingSignatures.length === 0 && activatedSignatures.length === 0 && ticketNotifications.length === 0 && faceUpdateRequests.length === 0 ? (
+                {allNotificationListsEmpty ? (
                   <div className="no-notifications">
                     <Bell size={24} />
-                    <p>{t('header.noNotifications')}</p>
+                    <p>{totalUnread > 0 ? (t('header.loadingNotifications') || 'Đang tải thông báo...') : t('header.noNotifications')}</p>
                   </div>
                 ) : (
                   <>
@@ -1177,6 +1551,100 @@ const TopHeader = () => {
                             </div>
                             <div className="notification-time">
                               {ticket.notification_date && new Date(ticket.notification_date).toLocaleDateString('vi-VN')}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {/* Announcement Notifications */}
+                    {announcementNotifications.length > 0 && (
+                      <>
+                        {announcementNotifications.map((notification) => {
+                          const isUnread = notification.is_read === 0 || notification.is_read === false;
+                          return (
+                            <div
+                              key={`announcement-${notification.id}`}
+                              className={`notification-item ${isUnread ? 'unread' : ''}`}
+                              onClick={async () => {
+                                setShowNotificationsDropdown(false);
+                                if (isUnread) {
+                                  await markAnnouncementNotificationAsRead(notification.id);
+                                  // Update local state
+                                  setAnnouncementNotifications(prev => 
+                                    prev.map(n => n.id === notification.id ? { ...n, is_read: 1 } : n)
+                                  );
+                                  // Refresh count
+                                  await fetchAnnouncementNotificationsCount();
+                                }
+                                navigate('/announcements');
+                              }}
+                            >
+                        <div className="notification-content">
+                          <div className="notification-title">
+                            {notification.type === 'like' && <span style={{ fontSize: '16px' }}>❤️</span>}
+                            {notification.type === 'comment' && <span style={{ fontSize: '16px' }}>💬</span>}
+                            {notification.type === 'reply' && <span style={{ fontSize: '16px' }}>↩️</span>}
+                            <span>
+                              {notification.type === 'like' && `${notification.actor_name || notification.actor_username || 'Người dùng'} đã thích thông báo của bạn`}
+                              {notification.type === 'comment' && `${notification.actor_name || notification.actor_username || 'Người dùng'} đã bình luận`}
+                              {notification.type === 'reply' && `${notification.actor_name || notification.actor_username || 'Người dùng'} đã trả lời bình luận của bạn`}
+                            </span>
+                          </div>
+                          <div className="notification-details">
+                            <span className="notification-owner">
+                              {notification.announcement_title}
+                            </span>
+                            {notification.comment_content && (
+                              <span className="notification-route">
+                                • {notification.comment_content.length > 30 ? notification.comment_content.substring(0, 30) + '...' : notification.comment_content}
+                              </span>
+                            )}
+                          </div>
+                          <div className="notification-time">
+                            {notification.created_at && new Date(notification.created_at).toLocaleDateString('vi-VN', {
+                              day: 'numeric',
+                              month: 'short',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                          );
+                        })}
+                      </>
+                    )}
+                    {/* Evidence (minh chứng) notifications */}
+                    {evidenceNotifications.map((notification) => {
+                      const isUnread = !notification.is_read;
+                      const navPath = notification.type === 'submission' ? '/quality-assurance/evidence-storage' : '/quality-assurance/staff';
+                      return (
+                        <div
+                          key={`evidence-${notification.id}`}
+                          className={`notification-item ${isUnread ? 'unread' : ''}`}
+                          onClick={async () => {
+                            setShowNotificationsDropdown(false);
+                            if (isUnread) await markEvidenceNotificationAsRead(notification.id);
+                            navigate(navPath);
+                          }}
+                        >
+                          <div className="notification-content">
+                            <div className="notification-title">
+                              <FileText size={16} />
+                              <span>{notification.title}</span>
+                            </div>
+                            <div className="notification-details">
+                              <span className="notification-owner">
+                                {notification.message && (notification.message.length > 60 ? notification.message.substring(0, 60) + '...' : notification.message)}
+                              </span>
+                            </div>
+                            <div className="notification-time">
+                              {notification.created_at && new Date(notification.created_at).toLocaleDateString('vi-VN', {
+                                day: 'numeric',
+                                month: 'short',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
                             </div>
                           </div>
                         </div>
@@ -1280,7 +1748,7 @@ const TopHeader = () => {
                   </>
                 )}
               </div>
-              {(pendingDocumentsCount > 0 || pendingSignaturesCount > 0 || activatedSignaturesCount > 0 || ticketNotificationsCount > 0 || faceUpdateRequestsCount > 0) && (
+              {(pendingDocumentsCount > 0 || pendingSignaturesCount > 0 || activatedSignaturesCount > 0 || ticketNotificationsCount > 0 || announcementNotificationsCount > 0 || evidenceNotifications.length > 0 || faceUpdateRequestsCount > 0) && (
                 <>
                   <div className="dropdown-divider"></div>
                   <div className="dropdown-footer">
@@ -1311,7 +1779,7 @@ const TopHeader = () => {
             <div className="profile-avatar">
               {currentUser?.profile_picture ? (
                 <img 
-                  src={currentUser.profile_picture.startsWith('http') ? currentUser.profile_picture : `${window.location.origin}${currentUser.profile_picture}`}
+                  src={currentUser.profile_picture.startsWith('http') ? currentUser.profile_picture : `${getUploadsBaseURL()}${currentUser.profile_picture}`}
                   alt="Profile" 
                   className="avatar-img"
                   onError={(e) => {
@@ -1337,6 +1805,10 @@ const TopHeader = () => {
                 <Link to="/profile" className="dropdown-item" onClick={() => setShowProfileDropdown(false)}>
                   <User size={18} />
                   <span>{t('header.myProfile')}</span>
+                </Link>
+                <Link to="/announcements" className="dropdown-item" onClick={() => setShowProfileDropdown(false)}>
+                  <Bell size={18} />
+                  <span>Thông báo</span>
                 </Link>
                 <button className="dropdown-item logout-btn" onClick={handleLogoutClick}>
                   <span>{t('header.logout')}</span>
@@ -1401,6 +1873,9 @@ const TopHeader = () => {
                     let isUnread = false;
                     if (notification.type === 'face-update') {
                       isUnread = true; // Face update requests are always shown as unread
+                    } else if (notification.type === 'announcement') {
+                      // For announcement notifications, check is_read from data
+                      isUnread = notification.data && !notification.data.is_read;
                     } else if (notification.type === 'ticket') {
                       const currentLastViewed = lastViewedTicketsAt || (() => {
                         const saved = localStorage.getItem('notifications_tickets_last_viewed');
@@ -1425,14 +1900,27 @@ const TopHeader = () => {
                         return saved ? new Date(saved) : null;
                       })();
                       isUnread = !currentLastViewed || (notification.timestamp && new Date(notification.timestamp) > currentLastViewed);
+                    } else if (notification.type === 'announcement') {
+                      // For announcement notifications, check is_read from data
+                      isUnread = notification.data && (notification.data.is_read === 0 || notification.data.is_read === false);
                     }
 
                     return (
                       <div
                         key={notification.id}
                         className={`notification-item-modal ${isUnread ? 'unread' : ''}`}
-                        onClick={() => {
+                        onClick={async () => {
                           setShowAllNotificationsModal(false);
+                          // Mark announcement notification as read if unread
+                          if (notification.type === 'announcement' && isUnread && notification.data?.id) {
+                            await markAnnouncementNotificationAsRead(notification.data.id);
+                            // Refresh count
+                            await fetchAnnouncementNotificationsCount();
+                            // Update local state
+                            setAnnouncementNotifications(prev => 
+                              prev.map(n => n.id === notification.data.id ? { ...n, is_read: 1 } : n)
+                            );
+                          }
                           if (notification.action) {
                             notification.action();
                           }
@@ -1440,6 +1928,14 @@ const TopHeader = () => {
                       >
                         <div className="notification-icon">
                           {notification.type === 'face-update' && <Shield size={20} />}
+                          {notification.type === 'announcement' && (
+                            <span style={{ fontSize: '20px' }}>
+                              {notification.data?.type === 'like' && '❤️'}
+                              {notification.data?.type === 'comment' && '💬'}
+                              {notification.data?.type === 'reply' && '↩️'}
+                              {!notification.data?.type && '📢'}
+                            </span>
+                          )}
                           {notification.type === 'ticket' && <Ticket size={20} />}
                           {notification.type === 'activated-signature' && <Shield size={20} />}
                           {notification.type === 'pending-signature' && <PenTool size={20} />}
@@ -1493,7 +1989,7 @@ const TopHeader = () => {
                         <div className="user-avatar-medium">
                           {user.profile_picture ? (
                             <img 
-                              src={user.profile_picture} 
+                              src={user.profile_picture.startsWith('http') ? user.profile_picture : `${getUploadsBaseURL()}${user.profile_picture}`} 
                               alt={user.full_name || user.username}
                               className="avatar-img-medium"
                             />
@@ -1533,13 +2029,13 @@ const TopHeader = () => {
                       <img 
                         src={selectedUser.profile_picture.startsWith('http') 
                           ? selectedUser.profile_picture 
-                          : `${window.location.origin}${selectedUser.profile_picture}`}
+                          : `${getUploadsBaseURL()}${selectedUser.profile_picture}`}
                         alt={selectedUser.full_name || selectedUser.username}
                         className="user-profile-picture"
                         onClick={() => {
                           const imageUrl = selectedUser.profile_picture.startsWith('http') 
                             ? selectedUser.profile_picture 
-                            : `${window.location.origin}${selectedUser.profile_picture}`;
+                            : `${getUploadsBaseURL()}${selectedUser.profile_picture}`;
                           setFullscreenImage(imageUrl);
                         }}
                         style={{ cursor: 'pointer' }}
@@ -1586,7 +2082,7 @@ const TopHeader = () => {
                     <div className="info-row">
                       <label>{t('user.lastActivity')}:</label>
                       <span>{selectedUser.last_activity ? 
-                        new Date(selectedUser.last_activity).toLocaleString(i18n.language === 'vi' ? 'vi-VN' : i18n.language === 'hi' ? 'hi-IN' : 'en-US') : 'N/A'}</span>
+                        new Date(selectedUser.last_activity).toLocaleString(i18n.language === 'vi' ? 'vi-VN' : 'en-US') : 'N/A'}</span>
                     </div>
                   </div>
                 </div>
@@ -1634,6 +2130,7 @@ const TopHeader = () => {
         </div>
       )}
     </header>
+    </>
   );
 };
 

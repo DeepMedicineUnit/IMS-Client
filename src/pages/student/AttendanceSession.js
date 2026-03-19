@@ -13,6 +13,7 @@ import '../../styles/modern-ui.css';
 import { useHospitalLocations, findHospitalByCoordinates } from '../../hooks/useHospitalLocations';
 import { checkVPNStatus, getCommonVPNApps } from '../../utils/vpnDetection';
 import { useTranslation } from 'react-i18next';
+import { getApiBaseURL } from '../../utils/api';
 
 // Custom hook for polling at intervals
 const useInterval = (callback, delay) => {
@@ -660,9 +661,6 @@ const AttendanceSession = ({ shared = false }) => {
             const result = await checkVPNStatus();
             setVpnStatus(result);
             
-            // Log VPN detection result for debugging
-            console.log('VPN Detection Result:', result);
-            
         } catch (error) {
             console.error('Error checking VPN status:', error);
             setVpnCheckError('Không thể kiểm tra trạng thái VPN. Vui lòng thử lại.');
@@ -716,7 +714,6 @@ const AttendanceSession = ({ shared = false }) => {
 
         // Skip location check if VPN/Proxy is detected
         if (vpnStatus && (vpnStatus.isVPN || vpnStatus.isProxy)) {
-            console.log('VPN/Proxy detected, cannot retry location check');
             setError(t('attendanceSession.location.cannotRetryVPN'));
             return;
         }
@@ -727,7 +724,6 @@ const AttendanceSession = ({ shared = false }) => {
         
         try {
             // First, do a quick permission check
-            console.log('Checking location permission status...');
             const permissionStatus = await checkLocationPermissionStatus();
             
             if (!permissionStatus.supported) {
@@ -749,7 +745,6 @@ const AttendanceSession = ({ shared = false }) => {
                 return;
             }
             
-            console.log('Location permission granted, getting detailed location...');
             const position = await getLocationWithFallback();
             const currentLocation = {
                 latitude: position.coords.latitude,
@@ -762,7 +757,6 @@ const AttendanceSession = ({ shared = false }) => {
             setIsGettingLocation(false);
             setError(''); // Clear any previous errors
             
-            console.log('Location retry successful:', currentLocation);
             
             // Check geofence if enabled
             if (session?.monitoring_options?.location?.geofence?.enabled) {
@@ -770,7 +764,6 @@ const AttendanceSession = ({ shared = false }) => {
                 const withinGeofence = isWithinGeofence(currentLocation, geofence);
                 
                 if (!withinGeofence) {
-                    console.log('User is outside geofence');
                     if (session.monitoring_options?.location?.enforcement === 'immediate') {
                         setError(t('attendanceSession.location.outsideRange', { radius: geofence.radius }));
                     }
@@ -852,8 +845,9 @@ const AttendanceSession = ({ shared = false }) => {
             }
 
             // Create an API instance without auth headers for public access
+            // Use getApiBaseURL() to ensure correct port in production (8043)
             const publicApi = axios.create({
-                baseURL: '/api',
+                baseURL: getApiBaseURL(),
                 headers: {
                     'Content-Type': 'application/json'
                 }
@@ -902,12 +896,10 @@ const AttendanceSession = ({ shared = false }) => {
             // If no token in URL and user is logged in, try to generate one
             if (!tokenFromURL && isLoggedIn) {
                 try {
-                    console.log('No token in URL, generating temporary token...');
                     const tokenResponse = await api.post(`/sessions/${id}/generate-token`);
 
                     if (tokenResponse.data.success && tokenResponse.data.token) {
                         const newToken = tokenResponse.data.token;
-                        console.log('Generated temporary token:', newToken);
                         setToken(newToken);
 
                         // Update URL with token
@@ -932,7 +924,6 @@ const AttendanceSession = ({ shared = false }) => {
                     setError(''); // Clear any previous errors
                     
                     // First, do a quick permission check
-                    console.log('Checking location permission status on initial load...');
                     try {
                         const permissionStatus = await checkLocationPermissionStatus();
                         
@@ -955,7 +946,6 @@ const AttendanceSession = ({ shared = false }) => {
                             return;
                         }
                         
-                        console.log('Location permission granted, getting detailed location...');
                     } catch (permissionError) {
                         console.error('Error checking location permission:', permissionError);
                         setError('Không thể kiểm tra quyền truy cập vị trí. Vui lòng thử lại.');
@@ -965,7 +955,6 @@ const AttendanceSession = ({ shared = false }) => {
                     
                     // Add timeout to prevent infinite loading
                     const locationTimeout = setTimeout(() => {
-                        console.log('Location request timed out after 30 seconds');
                         setIsGettingLocation(false);
                         setHasLocationPermission(false);
                         
@@ -997,7 +986,6 @@ const AttendanceSession = ({ shared = false }) => {
                                 const withinGeofence = isWithinGeofence(currentLocation, geofence);
                                 
                                 if (!withinGeofence) {
-                                    console.log('User is outside geofence');
                                     if (parsedSessionData.monitoring_options?.location?.enforcement === 'immediate') {
                                         setError(t('attendanceSession.location.outsideRange', { radius: geofence.radius }));
                                     }
@@ -1015,10 +1003,8 @@ const AttendanceSession = ({ shared = false }) => {
                                 setLocationPermissionDenied(true);
                                 setError(t('attendanceSession.location.permissionDenied'));
                             } else if (error.code === 3) { // TIMEOUT
-                                console.log('Location timeout after permission granted - GPS may be slow');
                                 setError('Không thể xác định vị trí sau nhiều lần thử. Vui lòng kiểm tra cài đặt GPS và thử lại.');
                             } else if (error.code === 2) { // POSITION_UNAVAILABLE
-                                console.log('Position unavailable - GPS signal may be weak');
                                 setError('Không thể xác định vị trí. Vui lòng kiểm tra tín hiệu GPS và thử lại.');
                             } else {
                                 setError('Lỗi không xác định khi lấy vị trí. Vui lòng thử lại sau vài giây.');
@@ -1036,7 +1022,6 @@ const AttendanceSession = ({ shared = false }) => {
                 }
             } else if (!isRefresh && vpnStatus && (vpnStatus.isVPN || vpnStatus.isProxy)) {
                 // VPN/Proxy detected, skip location check
-                console.log('VPN/Proxy detected, skipping location check');
                 setIsGettingLocation(false);
                 setHasLocationPermission(false);
             } else if (isRefresh && navigator.geolocation && (!vpnStatus || (!vpnStatus.isVPN && !vpnStatus.isProxy))) {
@@ -1144,7 +1129,7 @@ const AttendanceSession = ({ shared = false }) => {
             try {
                 // Create an API instance without auth headers for public access
                 const publicApi = axios.create({
-                    baseURL: '/api',
+                    baseURL: getApiBaseURL(),
                     headers: {
                         'Content-Type': 'application/json'
                     },
@@ -1351,20 +1336,21 @@ const AttendanceSession = ({ shared = false }) => {
 
     // Helper function to get location with fallback options and retry mechanism
     const getLocationWithFallback = async (options = {}, retryCount = 0) => {
-        const maxRetries = 3;
-        const baseTimeout = 12000; // Increased base timeout to 12 seconds
-        const timeout = baseTimeout + (retryCount * 3000); // Increase timeout with each retry
+        const maxRetries = 2; // Reduced retries since we have better fallback
+        // Increased timeouts: High accuracy GPS can take 20-30 seconds in some environments
+        const baseTimeout = 20000; // 20 seconds base timeout for high accuracy
+        const timeout = baseTimeout + (retryCount * 5000); // Increase timeout with each retry: 20s, 25s, 30s
         
         const defaultOptions = {
             enableHighAccuracy: true,
             timeout: timeout,
-            maximumAge: retryCount > 0 ? 120000 : 0 // Use cached location on retry (2 minutes)
+            maximumAge: retryCount > 0 ? 300000 : 60000 // Use cached location on retry (5 minutes), 1 minute on first attempt
         };
 
         const fallbackOptions = {
             enableHighAccuracy: false, // Giảm độ chính xác để tăng tốc độ
-            timeout: timeout + 5000, // Even longer timeout for fallback
-            maximumAge: retryCount > 0 ? 300000 : 120000 // 5 minutes cache on retry, 2 minutes on first attempt
+            timeout: 15000, // 15 seconds for fallback (faster, less accurate)
+            maximumAge: retryCount > 0 ? 600000 : 300000 // 10 minutes cache on retry, 5 minutes on first attempt
         };
 
         try {
@@ -1393,20 +1379,23 @@ const AttendanceSession = ({ shared = false }) => {
                             console.warn('Location accuracy is low:', accuracy, 'meters');
                         }
                         
-                        console.log(`Location obtained successfully (attempt ${retryCount + 1})`);
                         resolve(position);
                     },
                     (error) => {
-                        console.error(`High accuracy location error (attempt ${retryCount + 1}):`, error);
+                        // Handle timeout gracefully - it's not necessarily an error, just slow GPS
+                        if (error.code === 3) { // TIMEOUT
+                            console.warn(`High accuracy location timeout (attempt ${retryCount + 1}/${maxRetries + 1}) - will try fallback`);
+                        } else {
+                            console.warn(`High accuracy location error (attempt ${retryCount + 1}/${maxRetries + 1}):`, error.message || error);
+                        }
                         reject(error);
                     },
                     { ...defaultOptions, ...options }
                 );
             });
         } catch (error) {
-            console.log(`High accuracy location failed (attempt ${retryCount + 1}), trying fallback...`, error);
-            
-            // Nếu thất bại, thử với fallback options
+            // If timeout or other error, immediately try fallback (don't wait)
+            // Nếu thất bại, thử với fallback options ngay lập tức
             try {
                 return await new Promise((resolve, reject) => {
                     navigator.geolocation.getCurrentPosition(
@@ -1427,26 +1416,36 @@ const AttendanceSession = ({ shared = false }) => {
                                 return;
                             }
                             
-                            console.log(`Fallback location obtained (attempt ${retryCount + 1}) with accuracy:`, accuracy, 'meters');
+                            // Log that we used fallback (lower accuracy)
+                            if (error.code === 3) {
+                                console.info('Using fallback location (lower accuracy) due to high accuracy timeout');
+                            }
+                            
                             resolve(position);
                         },
-                        (error) => {
-                            console.error(`Fallback location error (attempt ${retryCount + 1}):`, error);
-                            reject(error);
+                        (fallbackError) => {
+                            // Handle fallback timeout/error
+                            if (fallbackError.code === 3) {
+                                console.warn(`Fallback location timeout (attempt ${retryCount + 1}/${maxRetries + 1})`);
+                            } else {
+                                console.warn(`Fallback location error (attempt ${retryCount + 1}/${maxRetries + 1}):`, fallbackError.message || fallbackError);
+                            }
+                            reject(fallbackError);
                         },
                         { ...fallbackOptions, ...options }
                     );
                 });
             } catch (fallbackError) {
-                console.error(`Both location attempts failed (attempt ${retryCount + 1}):`, fallbackError);
-                
                 // Retry with exponential backoff if we haven't exceeded max retries
                 if (retryCount < maxRetries) {
-                    console.log(`Retrying location detection (${retryCount + 1}/${maxRetries}) in ${2000 * (retryCount + 1)}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1))); // Exponential backoff
+                    const backoffDelay = 1000 * (retryCount + 1); // 1s, 2s backoff
+                    console.info(`Retrying location after ${backoffDelay}ms delay (attempt ${retryCount + 2}/${maxRetries + 1})`);
+                    await new Promise(resolve => setTimeout(resolve, backoffDelay));
                     return getLocationWithFallback(options, retryCount + 1);
                 }
                 
+                // All attempts failed
+                console.error(`All location attempts failed after ${maxRetries + 1} tries`);
                 throw fallbackError;
             }
         }
@@ -1572,7 +1571,6 @@ const AttendanceSession = ({ shared = false }) => {
     // Open face verification modal
     const openFaceVerificationModal = async () => {
         try {
-            console.log('Opening face verification modal...');
             setShowFaceVerificationModal(true);
             setFaceVerificationStep('preview');
             setFaceVerificationProgress(0);
@@ -1585,7 +1583,6 @@ const AttendanceSession = ({ shared = false }) => {
             
             // Start camera asynchronously
             await startFaceVerificationCamera();
-            console.log('Face verification camera started successfully');
         } catch (error) {
             console.error('Error in openFaceVerificationModal:', error);
             setFaceVerificationStep('error');
@@ -1901,22 +1898,50 @@ const AttendanceSession = ({ shared = false }) => {
         try {
             setFaceVerificationProgress(85);
             
-            // Upload profile image for monitoring
+            // Upload profile image for monitoring (non-blocking with retry mechanism)
+            // This is done asynchronously to not delay attendance submission, but ensures image is sent
             if (profileImage) {
-                try {
-                    const formData = new FormData();
-                    formData.append('file', profileImage, 'profile.jpg');
-                    formData.append('sessionId', id);
-                    formData.append('dataType', 'webcam');
-
-                    await api.post('/monitoring/data?attendance=true', formData, {
-                        headers: {
-                            'Content-Type': 'multipart/form-data'
+                // Upload with retry mechanism to ensure image is sent
+                const uploadProfileImageWithRetry = async (imageBlob, maxRetries = 3, retryDelay = 2000) => {
+                    let lastError = null;
+                    
+                    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                        try {
+                            const formData = new FormData();
+                            formData.append('file', imageBlob, 'profile.jpg');
+                            formData.append('sessionId', id);
+                            formData.append('dataType', 'webcam');
+                            
+                            await api.post('/monitoring/data?attendance=true', formData, {
+                                headers: {
+                                    'Content-Type': 'multipart/form-data'
+                                },
+                                timeout: 15000 // 15 second timeout for upload
+                            });
+                            
+                            // Success - image uploaded
+                            console.log(`Profile image uploaded successfully (attempt ${attempt}/${maxRetries})`);
+                            return true;
+                        } catch (uploadError) {
+                            lastError = uploadError;
+                            console.warn(`Profile image upload attempt ${attempt}/${maxRetries} failed:`, uploadError);
+                            
+                            // If not the last attempt, wait before retrying
+                            if (attempt < maxRetries) {
+                                await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
+                            }
                         }
-                    });
-                } catch (uploadError) {
-                    console.error('Error uploading profile image:', uploadError);
-                }
+                    }
+                    
+                    // All retries failed - log error but don't block attendance
+                    console.error('Profile image upload failed after all retries:', lastError);
+                    return false;
+                };
+                
+                // Start upload asynchronously (non-blocking)
+                uploadProfileImageWithRetry(profileImage).catch(err => {
+                    console.error('Unexpected error in profile image upload retry mechanism:', err);
+                });
             }
 
             // Get device fingerprint
@@ -1947,7 +1972,8 @@ const AttendanceSession = ({ shared = false }) => {
 
             // Face verification retry mechanism
             const MAX_FACE_VERIFICATION_RETRIES = 1;
-            const FACE_VERIFICATION_TIMEOUT = 5000;
+            // Removed FACE_VERIFICATION_TIMEOUT - use only API timeout to avoid conflicts
+            // API timeout is 60 seconds which is sufficient for processing
             let response;
             let currentAttempt = 0;
             let verificationSuccess = false;
@@ -1985,22 +2011,16 @@ const AttendanceSession = ({ shared = false }) => {
                         setFaceVerificationProgress(80);
                         setFaceVerificationStep('verifying');
                         
-                        // Wait 5 seconds before retry
-                        for (let i = 5; i > 0; i--) {
+                        // Wait 3 seconds before retry (reduced from 5 seconds)
+                        for (let i = 3; i > 0; i--) {
                             setFaceVerificationMessage(`Khuôn mặt không khớp. Thử lại sau ${i} giây...`);
                             await new Promise(resolve => setTimeout(resolve, 1000));
                         }
                     }
 
-                    const timeoutPromise = new Promise((_, reject) => {
-                        setTimeout(() => reject(new Error('Timeout')), FACE_VERIFICATION_TIMEOUT);
-                    });
-
-                    // Tăng timeout lên 60 giây để xử lý khi có nhiều request đồng thời
-                    response = await Promise.race([
-                        api.post(`/sessions/${id}/attend`, attendanceData, { timeout: 60000 }),
-                        timeoutPromise
-                    ]);
+                    // Use only API timeout (60 seconds) - removed Promise.race with 5 second timeout
+                    // This prevents premature timeout when server is still processing
+                    response = await api.post(`/sessions/${id}/attend`, attendanceData, { timeout: 60000 });
 
                     verificationSuccess = true;
                     break;
@@ -2033,33 +2053,74 @@ const AttendanceSession = ({ shared = false }) => {
                 
                 trackAttendance(id, 'normal');
 
-                // Initialize monitoring data
-                try {
-                    const monitoringOptions = session.monitoring_options || {};
-                    if (locationData && monitoringOptions.location?.enabled) {
-                        await api.post('/monitoring/data/text?attendance=true', {
-                            sessionId: id,
-                            dataType: 'location',
-                            content: JSON.stringify({
-                                location: `${locationData.latitude}, ${locationData.longitude}`,
-                                batteryLevel: navigator.getBattery ? (await navigator.getBattery()).level * 100 : null,
-                                networkStatus: navigator.connection ? navigator.connection.effectiveType : 'unknown'
-                            })
-                        });
-                    }
-
-                    await api.post('/monitoring/data/text?attendance=true', {
-                        sessionId: id,
-                        dataType: 'activity',
-                        content: JSON.stringify({
-                            type: 'attendance',
-                            status: 'active',
-                            device: navigator.userAgent
-                        })
-                    });
-                } catch (monitoringError) {
-                    console.error('Error initializing monitoring data:', monitoringError);
+                // Ensure profile image is uploaded after attendance success
+                // This is a fallback in case the initial upload is still in progress
+                if (profileImage) {
+                    // Wait a bit for initial upload to complete, then verify/retry if needed
+                    setTimeout(async () => {
+                        try {
+                            // Try to verify if image was uploaded by checking if we can upload again
+                            // (Backend will handle duplicate gracefully)
+                            const formData = new FormData();
+                            formData.append('file', profileImage, 'profile.jpg');
+                            formData.append('sessionId', id);
+                            formData.append('dataType', 'webcam');
+                            
+                            await api.post('/monitoring/data?attendance=true', formData, {
+                                headers: {
+                                    'Content-Type': 'multipart/form-data'
+                                },
+                                timeout: 10000
+                            });
+                            console.log('Profile image verified/uploaded after attendance success');
+                        } catch (verifyError) {
+                            // If verification fails, it's likely already uploaded or will be retried
+                            console.log('Profile image verification (non-critical):', verifyError);
+                        }
+                    }, 3000); // Wait 3 seconds after attendance success
                 }
+
+                // Initialize monitoring data (non-blocking - don't wait for it)
+                // These are done asynchronously to not delay user feedback
+                (async () => {
+                    try {
+                        const monitoringOptions = session.monitoring_options || {};
+                        if (locationData && monitoringOptions.location?.enabled) {
+                            // Get battery level asynchronously (non-blocking)
+                            let batteryLevel = null;
+                            try {
+                                if (navigator.getBattery) {
+                                    const battery = await navigator.getBattery();
+                                    batteryLevel = battery.level * 100;
+                                }
+                            } catch (batteryError) {
+                                // Ignore battery errors
+                            }
+
+                            api.post('/monitoring/data/text?attendance=true', {
+                                sessionId: id,
+                                dataType: 'location',
+                                content: JSON.stringify({
+                                    location: `${locationData.latitude}, ${locationData.longitude}`,
+                                    batteryLevel: batteryLevel,
+                                    networkStatus: navigator.connection ? navigator.connection.effectiveType : 'unknown'
+                                })
+                            }, { timeout: 5000 }).catch(err => console.error('Error posting location data:', err));
+                        }
+
+                        api.post('/monitoring/data/text?attendance=true', {
+                            sessionId: id,
+                            dataType: 'activity',
+                            content: JSON.stringify({
+                                type: 'attendance',
+                                status: 'active',
+                                device: navigator.userAgent
+                            })
+                        }, { timeout: 5000 }).catch(err => console.error('Error posting activity data:', err));
+                    } catch (monitoringError) {
+                        console.error('Error initializing monitoring data:', monitoringError);
+                    }
+                })();
 
                 // If student registered as duty student, reload session data to show updated badge
                 if (isDutyStudent) {
@@ -2080,7 +2141,6 @@ const AttendanceSession = ({ shared = false }) => {
                                 }
                             }
                             setSession(sessionData);
-                            console.log('Session data reloaded after duty student registration');
                         }
                     } catch (reloadError) {
                         console.error('Error reloading session data:', reloadError);
@@ -2109,55 +2169,29 @@ const AttendanceSession = ({ shared = false }) => {
     };
 
     const handleSubmitAttendance = async (e) => {
-        console.log('=== handleSubmitAttendance STARTED ===');
-        console.log('Event:', e);
-        console.log('Current state:', {
-            submitting,
-            success,
-            error,
-            faceVerificationEnabled,
-            hasFaceSample,
-            isDutyStudent,
-            session: session ? { id: session.id, status: session.status } : null,
-            currentAttendanceWindow,
-            hasLocationPermission,
-            vpnStatus
-        });
-
         e.preventDefault();
         setError('');
         setSuccess('');
 
         try {
-            console.log('Setting submitting to true...');
             setSubmitting(true);
 
             // Check VPN status before allowing attendance
-            console.log('Checking VPN status...', vpnStatus);
             if (vpnStatus && (vpnStatus.isVPN || vpnStatus.isProxy)) {
-                console.log('VPN/Proxy detected, blocking attendance');
                 setError(vpnStatus.message);
                 showAlert(t('attendanceSession.vpnDetection.mustDisable'), 'danger');
                 setSubmitting(false);
                 return;
             }
-            console.log('VPN check passed');
 
             // Check if location is required but permission is denied
-            console.log('Checking location permission...', {
-                locationRequired: session.monitoring_options?.location?.required,
-                enforcement: session.monitoring_options?.location?.enforcement,
-                hasLocationPermission
-            });
             if (session.monitoring_options?.location?.required &&
                 session.monitoring_options?.location?.enforcement === 'immediate' &&
                 !hasLocationPermission) {
-                console.log('Location permission denied, blocking attendance');
                 setError('Buổi học này yêu cầu quyền truy cập vị trí. Vui lòng cấp quyền và làm mới trang.');
                 setSubmitting(false);
                 return;
             }
-            console.log('Location permission check passed');
 
             // Get fresh location data before checking geofence
             let currentLocationData = locationData;
@@ -2181,16 +2215,10 @@ const AttendanceSession = ({ shared = false }) => {
             }
 
             // Check geofence restriction if enabled - STRICTLY ENFORCE THIS
-            console.log('Checking geofence...', {
-                locationEnabled: session.monitoring_options?.location?.enabled,
-                geofenceEnabled: session.monitoring_options?.location?.geofence?.enabled,
-                currentLocationData
-            });
             if (session.monitoring_options?.location?.enabled &&
                 session.monitoring_options?.location?.geofence?.enabled) {
 
                 if (!currentLocationData) {
-                    console.log('No location data, blocking attendance');
                     setError(t('attendanceSession.location.cannotDetermine'));
                     setSubmitting(false);
                     return;
@@ -2198,23 +2226,12 @@ const AttendanceSession = ({ shared = false }) => {
 
                 const geofence = session.monitoring_options.location.geofence;
                 const isWithin = isWithinGeofence(currentLocationData, geofence);
-                console.log('Geofence check result:', {
-                    isWithin,
-                    currentLocation: currentLocationData,
-                    geofence: {
-                        latitude: geofence.coordinates?.latitude,
-                        longitude: geofence.coordinates?.longitude,
-                        radius: geofence.radius
-                    }
-                });
                 if (!isWithin) {
-                    console.log('User is outside geofence, blocking attendance');
                     setError(`Bạn đang ở ngoài phạm vi cho phép (${geofence.radius}m). Vui lòng di chuyển đến địa điểm buổi học để điểm danh.`);
                     showAlert('Không thể điểm danh: Bạn đang ở ngoài phạm vi cho phép.', 'danger');
                     setSubmitting(false);
                     return;
                 }
-                console.log('Geofence check passed');
 
                 // Double-check with a second location request to prevent spoofing
                 try {
@@ -2235,7 +2252,6 @@ const AttendanceSession = ({ shared = false }) => {
                     currentLocationData = secondCheck;
                     setLocationData(currentLocationData);
                     setLocationPermissionDenied(false); // Reset permission denied state
-                    console.log('Second location check passed, geofence verified');
                 } catch (locError) {
                     console.error('Error during second location check:', locError);
                     // Don't continue if we can't verify location with a second check
@@ -2244,25 +2260,15 @@ const AttendanceSession = ({ shared = false }) => {
                     return;
                 }
             } else {
-                console.log('Geofence check skipped (not enabled)');
             }
 
             // Kiểm tra lại khung giờ điểm danh hiện tại để đảm bảo thông tin mới nhất
-            console.log('Checking attendance window...', {
-                currentAttendanceWindow,
-                sessionDate: session?.date,
-                sessionStartTime: session?.start_time,
-                sessionEndTime: session?.end_time,
-                isDutyStudent
-            });
             
             let attendanceStatus = currentAttendanceWindow || checkAttendanceWindow(session);
-            console.log('Initial attendance status:', attendanceStatus);
 
             // If user selected "ra ca trực giữa giờ", allow attendance in "during session" window
             // (120 phút sau giờ bắt đầu và 120 phút trước giờ kết thúc)
             if (!attendanceStatus.allowed && isDutyStudent) {
-                console.log('User selected duty student, checking during session window...');
                 
                 try {
                     const now = new Date();
@@ -2293,22 +2299,14 @@ const AttendanceSession = ({ shared = false }) => {
                     const duringEnd = new Date(sessionEndTime);
                     duringEnd.setMinutes(duringEnd.getMinutes() - minutesBeforeEnd);
                     
-                    console.log('During session window:', {
-                        duringStart: duringStart.toLocaleTimeString(),
-                        duringEnd: duringEnd.toLocaleTimeString(),
-                        now: now.toLocaleTimeString()
-                    });
-                    
                     // Check if current time is within the during_session window
                     if (now >= duringStart && now <= duringEnd) {
-                        console.log('User is within during session window, allowing attendance');
                         attendanceStatus = {
                             allowed: true,
                             type: 'during',
                             message: t('attendanceSession.attendanceWindow.inDuringWindow')
                         };
                     } else {
-                        console.log('User is outside during session window even with duty student selection');
                     }
                 } catch (dutyError) {
                     console.error('Error checking duty student attendance window:', dutyError);
@@ -2316,16 +2314,13 @@ const AttendanceSession = ({ shared = false }) => {
             }
 
             if (!attendanceStatus.allowed) {
-                console.log('Attendance not allowed:', attendanceStatus.message);
                 setError(attendanceStatus.message);
                 setSubmitting(false);
                 return;
             }
-            console.log('Attendance window check passed');
 
             // Check if face verification is enabled
             if (faceVerificationEnabled) {
-                console.log('Face verification enabled, checking exempt/allowed status...');
                 
                 // Check if user is exempt or if face verification is required
                 try {
@@ -2334,18 +2329,15 @@ const AttendanceSession = ({ shared = false }) => {
                     if (statusResponse.data.success) {
                         const { required, exempt, hasFaceSample } = statusResponse.data.data;
                         
-                        console.log('Face verification status:', { required, exempt, hasFaceSample });
                         
                         // If user is exempt, skip face verification
                         if (exempt || !required) {
-                            console.log('User is exempt from face verification, proceeding directly');
                             // Continue with attendance submission without face verification
                             // The photo will be captured in background
                             let capturedPhoto = null;
                             try {
                                 capturedPhoto = await captureBackgroundPhoto();
                                 if (capturedPhoto) {
-                                    console.log('Background photo captured successfully');
                                 }
                             } catch (photoError) {
                                 console.warn('Failed to capture background photo:', photoError);
@@ -2393,7 +2385,6 @@ const AttendanceSession = ({ shared = false }) => {
                                                 'Content-Type': 'multipart/form-data'
                                             }
                                         });
-                                        console.log('Profile image uploaded to monitoring data after attendance');
                                     } catch (uploadError) {
                                         console.error('Error uploading profile image:', uploadError);
                                     }
@@ -2451,14 +2442,11 @@ const AttendanceSession = ({ shared = false }) => {
                         if (hasFaceSample === false || hasFaceSample === null) {
                             // Check face sample status before opening modal
                             if (hasFaceSample === null) {
-                                console.log('Face sample status is null, checking now...');
                                 await checkFaceSampleStatus();
-                                console.log('Face sample status after check:', hasFaceSample);
                             }
                             
                             if (hasFaceSample === false) {
                                 // User doesn't have face sample - show modal with instruction
-                                console.log('User does not have face sample, showing required modal');
                                 setShowFaceSampleRequiredModal(true);
                                 setSubmitting(false);
                                 return;
@@ -2466,10 +2454,8 @@ const AttendanceSession = ({ shared = false }) => {
                         }
                         
                         // User has face sample and verification is required - open face verification modal
-                        console.log('User has face sample and verification is required, opening face verification modal...');
                         try {
                             openFaceVerificationModal();
-                            console.log('Face verification modal opened successfully');
                         } catch (error) {
                             console.error('Error opening face verification modal:', error);
                             setError('Không thể mở cửa sổ xác minh khuôn mặt. Vui lòng thử lại.');
@@ -2480,28 +2466,22 @@ const AttendanceSession = ({ shared = false }) => {
                 } catch (statusError) {
                     console.error('Error checking face verification status:', statusError);
                     // Fallback to old behavior if status check fails
-                    console.log('Falling back to default face verification check...');
                     
                     // Check face sample status before opening modal
                     if (hasFaceSample === null) {
-                        console.log('Face sample status is null, checking now...');
                         await checkFaceSampleStatus();
-                        console.log('Face sample status after check:', hasFaceSample);
                     }
 
                     if (hasFaceSample === false) {
                         // User doesn't have face sample - show modal with instruction
-                        console.log('User does not have face sample, showing required modal');
                         setShowFaceSampleRequiredModal(true);
                         setSubmitting(false);
                         return;
                     }
 
                     // User has face sample - open face verification modal
-                    console.log('User has face sample, opening face verification modal...');
                     try {
                         openFaceVerificationModal();
-                        console.log('Face verification modal opened successfully');
                     } catch (error) {
                         console.error('Error opening face verification modal:', error);
                         setError('Không thể mở cửa sổ xác minh khuôn mặt. Vui lòng thử lại.');
@@ -2511,14 +2491,12 @@ const AttendanceSession = ({ shared = false }) => {
                 }
             } else {
                 // Face verification is disabled - capture photo in background and submit attendance
-                console.log('Face verification disabled, capturing photo in background...');
                 
                 // Capture photo in background (without showing modal)
                 let capturedPhoto = null;
                 try {
                     capturedPhoto = await captureBackgroundPhoto();
                     if (capturedPhoto) {
-                        console.log('Background photo captured successfully');
                     } else {
                         console.warn('Failed to capture background photo, continuing without photo');
                     }
@@ -2570,7 +2548,6 @@ const AttendanceSession = ({ shared = false }) => {
                                     'Content-Type': 'multipart/form-data'
                                 }
                             });
-                            console.log('Profile image uploaded to monitoring data after attendance');
                         } catch (uploadError) {
                             console.error('Error uploading profile image:', uploadError);
                             // Continue even if upload fails
@@ -2615,7 +2592,6 @@ const AttendanceSession = ({ shared = false }) => {
                         
                         // Reload session data again to show the newly enabled "Trong buổi học" badge
                         await fetchSessionData(true);
-                        console.log('Session data reloaded after duty student registration (no face verification)');
                     }
                     
                     // Redirect to monitor page after 2 seconds
@@ -2642,18 +2618,6 @@ const AttendanceSession = ({ shared = false }) => {
             trackError('attendance_error', error.response?.data?.message || error.message);
 
             // Log the complete error response for debugging
-            console.log('Error details:', {
-                status: error.response?.status,
-                statusText: error.response?.statusText,
-                data: error.response?.data,
-                headers: error.response?.headers,
-                config: {
-                    url: error.config?.url,
-                    method: error.config?.method,
-                    data: error.config?.data
-                }
-            });
-
             // Show detailed error message from server if available
             let errorMessage = t('attendanceSession.errors.generic');
 
@@ -2710,10 +2674,7 @@ const AttendanceSession = ({ shared = false }) => {
                 console.error('Validation errors:', error.response.data.errors);
             }
         } finally {
-            console.log('=== handleSubmitAttendance FINALLY ===');
-            console.log('Setting submitting to false');
             setSubmitting(false);
-            console.log('=== handleSubmitAttendance ENDED ===');
         }
     };
 
@@ -3535,7 +3496,7 @@ const AttendanceSession = ({ shared = false }) => {
 
                         </div>
                         <div className="card-footer bg-white text-center border-0">
-                            <small className="text-muted">PCTU IMS v2.0.0</small>
+                            <small className="text-muted">PCTU-IMS v2.1.2</small>
                         </div>
                     </div>
                 </Col>

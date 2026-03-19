@@ -4,7 +4,6 @@ import LanguageDetector from 'i18next-browser-languagedetector';
 
 import translationVI from './locales/vi/translation.json';
 import translationEN from './locales/en/translation.json';
-import translationHI from './locales/hi/translation.json';
 
 const resources = {
   vi: {
@@ -12,9 +11,6 @@ const resources = {
   },
   en: {
     translation: translationEN
-  },
-  hi: {
-    translation: translationHI
   }
 };
 

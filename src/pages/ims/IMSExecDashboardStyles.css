@@ -1,0 +1,529 @@
+/* IMS Exec Dashboard - Màu nhẹ nhàng, không nền, có chart (theo tham chiếu ảnh) */
+.ims-exec-wrap {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #ffffff;
+  min-height: 100vh;
+  padding: 24px 0 48px;
+}
+
+.ims-exec-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.ims-exec-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0;
+}
+
+.ims-exec-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ims-exec-updated {
+  font-size: 0.8125rem;
+  color: #64748b;
+}
+
+/* KPI cards - pastel, bo tròn, shadow nhẹ */
+.ims-exec-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+.ims-exec-kpi-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 22px 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.ims-exec-kpi-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+
+.ims-exec-kpi-card a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.ims-exec-kpi-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.35rem;
+  margin-bottom: 12px;
+  color: #fff;
+}
+
+.ims-exec-kpi-label {
+  font-size: 0.8125rem;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.ims-exec-kpi-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+/* Widget Sức khỏe server */
+/* Hai cột: Sức khỏe server | Hoạt động gần đây */
+.ims-exec-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 28px;
+  align-items: start;
+}
+@media (max-width: 992px) {
+  .ims-exec-two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ims-exec-server-health {
+  min-width: 0;
+}
+
+.ims-exec-server-health-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.ims-exec-hostname {
+  font-size: 0.8rem;
+  margin-top: 2px;
+}
+
+.ims-exec-server-health-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.ims-exec-server-health-badge--healthy {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.ims-exec-server-health-badge--warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.ims-exec-server-health-badge--danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.ims-exec-server-health-badge--offline {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+/* Host stats – CPU, Memory, Network realtime (nội dung trong Sức khỏe server) */
+
+.ims-exec-host-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+@media (max-width: 768px) {
+  .ims-exec-host-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ims-exec-host-stats-card {
+  background: #fff;
+  border-radius: 14px;
+  padding: 18px 20px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* Nháy cảnh báo (vàng nhẹ) */
+@keyframes ims-exec-blink-warning {
+  0%, 100% {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    background-color: #fff;
+    border-color: #e2e8f0;
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.25);
+    background-color: rgba(254, 249, 195, 0.25);
+    border-color: rgba(250, 204, 21, 0.4);
+  }
+}
+
+/* Nháy nguy hiểm (đỏ nhẹ) */
+@keyframes ims-exec-blink-danger {
+  0%, 100% {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    background-color: #fff;
+    border-color: #e2e8f0;
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.2);
+    background-color: rgba(254, 226, 226, 0.2);
+    border-color: rgba(248, 113, 113, 0.35);
+  }
+}
+
+.ims-exec-host-stats-card--warning {
+  animation: ims-exec-blink-warning 2s ease-in-out infinite;
+}
+
+.ims-exec-host-stats-card--danger {
+  animation: ims-exec-blink-danger 2s ease-in-out infinite;
+}
+
+.ims-exec-host-stats-offline {
+  padding: 20px;
+  background: #fef3c7;
+  border-color: #fcd34d;
+}
+
+.ims-exec-host-stats-hint code {
+  background: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+.ims-exec-host-stats-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 1.1rem;
+  margin-bottom: 10px;
+}
+
+.ims-exec-host-stats-label {
+  font-size: 0.8125rem;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.ims-exec-host-stats-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.ims-exec-host-stats-value.ims-exec-host-stats-network {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.ims-exec-host-stats-bar {
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.ims-exec-host-stats-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.ims-exec-host-stats-extra {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-top: 6px;
+}
+
+/* Hoạt động gần đây */
+.ims-exec-recent-activity {
+  min-width: 0;
+}
+
+.ims-exec-recent-activity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ims-exec-recent-activity-link {
+  font-size: 0.875rem;
+  color: #2563eb;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ims-exec-recent-activity-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.ims-exec-recent-activity-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px 20px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.ims-exec-recent-activity-card.ims-exec-recent-activity-error {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.ims-exec-recent-activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.ims-exec-recent-activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.ims-exec-recent-activity-item:last-child {
+  border-bottom: none;
+}
+
+.ims-exec-recent-activity-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #7dd3fc;
+  margin-top: 6px;
+}
+
+.ims-exec-recent-activity-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ims-exec-recent-activity-user {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.ims-exec-recent-activity-desc {
+  font-size: 0.8125rem;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ims-exec-recent-activity-time {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+/* Chart cards */
+.ims-exec-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.ims-exec-chart-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 20px 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.ims-exec-chart-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #334155;
+  margin: 0 0 16px 0;
+}
+
+/* API list section */
+.ims-exec-apis-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #334155;
+  margin: 0 0 16px 0;
+}
+
+.ims-exec-api-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ims-exec-api-list-charts {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 1200px) {
+  .ims-exec-api-list-charts {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .ims-exec-api-list-charts {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.ims-exec-api-card {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.ims-exec-api-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  transition: background 0.15s ease;
+}
+
+.ims-exec-api-card-header:hover {
+  background: #f8fafc;
+}
+
+.ims-exec-api-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.ims-exec-api-badge {
+  font-size: 0.6875rem;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.ims-exec-api-badge.ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.ims-exec-api-badge.err {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.ims-exec-api-badge.forbidden {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.ims-exec-api-body {
+  padding: 10px 14px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 0.75rem;
+  color: #475569;
+  max-height: 220px;
+  overflow: auto;
+}
+
+/* Phần chart trong mỗi API card */
+.ims-exec-api-chart-body {
+  padding: 10px 14px;
+  min-height: 100px;
+}
+
+.ims-exec-api-chart-wrap {
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.ims-exec-api-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.ims-exec-api-body .ims-exec-api-summary {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.ims-exec-api-summary span {
+  display: inline-block;
+  padding: 2px 0;
+}
+
+/* Loading / empty */
+.ims-exec-loading {
+  text-align: center;
+  padding: 48px 24px;
+  color: #64748b;
+}
+
+.ims-exec-empty {
+  color: #94a3b8;
+  font-size: 0.8125rem;
+  padding: 4px 0;
+}

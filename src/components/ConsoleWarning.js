@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import i18n from '../i18n/config';
 
 const ConsoleWarning = () => {
   const hasWarnedRef = useRef(false);
@@ -23,6 +24,11 @@ const ConsoleWarning = () => {
       return; // Đã hiển thị rồi, không hiển thị lại
     }
 
+    // Lấy translations từ i18n
+    const title = i18n.t('consoleWarning.title');
+    const message = i18n.t('consoleWarning.message');
+    const footer = i18n.t('consoleWarning.footer');
+
     // Tạo cảnh báo với styling đặc biệt
     const separator = '═'.repeat(70);
     
@@ -31,19 +37,19 @@ const ConsoleWarning = () => {
     
     // Tiêu đề cảnh báo
     console.log(
-      '%c⚠️ DỪNG LẠI! ⚠️',
+      `%c⚠️ ${title} ⚠️`,
       'font-size: 28px; font-weight: bold; color: #ff0000; text-shadow: 2px 2px 4px rgb(255, 255, 255); padding: 15px; background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%); border-radius: 10px; display: block; margin: 10px 0;'
     );
     
     // Nội dung cảnh báo
     console.log(
-      '%cĐây là một tính năng của trình duyệt dành cho các nhà phát triển. Nếu ai đó bảo bạn sao chép-dán nội dung nào đó vào đây để bật một tính năng của hệ thống hoặc "hack" truy cập dữ liệu trái phép, thì đó là hành vi lừa đảo và vi phạm pháp luật.',
+      `%c${message}`,
       'font-size: 16px; line-height: 1.8; color: #333; padding: 15px; background: #fff3cd; border-left: 5px solid #ffc107; margin: 10px 0; border-radius: 5px;'
     );
     
     // Footer cảnh báo
     console.log(
-      '%c⚠️ Hãy cẩn thận và không bao giờ chạy code từ những nguồn không đáng tin cậy!',
+      `%c⚠️ ${footer}`,
       'font-size: 14px; color: #856404; font-weight: bold; padding: 10px; background: #ffeaa7; border-radius: 5px; margin: 10px 0;'
     );
     

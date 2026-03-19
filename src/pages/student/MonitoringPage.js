@@ -9,6 +9,7 @@ import axios from 'axios';
 import '../../styles/modern-ui.css';
 import usePageTitle from '../../hooks/usePageTitle';
 import { useTranslation } from 'react-i18next';
+import { getApiBaseURL } from '../../utils/api';
 
 const MonitoringPage = () => {
   const { t } = useTranslation();
@@ -243,10 +244,6 @@ const MonitoringPage = () => {
     
     const dutyStudents = session.monitoring_options.attendance.during_session.duty_students;
     
-    // Debug logging
-    console.log('Checking duty student status:');
-    console.log('Current user:', { id: currentUser.id, student_id: currentUser.student_id, username: currentUser.username });
-    console.log('Duty students:', dutyStudents);
     
     const isDuty = dutyStudents.some(dutyStudent => 
       dutyStudent.id === currentUser.id || 
@@ -256,7 +253,6 @@ const MonitoringPage = () => {
       dutyStudent.id === currentUser.student_id
     );
     
-    console.log('Is duty student:', isDuty);
     return isDuty;
   };
 
@@ -331,11 +327,6 @@ const MonitoringPage = () => {
             // Error parsing monitoring_options
             parsedSessionData.monitoring_options = null;
           }
-        }
-        
-        // Log duty students for debugging
-        if (parsedSessionData.monitoring_options?.attendance?.during_session?.duty_students) {
-          console.log('Duty students updated:', parsedSessionData.monitoring_options.attendance.during_session.duty_students);
         }
         
         // Update session state silently - make sure monitoring_options is fully replaced
@@ -667,7 +658,6 @@ const MonitoringPage = () => {
     
     if (reloadParam && session) {
       // Force reload session data to get updated duty_students list
-      console.log('Force reloading session data due to reload parameter');
       fetchSessionDataSilently();
       
       // Clean up the reload parameter from URL
@@ -867,7 +857,6 @@ const MonitoringPage = () => {
       // If continuous mode is enabled, setup video streaming
       if (session.monitoring_options?.webcam?.continuous) {
         // In a real implementation, we would setup video streaming here
-        console.log('Continuous webcam monitoring enabled');
       }
     }
     
@@ -1154,7 +1143,7 @@ const MonitoringPage = () => {
       
       // Create a separate axios instance for file upload to avoid Content-Type conflicts
       const uploadApi = axios.create({
-        baseURL: '/api',
+        baseURL: getApiBaseURL(),
         withCredentials: true
       });
       
@@ -1836,7 +1825,7 @@ const MonitoringPage = () => {
                                     
                                   try {
                                     const token = localStorage.getItem('token');
-                                    const response = await fetch(`/api/monitoring/file/${file.id}/download`, {
+                                    const response = await fetch(`${getApiBaseURL()}/monitoring/file/${file.id}/download`, {
                                       headers: {
                                         'x-auth-token': token
                                       }

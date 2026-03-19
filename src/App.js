@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { AlertProvider } from './contexts/AlertContext';
+import { getDefaultDashboardRoute } from './utils/dashboardRedirect';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { trackPageView } from './utils/analytics';
+import activityTracker from './utils/activityTracker';
 import Navbar from './components/Navbar';
 import TopHeader from './components/TopHeader';
 import Loader from './components/Loader';
@@ -35,13 +37,19 @@ import StudentExams from './pages/student/StudentExams';
 import StudentGrades from './pages/student/StudentGrades';
 import StudentCourses from './pages/student/StudentCourses';
 import StudentSchedule from './pages/student/StudentSchedule';
+import StudentPerformancePage from './pages/student/StudentPerformancePage';
 import MonitoringDashboard from './pages/admin/MonitoringDashboard';
 // SessionHistory is now integrated into SessionDetail
 import StatisticsDetail from './pages/admin/StatisticsDetail';
 import AbsenceRequestManagement from './pages/admin/AbsenceRequestManagement';
 import EnhancedAttendanceReports from './pages/admin/EnhancedAttendanceReports';
 import DeviceManagement from './pages/admin/DeviceManagement';
+import FaceIDEvaluationPage from './pages/admin/FaceIDEvaluationPage';
+import AttendanceLogPage from './pages/admin/AttendanceLogPage';
 import SystemPage from './pages/superadmin/SystemPage';
+import AnnouncementManagement from './pages/superadmin/AnnouncementManagement';
+import AnnouncementView from './pages/public/AnnouncementView';
+import AnnouncementDetailPage from './pages/public/AnnouncementDetailPage';
 import HRDashboard from './pages/hr/HRDashboard';
 import EmployeesDemo from './pages/hr/Employees';
 import Profiles from './pages/hr/Profiles';
@@ -65,13 +73,13 @@ import Transport from './pages/hr/Transport';
 import ClinicLab from './pages/hr/ClinicLab';
 import LMSDashboard from './pages/lms/LMSDashboard';
 import LMSUserManagement from './pages/lms/LMSUserManagement';
+import LMSActivityLogsPage from './pages/lms/LMSActivityLogsPage';
+import LMSMailSettings from './pages/lms/LMSMailSettings';
 import Courses from './pages/lms/Courses';
 import LiveClass from './pages/lms/LiveClass';
 import Exams from './pages/lms/Exams';
 import QuestionBank from './pages/lms/QuestionBank';
 import Grades from './pages/lms/Grades';
-import Integrations from './pages/lms/Integrations';
-import SupportAnalytics from './pages/lms/SupportAnalytics';
 import ExamReports from './pages/lms/ExamReports';
 import TrainingDashboard from './pages/training/trainingDashboard';
 import Planning from './pages/training/Planning';
@@ -125,6 +133,25 @@ import Compliance from './pages/research/Compliance';
 import ResearchIntegrations from './pages/research/Integrations';
 import ResearchSupport from './pages/research/Support';
 import Researchers from './pages/research/Researchers';
+// Đảm bảo chất lượng - Lưu trữ minh chứng
+import QualityAssuranceDashboard from './pages/quality-assurance/QualityAssuranceDashboard';
+import EvidenceStorageManagement from './pages/quality-assurance/EvidenceStorageManagement';
+import EvidenceStorageStaffView from './pages/quality-assurance/EvidenceStorageStaffView';
+import QualityAssuranceReports from './pages/quality-assurance/QualityAssuranceReports';
+import EvidenceMailSettings from './pages/quality-assurance/EvidenceMailSettings';
+import QualityAssuranceUserManagement from './pages/quality-assurance/QualityAssuranceUserManagement';
+
+// Medical Records Module
+import MedicalRecordsManagement from './pages/medical-records/MedicalRecordsManagement';
+import MedicalRecordsDashboard from './pages/medical-records/MedicalRecordsDashboard';
+import CIChuaChamDiemPage from './pages/medical-records/CIChuaChamDiemPage';
+import ScoreScanningDashboard from './pages/score-scanning/ScoreScanningDashboard';
+import ScoreListDetail from './pages/score-scanning/ScoreListDetail';
+import ScoreCapturePage from './pages/score-scanning/ScoreCapturePage';
+import GeminiApiKeyPage from './pages/score-scanning/GeminiApiKeyPage';
+import ScoreScanningUserManagement from './pages/score-scanning/ScoreScanningUserManagement';
+import MedicalRecordsUserManagement from './pages/medical-records/MedicalRecordsUserManagement';
+import EnhancedMedicalRecordsReports from './pages/medical-records/EnhancedMedicalRecordsReports';
 import IMSExecDashboard from './pages/ims/IMSExecDashboard';
 import Tickets from './pages/ims/Tickets';
 import SLA from './pages/ims/SLA';
@@ -138,6 +165,12 @@ import PersonalTickets from './pages/personal/PersonalTickets';
 import PersonalTasks from './pages/personal/PersonalTasks';
 import PersonalNotifications from './pages/personal/PersonalNotifications';
 import ErrorPage from './pages/ErrorPage';
+import MeetingRoomBooking from './pages/receptionist/MeetingRoomBooking';
+import RoomManagement from './pages/receptionist/RoomManagement';
+import BookingApprovals from './pages/receptionist/BookingApprovals';
+import ReceptionistUserManagement from './pages/receptionist/ReceptionistUserManagement';
+import ReceptionistMailSettings from './pages/receptionist/ReceptionistMailSettings';
+import ReceptionistDashboard from './pages/receptionist/ReceptionistDashboard';
 
 
 // Protected route component
@@ -163,63 +196,105 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
 
     // Check if user has access based on role or module_roles
     const hasAccess = () => {
+        const path = window.location.pathname;
+
+        // Medical Records: admin toàn quyền, mod trừ quản lý người dùng, staff chỉ Dashboard / Reports / CI chưa chấm
+        if (path.startsWith('/medical-records')) {
+            if (currentUser.role === 'superadmin') return true;
+            const moduleRoles = currentUser.module_roles || [];
+            if (path === '/medical-records/users' || path.startsWith('/medical-records/users/'))
+                return moduleRoles.includes('medicalrecords_admin');
+            if (path === '/medical-records' || path === '/medical-records/')
+                return moduleRoles.includes('medicalrecords_admin') || moduleRoles.includes('medicalrecords_mod');
+            return moduleRoles.includes('medicalrecords_admin') || moduleRoles.includes('medicalrecords_mod') || moduleRoles.includes('medicalrecords_staff');
+        }
+
+        // Score Scanning: admin (toàn quyền + quản lý người dùng), mod (xem tất cả + API keys), staff (chỉ dữ liệu của mình)
+        if (path.startsWith('/score-scanning')) {
+            if (currentUser.role === 'superadmin') return true;
+            const moduleRoles = currentUser.module_roles || [];
+            const hasSS = moduleRoles.some(r => r && r.startsWith('score_scanning_'));
+            if (!hasSS) return false;
+            if (path === '/score-scanning/users' || path.startsWith('/score-scanning/users/'))
+                return moduleRoles.includes('score_scanning_admin');
+            return true;
+        }
+
+        // Lễ tân (Receptionist): receptionist_admin hoặc meeting_staff
+        if (path.startsWith('/receptionist')) {
+            if (currentUser.role === 'superadmin') return true;
+            const moduleRoles = currentUser.module_roles || [];
+            return moduleRoles.includes('receptionist_admin') || moduleRoles.includes('meeting_staff');
+        }
+
+        // Đảm bảo chất lượng: bắt buộc module_roles (qualityassurance_admin hoặc evidence_*, qastandard_*, ...), không cho vào chỉ vì role admin/staff
+        if (path.startsWith('/quality-assurance/')) {
+            if (currentUser.role === 'superadmin') return true;
+            const moduleRoles = currentUser.module_roles || [];
+            if (!Array.isArray(moduleRoles)) return false;
+            if (moduleRoles.includes('qualityassurance_admin')) return true;
+            const qaPrefixes = ['evidence_', 'qastandard_', 'qaselfassessment_', 'qatrainingprogram_', 'qakpi_'];
+            if (moduleRoles.some(r => qaPrefixes.some(p => r.startsWith(p)))) return true;
+            return false;
+        }
+
+        // IMS: chỉ superadmin hoặc có module_roles ims_*
+        if (path.startsWith('/ims/')) {
+            if (currentUser.role === 'superadmin') return true;
+            const moduleRoles = currentUser.module_roles || [];
+            return moduleRoles.some(r => r && r.startsWith('ims_'));
+        }
+
+        // HR: chỉ superadmin hoặc có module_roles hr_*
+        if (path.startsWith('/hr/')) {
+            if (currentUser.role === 'superadmin') return true;
+            const moduleRoles = currentUser.module_roles || [];
+            return moduleRoles.some(r => r && r.startsWith('hr_'));
+        }
+
+        // Admin / Staff (clinical): chỉ superadmin hoặc có clinical_* (không cho vào chỉ vì role admin/staff)
+        const isClinicalRoute = path.startsWith('/admin/') || path.startsWith('/staff/');
+        if (isClinicalRoute) {
+            if (currentUser.role === 'superadmin') return true;
+            const effectiveClinicalRole = getEffectiveClinicalRole();
+            if (!effectiveClinicalRole) return false;
+            if (effectiveClinicalRole === 'clinical_admin') {
+                if (allowedRoles && (allowedRoles.includes('superadmin') || allowedRoles.includes('admin') || allowedRoles.includes('staff')))
+                    return true;
+            }
+            if (effectiveClinicalRole === 'clinical_mod') {
+                if (allowedRoles && (allowedRoles.includes('admin') || allowedRoles.includes('staff')))
+                    return true;
+            }
+            if (effectiveClinicalRole === 'clinical_staff') {
+                if (allowedRoles && allowedRoles.includes('staff'))
+                    return true;
+            }
+            return false;
+        }
+
         if (!allowedRoles) return true; // No restriction
-        
-        // Check direct role match first
+
+        // Check direct role match (chỉ cho các route không thuộc module trên)
         if (allowedRoles.includes(currentUser.role)) {
             return true;
         }
-        
-        // Check clinical module roles for clinical routes
-        // Clinical routes are: /admin/*, /superadmin/* (for clinical module), /staff/dashboard
-        const path = window.location.pathname;
-        const isClinicalRoute = path.startsWith('/admin/') || 
-                                path.startsWith('/superadmin/') || 
-                                path.startsWith('/staff/dashboard');
-        
-        if (isClinicalRoute) {
-            const effectiveClinicalRole = getEffectiveClinicalRole();
-            
-            // Map clinical roles to standard roles for access check
-            // clinical_admin is equivalent to superadmin for clinical routes
-            if (effectiveClinicalRole === 'clinical_admin') {
-                // clinical_admin can access routes that require superadmin, admin, or staff
-                if (allowedRoles.includes('superadmin') || 
-                    allowedRoles.includes('admin') || 
-                    allowedRoles.includes('staff')) {
-                    return true;
-                }
-            }
-            // clinical_mod is equivalent to admin for clinical routes
-            if (effectiveClinicalRole === 'clinical_mod') {
-                // clinical_mod can access routes that require admin or staff (but not superadmin-only routes)
-                if (allowedRoles.includes('admin') || 
-                    allowedRoles.includes('staff')) {
-                    return true;
-                }
-            }
-            // clinical_staff is equivalent to staff for clinical routes
-            if (effectiveClinicalRole === 'clinical_staff') {
-                // clinical_staff can access routes that require staff
-                if (allowedRoles.includes('staff')) {
-                    return true;
-                }
-            }
-        }
-        
+
         return false;
     };
 
     if (allowedRoles && !hasAccess()) {
-        // Redirect to appropriate dashboard based on role
-        if (currentUser.role === 'superadmin') {
-            return <Navigate to="/ims/dashboard" />;
+        const path = window.location.pathname;
+        if (path.startsWith('/medical-records')) {
+            return <Navigate to="/medical-records/dashboard" replace />;
         }
-        if (currentUser.role === 'student') {
-            return <Navigate to="/student/attendance" />;
+        if (path.startsWith('/score-scanning')) {
+            return <Navigate to={getDefaultDashboardRoute(currentUser)} replace />;
         }
-        // All other users (admin, staff, clinical_admin, clinical_mod, clinical_staff, etc.) go to personal dashboard
-        return <Navigate to="/personal/dashboard" />;
+        if (path.startsWith('/receptionist')) {
+            return <Navigate to="/receptionist/booking" replace />;
+        }
+        return <Navigate to={getDefaultDashboardRoute(currentUser)} replace />;
     }
 
     return children;
@@ -229,6 +304,8 @@ function App() {
     const { currentUser } = useAuth();
     const location = useLocation();
     const isStatusPage = location.pathname === '/status';
+    const isAnnouncementPage = location.pathname === '/announcements' || location.pathname.startsWith('/announcements/');
+    const isPublicBookingPage = location.pathname === '/dat-phong-cong-khai';
     const [isTakingExam, setIsTakingExam] = useState(false);
 
     // Check if student is taking exam by checking body class
@@ -252,6 +329,30 @@ function App() {
         };
     }, [location.pathname]);
 
+    // Initialize activity tracker when user is logged in
+    useEffect(() => {
+        if (currentUser) {
+            // Luôn cập nhật user info khi currentUser thay đổi
+            // initialize() sẽ tự kiểm tra và chỉ add listeners một lần
+            activityTracker.initialize(currentUser);
+        } else {
+            activityTracker.stop();
+        }
+
+        return () => {
+            // Không stop khi component unmount, chỉ stop khi logout
+            // activityTracker.stop();
+        };
+    }, [currentUser]);
+
+    // Track page views - chỉ track khi pathname thay đổi, không track khi currentUser thay đổi
+    useEffect(() => {
+        if (currentUser) {
+            activityTracker.trackPageView(location.pathname);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.pathname]); // Chỉ track khi pathname thay đổi, không track khi currentUser thay đổi
+
     // Helper function to get effective clinical role based on module_roles
     const getEffectiveClinicalRole = () => {
         if (!currentUser) return null;
@@ -263,32 +364,17 @@ function App() {
     };
 
     // Function to redirect to appropriate dashboard based on user role
-    const getDashboardRoute = () => {
-        if (!currentUser) return '/login';
-
-        // Only superadmin goes to IMS dashboard
-        if (currentUser.role === 'superadmin') {
-            return '/ims/dashboard';
-        }
-        
-        // Students go to student dashboard
-        if (currentUser.role === 'student') {
-            return '/student/attendance';
-        }
-        
-        // All other users (admin, staff, clinical_admin, clinical_mod, clinical_staff, etc.) go to personal dashboard
-        return '/personal/dashboard';
-    };
+    const getDashboardRoute = () => getDefaultDashboardRoute(currentUser);
 
     return (
         <GoogleOAuthProvider clientId={process.env.REACT_APP_GOOGLE_CLIENT_ID || "477031696759-08e98kj8h2slc25g9qkr6vfrh9bgmqku.apps.googleusercontent.com"}>
             <AlertProvider>
                 <ConsoleWarning />
                 <PageTracker />
-                {!isTakingExam && !isStatusPage && <Navbar />}
+                {!isTakingExam && !isStatusPage && !isAnnouncementPage && !isPublicBookingPage && <Navbar />}
                 {currentUser && !isTakingExam && !isStatusPage && <TopHeader />}
-                <div className={currentUser && !isStatusPage ? "main-content-with-header" : "main-content"}>
-                <div className={isStatusPage ? "" : "container-fluid px-2"}>
+                <div className={`${currentUser && !isStatusPage ? "main-content-with-header" : "main-content"} ${isAnnouncementPage ? "announcement-page-layout" : ""} ${isPublicBookingPage ? "public-booking-page-layout" : ""}`}>
+                <div className={isStatusPage || isPublicBookingPage ? "" : "container-fluid px-2"}>
                     <Routes>
                         {/* Public routes - redirect if already logged in */}
                         <Route 
@@ -307,6 +393,8 @@ function App() {
                         <Route path="/qr-login" element={<QRLogin />} />
                         {/* Public Status Page - No authentication required */}
                         <Route path="/status" element={<StatusPage />} />
+                        {/* Lịch đặt phòng họp công khai - chỉ xem, không cần đăng nhập; đã login thì chuyển sang lịch nội bộ */}
+                        <Route path="/dat-phong-cong-khai" element={currentUser ? <Navigate to="/receptionist/booking" replace /> : <MeetingRoomBooking isPublic />} />
 
                         {/* Default route - redirects to appropriate dashboard */}
                         <Route 
@@ -340,6 +428,18 @@ function App() {
                         <Route
                             path="/superadmin/systempage"
                             element={<ProtectedRoute allowedRoles={['superadmin']}><SystemPage /></ProtectedRoute>}
+                        />
+                        <Route
+                            path="/superadmin/announcements"
+                            element={<ProtectedRoute allowedRoles={['superadmin']}><AnnouncementManagement /></ProtectedRoute>}
+                        />
+                        <Route
+                            path="/announcements"
+                            element={<ProtectedRoute allowedRoles={['superadmin', 'admin', 'staff', 'student']}><AnnouncementView /></ProtectedRoute>}
+                        />
+                        <Route
+                            path="/announcements/:id"
+                            element={<ProtectedRoute allowedRoles={['superadmin', 'admin', 'staff', 'student']}><AnnouncementDetailPage /></ProtectedRoute>}
                         />
 
                         {/* Admin routes */}
@@ -393,8 +493,16 @@ function App() {
                             element={<ProtectedRoute allowedRoles={['admin', 'superadmin', 'staff']}><EnhancedAttendanceReports /></ProtectedRoute>}
                         />
                         <Route
+                            path="/admin/attendance-log"
+                            element={<ProtectedRoute allowedRoles={['admin', 'superadmin', 'staff']}><AttendanceLogPage /></ProtectedRoute>}
+                        />
+                        <Route
                             path="/admin/network-wired"
                             element={<ProtectedRoute allowedRoles={['admin', 'superadmin', 'staff']}><DeviceManagement /></ProtectedRoute>}
+                        />
+                        <Route
+                            path="/admin/faceid-evaluation"
+                            element={<ProtectedRoute allowedRoles={['superadmin']}><FaceIDEvaluationPage /></ProtectedRoute>}
                         />
 
                         {/* Staff routes */}
@@ -444,6 +552,10 @@ function App() {
                             path="/student/schedule"
                             element={<ProtectedRoute allowedRoles={['student']}><StudentSchedule /></ProtectedRoute>}
                         />
+                        <Route
+                            path="/student/performance"
+                            element={<ProtectedRoute allowedRoles={['student']}><StudentPerformancePage /></ProtectedRoute>}
+                        />
 
                         {/* Profile route - accessible by all authenticated users */}
                         <Route
@@ -480,20 +592,17 @@ function App() {
                         {/* IMS: LMS routes */}
                         <Route
                             path="/lms/dashboard"
-                            element={<ProtectedRoute allowedRoles={['superadmin', 'admin', 'staff', 'student']}><LMSDashboard /></ProtectedRoute>}
+                            element={<LMSDashboardRoute />}
                         />
                         <Route path="/lms/users" element={<LMSUserManagementRoute />} />
-                        <Route
-                            path="/lms/courses"
-                            element={<ProtectedRoute allowedRoles={['superadmin', 'admin', 'staff', 'student']}><Courses /></ProtectedRoute>}
-                        />
-                        <Route path="/lms/live" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff','student']}><LiveClass /></ProtectedRoute>} />
-                        <Route path="/lms/exams" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff','student']}><Exams /></ProtectedRoute>} />
+                        <Route path="/lms/activity-logs" element={<LMSActivityLogsRoute />} />
+                        <Route path="/lms/mail-settings" element={<LMSMailSettingsRoute />} />
+                        <Route path="/lms/courses" element={<LMSCoursesRoute />} />
+                        <Route path="/lms/live" element={<LMSLiveRoute />} />
+                        <Route path="/lms/exams" element={<LMSExamsRoute />} />
                         <Route path="/lms/questions" element={<LMSQuestionsRoute />} />
-                        <Route path="/lms/grades" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff','student']}><Grades /></ProtectedRoute>} />
+                        <Route path="/lms/grades" element={<LMSGradesRoute />} />
                         <Route path="/lms/reports" element={<LMSReportsRoute />} />
-                        <Route path="/lms/integrations" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff','student']}><Integrations /></ProtectedRoute>} />
-                        <Route path="/lms/support" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff','student']}><SupportAnalytics /></ProtectedRoute>} />
 
                         {/* IMS: Training routes */}
                         <Route
@@ -561,6 +670,36 @@ function App() {
                         <Route path="/research/support" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff','student']}><ResearchSupport /></ProtectedRoute>} />
                         <Route path="/research/researchers" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff','student']}><Researchers /></ProtectedRoute>} />
 
+                        {/* Đảm bảo chất lượng - Lưu trữ minh chứng */}
+                        <Route path="/quality-assurance/dashboard" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><QualityAssuranceDashboard /></ProtectedRoute>} />
+                        <Route path="/quality-assurance/users" element={<ProtectedRoute allowedRoles={['superadmin','admin']}><QualityAssuranceUserManagement /></ProtectedRoute>} />
+                        <Route path="/quality-assurance/evidence-storage" element={<ProtectedRoute allowedRoles={['superadmin','admin']}><EvidenceStorageManagement /></ProtectedRoute>} />
+                        <Route path="/quality-assurance/staff" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><EvidenceStorageStaffView /></ProtectedRoute>} />
+                        <Route path="/quality-assurance/reports" element={<ProtectedRoute allowedRoles={['superadmin','admin']}><QualityAssuranceReports /></ProtectedRoute>} />
+                        <Route path="/quality-assurance/mail-settings" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><EvidenceMailSettings /></ProtectedRoute>} />
+
+                        {/* Medical Records Module routes */}
+                        <Route path="/medical-records/dashboard" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><MedicalRecordsDashboard /></ProtectedRoute>} />
+                        <Route path="/medical-records/users" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><MedicalRecordsUserManagement /></ProtectedRoute>} />
+                        <Route path="/medical-records/ci-chua-cham-diem" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><CIChuaChamDiemPage /></ProtectedRoute>} />
+                        <Route path="/medical-records/reports" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><EnhancedMedicalRecordsReports /></ProtectedRoute>} />
+                        <Route path="/medical-records" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><MedicalRecordsManagement /></ProtectedRoute>} />
+
+                        {/* Score Scanning Module - Quét điểm sinh viên bằng Gemini AI */}
+                        <Route path="/score-scanning" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><ScoreScanningDashboard /></ProtectedRoute>} />
+                        <Route path="/score-scanning/users" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><ScoreScanningUserManagement /></ProtectedRoute>} />
+                        <Route path="/score-scanning/lists/:id" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><ScoreListDetail /></ProtectedRoute>} />
+                        <Route path="/score-scanning/capture/:id" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><ScoreCapturePage /></ProtectedRoute>} />
+                        <Route path="/score-scanning/gemini-keys" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><GeminiApiKeyPage /></ProtectedRoute>} />
+
+                        {/* Lễ tân - Receptionist: Đăng ký phòng họp, Quản lý Phòng, Duyệt đặt phòng */}
+                        <Route path="/receptionist/dashboard" element={<ReceptionistAdminDashboardRoute />} />
+                        <Route path="/receptionist/booking" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff','student']}><MeetingRoomBooking /></ProtectedRoute>} />
+                        <Route path="/receptionist/rooms" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff','student']}><RoomManagement /></ProtectedRoute>} />
+                        <Route path="/receptionist/approvals" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><BookingApprovals /></ProtectedRoute>} />
+                        <Route path="/receptionist/users" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><ReceptionistUserManagement /></ProtectedRoute>} />
+                        <Route path="/receptionist/settings/mail" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff']}><ReceptionistMailSettings /></ProtectedRoute>} />
+
                         {/* Personal routes */}
                         <Route path="/personal/dashboard" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff','student']}><PersonalDashboard /></ProtectedRoute>} />
                         <Route path="/personal/attendance" element={<ProtectedRoute allowedRoles={['superadmin','admin','staff','student']}><PersonalAttendance /></ProtectedRoute>} />
@@ -607,29 +746,16 @@ function TrainingUsersRoute() {
 
     const effectiveClinicalRole = getEffectiveClinicalRole();
     const hasTrainingAdminModule = Array.isArray(currentUser.module_roles) && currentUser.module_roles.includes('training_admin');
-    
-    // Allow access if:
-    // 1. User is superadmin
-    // 2. User is admin
-    // 3. User is staff with training_admin module role
-    // 4. User has clinical_admin (equivalent to superadmin for clinical module)
-    // 5. User has clinical_mod (equivalent to admin for clinical module)
-    const isAllowed = currentUser.role === 'superadmin' || 
-                     currentUser.role === 'admin' || 
+
+    // Chỉ cho phép khi có quyền module: superadmin, staff/admin + training_admin, clinical_admin, clinical_mod
+    const isAllowed = currentUser.role === 'superadmin' ||
                      (currentUser.role === 'staff' && hasTrainingAdminModule) ||
+                     (currentUser.role === 'admin' && hasTrainingAdminModule) ||
                      effectiveClinicalRole === 'clinical_admin' ||
                      effectiveClinicalRole === 'clinical_mod';
 
     if (!isAllowed) {
-        // Redirect based on role
-        if (currentUser.role === 'superadmin') {
-            return <Navigate to="/ims/dashboard" />;
-        }
-        if (currentUser.role === 'student') {
-            return <Navigate to="/student/attendance" />;
-        }
-        // All other users (admin, staff, clinical_admin, clinical_mod, clinical_staff, etc.) go to personal dashboard
-        return <Navigate to="/personal/dashboard" />;
+        return <Navigate to={getDefaultDashboardRoute(currentUser)} replace />;
     }
 
     return <UserManagement />;
@@ -650,11 +776,7 @@ function LMSQuestionsRoute() {
     );
 
     if (!hasLMSAccess) {
-        // Redirect based on base role
-        if (currentUser.role === 'superadmin') return <Navigate to="/ims/dashboard" />;
-        if (currentUser.role === 'student') return <Navigate to="/student/attendance" />;
-        // All other users (admin, staff, etc.) go to personal dashboard
-        return <Navigate to="/personal/dashboard" />;
+        return <Navigate to={getLMSRedirectPath(currentUser)} />;
     }
 
     return <QuestionBank />;
@@ -667,18 +789,14 @@ function LMSUserManagementRoute() {
     if (loading) return <Loader text="Đang tải thông tin..." />;
     if (!currentUser) return <Navigate to="/login" />;
 
-    // Kiểm tra module_roles: chỉ cho phép lms_qa và lms_mod
+    // Kiểm tra module_roles: chỉ cho phép lms_qa
     const moduleRoles = currentUser.module_roles || [];
     const hasLMSUserManagementAccess = Array.isArray(moduleRoles) && (
-        moduleRoles.includes('lms_qa') || moduleRoles.includes('lms_mod')
+        moduleRoles.includes('lms_qa')
     );
 
     if (!hasLMSUserManagementAccess) {
-        // Redirect based on base role
-        if (currentUser.role === 'superadmin') return <Navigate to="/ims/dashboard" />;
-        if (currentUser.role === 'student') return <Navigate to="/student/attendance" />;
-        // All other users (admin, staff, etc.) go to personal dashboard
-        return <Navigate to="/personal/dashboard" />;
+        return <Navigate to={getLMSRedirectPath(currentUser)} />;
     }
 
     return <LMSUserManagement />;
@@ -697,12 +815,143 @@ function LMSReportsRoute() {
     const hasLMSQAAccess = Array.isArray(moduleRoles) && moduleRoles.includes('lms_qa');
 
     if (!hasLMSQAAccess) {
-        // Redirect based on base role
-        if (currentUser.role === 'superadmin') return <Navigate to="/ims/dashboard" />;
-        if (currentUser.role === 'student') return <Navigate to="/student/attendance" />;
-        // All other users (admin, staff, etc.) go to personal dashboard
-        return <Navigate to="/personal/dashboard" />;
+        return <Navigate to={getLMSRedirectPath(currentUser)} />;
     }
 
     return <ExamReports />;
+}
+
+// Custom route cho /lms/activity-logs - chỉ cho phép lms_qa và lms_admin (QA & Admin LMS)
+function LMSActivityLogsRoute() {
+    const { currentUser, loading } = useAuth();
+
+    if (loading) return <Loader text="Đang tải thông tin..." />;
+    if (!currentUser) return <Navigate to="/login" />;
+
+    const moduleRoles = currentUser.module_roles || [];
+    const hasLMSActivityAccess = Array.isArray(moduleRoles) && (
+        moduleRoles.includes('lms_qa') || moduleRoles.includes('lms_admin')
+    );
+
+    if (!hasLMSActivityAccess) {
+        return <Navigate to={getLMSRedirectPath(currentUser)} />;
+    }
+
+    return <LMSActivityLogsPage />;
+}
+
+// Chỉ lms_qa mới được xem/cấu hình Cài đặt mail LMS (thông báo kỳ thi)
+function LMSMailSettingsRoute() {
+    const { currentUser, loading } = useAuth();
+
+    if (loading) return <Loader text="Đang tải thông tin..." />;
+    if (!currentUser) return <Navigate to="/login" />;
+
+    const moduleRoles = currentUser.module_roles || [];
+    const hasLMSMailAccess = Array.isArray(moduleRoles) && moduleRoles.includes('lms_qa');
+
+    if (!hasLMSMailAccess) {
+        return <Navigate to={getLMSRedirectPath(currentUser)} />;
+    }
+
+    return <LMSMailSettings />;
+}
+
+// =====================================================
+// LMS ROUTE HELPERS (theo module_roles + student)
+// =====================================================
+function getLMSRedirectPath(currentUser) {
+    if (!currentUser) return '/login';
+    const moduleRoles = currentUser.module_roles || [];
+    const hasAnyLMSRole = Array.isArray(moduleRoles) && moduleRoles.some(r => typeof r === 'string' && r.startsWith('lms_'));
+
+    // Nếu user có quyền vào LMS module (lms_* hoặc student) nhưng bị chặn trang cụ thể
+    // thì điều hướng về LMS dashboard để UX rõ ràng.
+    if (hasAnyLMSRole || currentUser.role === 'student') return '/lms/dashboard';
+
+    if (currentUser.role === 'superadmin') return '/ims/dashboard';
+    if (currentUser.role === 'student') return '/student/attendance';
+    return '/personal/dashboard';
+}
+
+// /lms/dashboard: lms_admin, lms_qa, lms_mod, lms_staff, student
+function LMSDashboardRoute() {
+    const { currentUser, loading } = useAuth();
+    if (loading) return <Loader text="Đang tải thông tin..." />;
+    if (!currentUser) return <Navigate to="/login" />;
+
+    const moduleRoles = currentUser.module_roles || [];
+    const hasAccess = currentUser.role === 'student' || (Array.isArray(moduleRoles) && (
+        moduleRoles.includes('lms_admin') || moduleRoles.includes('lms_qa') || moduleRoles.includes('lms_mod') || moduleRoles.includes('lms_staff')
+    ));
+
+    if (!hasAccess) return <Navigate to={getLMSRedirectPath(currentUser)} />;
+    return <LMSDashboard />;
+}
+
+// /lms/courses: lms_admin, lms_qa, lms_mod, lms_staff, student
+function LMSCoursesRoute() {
+    const { currentUser, loading } = useAuth();
+    if (loading) return <Loader text="Đang tải thông tin..." />;
+    if (!currentUser) return <Navigate to="/login" />;
+
+    const moduleRoles = currentUser.module_roles || [];
+    const hasAccess = currentUser.role === 'student' || (Array.isArray(moduleRoles) && (
+        moduleRoles.includes('lms_admin') || moduleRoles.includes('lms_qa') || moduleRoles.includes('lms_mod') || moduleRoles.includes('lms_staff')
+    ));
+
+    if (!hasAccess) return <Navigate to={getLMSRedirectPath(currentUser)} />;
+    return <Courses />;
+}
+
+// /lms/live: lms_admin, lms_qa, lms_mod, lms_staff, student
+function LMSLiveRoute() {
+    const { currentUser, loading } = useAuth();
+    if (loading) return <Loader text="Đang tải thông tin..." />;
+    if (!currentUser) return <Navigate to="/login" />;
+
+    const moduleRoles = currentUser.module_roles || [];
+    const hasAccess = currentUser.role === 'student' || (Array.isArray(moduleRoles) && (
+        moduleRoles.includes('lms_admin') || moduleRoles.includes('lms_qa') || moduleRoles.includes('lms_mod') || moduleRoles.includes('lms_staff')
+    ));
+
+    if (!hasAccess) return <Navigate to={getLMSRedirectPath(currentUser)} />;
+    return <LiveClass />;
+}
+
+// /lms/exams: lms_qa, lms_mod
+function LMSExamsRoute() {
+    const { currentUser, loading } = useAuth();
+    if (loading) return <Loader text="Đang tải thông tin..." />;
+    if (!currentUser) return <Navigate to="/login" />;
+
+    const moduleRoles = currentUser.module_roles || [];
+    const hasAccess = Array.isArray(moduleRoles) && (moduleRoles.includes('lms_qa') || moduleRoles.includes('lms_mod'));
+    if (!hasAccess) return <Navigate to={getLMSRedirectPath(currentUser)} />;
+    return <Exams />;
+}
+
+// /lms/grades: chỉ lms_qa
+function LMSGradesRoute() {
+    const { currentUser, loading } = useAuth();
+    if (loading) return <Loader text="Đang tải thông tin..." />;
+    if (!currentUser) return <Navigate to="/login" />;
+
+    const moduleRoles = currentUser.module_roles || [];
+    const hasAccess = Array.isArray(moduleRoles) && moduleRoles.includes('lms_qa');
+    if (!hasAccess) return <Navigate to={getLMSRedirectPath(currentUser)} />;
+    return <Grades />;
+}
+
+// /receptionist/dashboard: chỉ receptionist_admin (hoặc superadmin)
+function ReceptionistAdminDashboardRoute() {
+    const { currentUser, loading } = useAuth();
+    if (loading) return <Loader text="Đang tải thông tin..." />;
+    if (!currentUser) return <Navigate to="/login" />;
+
+    const moduleRoles = currentUser.module_roles || [];
+    const hasAccess = currentUser.role === 'superadmin' || (Array.isArray(moduleRoles) && moduleRoles.includes('receptionist_admin'));
+    if (!hasAccess) return <Navigate to="/receptionist/booking" replace />;
+
+    return <ReceptionistDashboard />;
 }

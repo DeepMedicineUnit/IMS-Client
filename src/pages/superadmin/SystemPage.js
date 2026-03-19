@@ -6,8 +6,11 @@ import * as XLSX from 'xlsx';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAlert } from '../../contexts/AlertContext';
 import MapPreview from '../../components/MapPreview';
+import Pagination from '../../components/Pagination';
 import { useHospitalLocations } from '../../hooks/useHospitalLocations';
 import usePageTitle from '../../hooks/usePageTitle';
+import io from 'socket.io-client';
+import { getSocketUrl } from '../../utils/api';
 import '../../styles/user.css';
 
 // Add custom styles for error display
@@ -42,6 +45,39 @@ const errorStyles = `
     white-space: pre-wrap;
     word-wrap: break-word;
     font-family: 'Courier New', monospace;
+  }
+
+  /* Activity logging switch in tab - màu vàng để phân biệt với tab xanh */
+  .activity-logging-switch .form-check-input {
+    background-color: #6c757d !important;
+    border-color: #6c757d !important;
+    width: 2.5em !important;
+    height: 1.25em !important;
+  }
+  
+  .activity-logging-switch .form-check-input:checked {
+    background-color: #ffc107 !important;
+    border-color: #ffc107 !important;
+  }
+  
+  .custom-tabs .nav-link .activity-logging-switch .form-check-input {
+    background-color: #6c757d !important;
+    border-color: #6c757d !important;
+  }
+  
+  .custom-tabs .nav-link .activity-logging-switch .form-check-input:checked {
+    background-color: #ffc107 !important;
+    border-color: #ffc107 !important;
+  }
+  
+  .custom-tabs .nav-link.active .activity-logging-switch .form-check-input {
+    background-color: #6c757d !important;
+    border-color: #6c757d !important;
+  }
+  
+  .custom-tabs .nav-link.active .activity-logging-switch .form-check-input:checked {
+    background-color: #ffc107 !important;
+    border-color: #ffc107 !important;
   }
 `;
 
@@ -131,10 +167,84 @@ const SystemPage = () => {
     ipAddress: ''
   });
   
+  // Activity Logs State
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityPagination, setActivityPagination] = useState({
+    page: 1,
+    limit: 50,
+    total: 0,
+    totalPages: 0
+  });
+  const [activityFilters, setActivityFilters] = useState({
+    event_context: '',
+    event_type: '',
+    component: '',
+    username: '',
+    start_date: '',
+    end_date: '',
+    start_date_only: '',
+    start_time: '',
+    end_date_only: '',
+    end_time: '',
+    search: ''
+  });
+  const [activityStats, setActivityStats] = useState(null);
+  const [showActivityFilters, setShowActivityFilters] = useState(false);
+  const [selectedActivityLog, setSelectedActivityLog] = useState(null);
+  const [showActivityDetailModal, setShowActivityDetailModal] = useState(false);
+  const [activityLoggingEnabled, setActivityLoggingEnabled] = useState(true);
+  const [updatingLoggingSetting, setUpdatingLoggingSetting] = useState(false);
+
+  // Helper functions để format hiển thị tiếng Việt
+  const formatEventContext = (context) => {
+    const contextMap = {
+      'authentication': 'Xác thực',
+      'navigation': 'Điều hướng',
+      'interaction': 'Tương tác',
+      'api_call': 'Gọi API',
+      'custom': 'Tùy chỉnh'
+    };
+    return contextMap[context] || context;
+  };
+
+  const formatEventType = (type) => {
+    const typeMap = {
+      'login': 'Đăng nhập',
+      'logout': 'Đăng xuất',
+      'click': 'Click',
+      'hover': 'Hover',
+      'page_view': 'Xem trang',
+      'scroll': 'Scroll',
+      'api_call': 'Gọi API'
+    };
+    return typeMap[type] || type;
+  };
+
+  const formatUserRole = (role) => {
+    const roleMap = {
+      'superadmin': 'Quản trị viên cấp cao',
+      'admin': 'Quản trị viên',
+      'staff': 'Nhân viên',
+      'student': 'Sinh viên',
+      'guest': 'Khách',
+      'Khách': 'Khách'
+    };
+    return roleMap[role] || role;
+  };
 
   // Auto-refresh states
   const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
   const autoRefreshIntervalRef = useRef(null);
+  
+  // Socket.IO và real-time update cho Activity Logs (chỉ cập nhật khi có dữ liệu mới từ API, không polling)
+  const activitySocketRef = useRef(null);
+  const lastLogIdRef = useRef(null);
+  const fetchActivityLogsRef = useRef(null);
+  const fetchActivityLogsSilentlyRef = useRef(null);
+  const activityPageRef = useRef(1);
+  const activitySocketDebounceRef = useRef(null);
+  const activityFallbackIntervalRef = useRef(null);
 
   // Fetch system logs
   const fetchSystemLogs = async () => {
@@ -287,6 +397,187 @@ const SystemPage = () => {
     }
   }, [threatLimit]);
 
+  // Fetch activity logging settings
+  const fetchActivityLoggingSettings = async () => {
+    try {
+      const response = await api.get('/activity/settings');
+      if (response.data.success) {
+        setActivityLoggingEnabled(response.data.data?.activityLoggingEnabled !== false);
+      }
+    } catch (error) {
+      console.error('Error fetching activity logging settings:', error);
+      setActivityLoggingEnabled(true); // Default to enabled on error
+    }
+  };
+
+  // Update activity logging settings
+  const updateActivityLoggingSettings = async (enabled) => {
+    try {
+      setUpdatingLoggingSetting(true);
+      const response = await api.put('/activity/settings', {
+        activityLoggingEnabled: enabled
+      });
+      
+      if (response.data.success) {
+        setActivityLoggingEnabled(enabled);
+        showAlert(
+          enabled 
+            ? 'Đã bật ghi lại nhật ký hoạt động' 
+            : 'Đã tắt ghi lại nhật ký hoạt động',
+          'success'
+        );
+      }
+    } catch (error) {
+      console.error('Error updating activity logging settings:', error);
+      showAlert('Không thể cập nhật cài đặt ghi nhật ký', 'danger');
+    } finally {
+      setUpdatingLoggingSetting(false);
+    }
+  };
+
+  // Fetch activity logs
+  // onlyUpdateIfPage1: khi true (realtime từ socket), chỉ cập nhật state nếu user đang xem trang 1
+  const fetchActivityLogs = async (page = 1, silent = false, onlyUpdateIfPage1 = false) => {
+    try {
+      if (!silent) {
+        setActivityLoading(true);
+      }
+      
+      const filterParams = Object.fromEntries(
+        Object.entries(activityFilters).filter(([key, value]) => 
+          value !== '' && 
+          !['start_date_only', 'start_time', 'end_date_only', 'end_time'].includes(key)
+        )
+      );
+      
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: activityPagination.limit.toString(),
+        sort_by: 'created_at',
+        sort_order: 'DESC',
+        ...filterParams
+      });
+      
+      const response = await api.get(`/activity/logs?${params.toString()}`, {
+        timeout: 15000
+      });
+      
+      if (response.data.success) {
+        if (onlyUpdateIfPage1 && activityPageRef.current !== 1) {
+          return;
+        }
+        const logs = response.data.data || [];
+        setActivityLogs(logs);
+        setActivityPagination(prev => ({
+          ...prev,
+          ...response.data.pagination,
+          page
+        }));
+        if (logs.length > 0 && logs[0].id) {
+          lastLogIdRef.current = logs[0].id;
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching activity logs:', err);
+      if (!silent) {
+        showAlert('Không thể tải nhật ký hoạt động', 'danger');
+      }
+    } finally {
+      if (!silent) {
+        setActivityLoading(false);
+      }
+    }
+  };
+
+  // Ref luôn trỏ tới fetch mới nhất để socket gọi đúng (tránh stale closure)
+  fetchActivityLogsRef.current = fetchActivityLogs;
+  activityPageRef.current = activityPagination.page;
+
+  // Fetch dưới nền khi socket báo có dữ liệu mới; không loading, không toast, chỉ cập nhật nếu đang xem trang 1
+  const fetchActivityLogsSilentlyRefFn = useCallback(() => {
+    fetchActivityLogsRef.current?.(1, true, true);
+  }, []);
+  fetchActivityLogsSilentlyRef.current = fetchActivityLogsSilentlyRefFn;
+
+  // Check for new logs
+  const checkNewLogs = useCallback(async () => {
+    if (!lastLogIdRef.current) return false;
+    
+    try {
+      const response = await api.get(`/activity/logs/check-new?last_id=${lastLogIdRef.current}`, {
+        timeout: 5000
+      });
+      
+      if (response.data.success && response.data.hasNew) {
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Error checking new logs:', err);
+      return false;
+    }
+  }, []);
+
+  // Fetch activity statistics
+  const fetchActivityStats = async () => {
+    try {
+      const params = new URLSearchParams({
+        ...Object.fromEntries(
+          Object.entries(activityFilters)
+            .filter(([key, value]) => ['start_date', 'end_date'].includes(key) && value !== '')
+        )
+      });
+      
+      const response = await api.get(`/activity/logs/stats?${params.toString()}`);
+      
+      if (response.data.success) {
+        setActivityStats(response.data.data);
+      }
+    } catch (err) {
+      console.error('Error fetching activity stats:', err);
+    }
+  };
+
+  // Export activity logs
+  const exportActivityLogs = async (format = 'csv') => {
+    try {
+      // Chỉ gửi các trường cần thiết, loại bỏ các trường tạm
+      const filterParams = Object.fromEntries(
+        Object.entries(activityFilters).filter(([key, value]) => 
+          value !== '' && 
+          !['start_date_only', 'start_time', 'end_date_only', 'end_time'].includes(key)
+        )
+      );
+      
+      const params = new URLSearchParams({
+        format,
+        ...filterParams
+      });
+      
+      const response = await api.get(`/activity/logs/export?${params.toString()}`, {
+        responseType: format === 'csv' ? 'blob' : 'json'
+      });
+      
+      if (format === 'csv') {
+        // Download CSV file
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `activity_logs_${Date.now()}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        showAlert('Đã export logs thành công', 'success');
+      } else {
+        // Return JSON data
+        return response.data;
+      }
+    } catch (err) {
+      console.error('Error exporting activity logs:', err);
+      showAlert('Không thể export logs', 'danger');
+    }
+  };
+
   // Fetch IP whitelist
   const fetchIPWhitelist = async () => {
     try {
@@ -367,12 +658,31 @@ const SystemPage = () => {
     }
   };
 
+  // Load activity logging settings ngay khi component mount
+  useEffect(() => {
+    fetchActivityLoggingSettings();
+  }, []);
+
+  // Prefetch activity logs khi vào SystemPage để khi mở tab "Nhật ký hoạt động" đã có data, giảm delay
+  useEffect(() => {
+    fetchActivityLogs(1, true);
+    fetchActivityStats();
+  }, []);
+
   useEffect(() => {
     fetchSystemLogs();
     fetchSecurityThreats();
     fetchIPWhitelist();
     if (activeTab === 'attendance') {
       fetchAttendanceSettings();
+    }
+    if (activeTab === 'activity') {
+      // Nếu chưa có data thì bật loading ngay để bảng hiển thị spinner, không bị delay "trống"
+      if (activityLogs.length === 0) {
+        setActivityLoading(true);
+      }
+      fetchActivityLogs(1, true);
+      fetchActivityStats();
     }
   }, [activeTab]);
 
@@ -409,6 +719,103 @@ const SystemPage = () => {
       }
     };
   }, [activeTab, fetchSystemLogsSilently, fetchSecurityThreatsSilently]);
+
+  // Socket.IO: chỉ cập nhật khi có dữ liệu mới từ API (event từ server), không polling
+  useEffect(() => {
+    if (activeTab !== 'activity') {
+      if (activitySocketRef.current) {
+        activitySocketRef.current.emit('activity_logs:leave');
+        activitySocketRef.current.disconnect();
+        activitySocketRef.current = null;
+      }
+      if (activitySocketDebounceRef.current) {
+        clearTimeout(activitySocketDebounceRef.current);
+        activitySocketDebounceRef.current = null;
+      }
+      return;
+    }
+
+    const socketUrl = getSocketUrl();
+    const socket = io(socketUrl, {
+      path: '/socket.io',
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionAttempts: 10
+    });
+    activitySocketRef.current = socket;
+
+    socket.on('connect', () => {
+      socket.emit('activity_logs:join');
+    });
+
+    socket.on('disconnect', (reason) => {
+      // Chỉ log khi không phải do tab switch
+      if (activeTab === 'activity') {
+        console.warn('Activity Logs socket disconnected:', reason);
+      }
+    });
+
+    socket.on('connect_error', (err) => {
+      console.warn('Activity Logs socket connect_error:', err.message);
+    });
+
+    const debouncedFetch = () => {
+      if (activitySocketDebounceRef.current) {
+        clearTimeout(activitySocketDebounceRef.current);
+      }
+      activitySocketDebounceRef.current = setTimeout(() => {
+        activitySocketDebounceRef.current = null;
+        fetchActivityLogsSilentlyRef.current?.();
+      }, 250);
+    };
+
+    socket.on('activity_log:new', () => {
+      debouncedFetch();
+    });
+    socket.on('activity_log:new_batch', () => {
+      debouncedFetch();
+    });
+
+    // Fallback: mỗi 30s kiểm tra có log mới không (khi socket không nhận được event)
+    const fallbackInterval = setInterval(() => {
+      if (document.visibilityState !== 'visible' || activityPageRef.current !== 1) return;
+      checkNewLogs().then(hasNew => {
+        if (hasNew) fetchActivityLogsSilentlyRef.current?.();
+      });
+    }, 30000);
+    activityFallbackIntervalRef.current = fallbackInterval;
+
+    return () => {
+      if (activityFallbackIntervalRef.current) {
+        clearInterval(activityFallbackIntervalRef.current);
+        activityFallbackIntervalRef.current = null;
+      }
+      if (activitySocketDebounceRef.current) {
+        clearTimeout(activitySocketDebounceRef.current);
+        activitySocketDebounceRef.current = null;
+      }
+      if (socket) {
+        socket.emit('activity_logs:leave');
+        socket.removeAllListeners();
+        socket.disconnect();
+        activitySocketRef.current = null;
+      }
+    };
+  }, [activeTab, checkNewLogs]);
+
+  // Khi quay lại tab trình duyệt, refetch activity logs để luôn có data mới nhất
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && activeTab === 'activity' && activityPageRef.current === 1) {
+        if (fetchActivityLogsSilentlyRef.current) {
+          fetchActivityLogsSilentlyRef.current();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [activeTab]);
 
   // Filter threats
   const filteredThreats = (securityThreats || []).filter(threat => {
@@ -1037,6 +1444,33 @@ const SystemPage = () => {
                     <span className="tab-title">
                       <i className="fas fa-clock me-2"></i>
                       Chấm công
+                    </span>
+                  </Nav.Link>
+                </Nav.Item>
+                <Nav.Item>
+                  <Nav.Link eventKey="activity">
+                    <span className="tab-title d-flex align-items-center justify-content-between w-100">
+                      <span>
+                        <i className="fas fa-history me-2"></i>
+                        Nhật ký hoạt động
+                      </span>
+                      <Form.Check
+                        type="switch"
+                        id="activity-logging-toggle-nav"
+                        checked={activityLoggingEnabled}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          updateActivityLoggingSettings(e.target.checked);
+                        }}
+                        disabled={updatingLoggingSetting}
+                        onClick={(e) => e.stopPropagation()}
+                        className="ms-3 activity-logging-switch"
+                        style={{ 
+                          marginTop: 0,
+                          opacity: updatingLoggingSetting ? 0.6 : 1,
+                          cursor: updatingLoggingSetting ? 'not-allowed' : 'pointer'
+                        }}
+                      />
                     </span>
                   </Nav.Link>
                 </Nav.Item>
@@ -1736,9 +2170,867 @@ const SystemPage = () => {
                     </Col>
                   </Row>
                 </Tab.Pane>
+
+                {/* Activity Logs Tab */}
+                <Tab.Pane eventKey="activity">
+                  {/* Stats Cards */}
+                  {activityStats && (
+                    <Row className="mb-4">
+                      <Col md={3}>
+                        <Card className="modern-card">
+                          <Card.Body>
+                            <div className="d-flex justify-content-between align-items-center">
+                              <div>
+                                <h6 className="text-muted mb-2">Tổng hoạt động</h6>
+                                <h3>{activityStats.total.total_activities?.toLocaleString()}</h3>
+                              </div>
+                              <div className="stat-icon bg-primary">
+                                <i className="fas fa-chart-line"></i>
+                              </div>
+                            </div>
+                          </Card.Body>
+                        </Card>
+                      </Col>
+                      <Col md={3}>
+                        <Card className="modern-card">
+                          <Card.Body>
+                            <div className="d-flex justify-content-between align-items-center">
+                              <div>
+                                <h6 className="text-muted mb-2">Người dùng</h6>
+                                <h3>{activityStats.total.unique_users}</h3>
+                              </div>
+                              <div className="stat-icon bg-success">
+                                <i className="fas fa-users"></i>
+                              </div>
+                            </div>
+                          </Card.Body>
+                        </Card>
+                      </Col>
+                      <Col md={3}>
+                        <Card className="modern-card">
+                          <Card.Body>
+                            <div className="d-flex justify-content-between align-items-center">
+                              <div>
+                                <h6 className="text-muted mb-2">Phiên làm việc</h6>
+                                <h3>{activityStats.total.unique_sessions}</h3>
+                              </div>
+                              <div className="stat-icon bg-info">
+                                <i className="fas fa-desktop"></i>
+                              </div>
+                            </div>
+                          </Card.Body>
+                        </Card>
+                      </Col>
+                      <Col md={3}>
+                        <Card className="modern-card">
+                          <Card.Body>
+                            <div className="d-flex justify-content-between align-items-center">
+                              <div>
+                                <h6 className="text-muted mb-2">Ngày hoạt động</h6>
+                                <h3>{activityStats.total.active_days}</h3>
+                              </div>
+                              <div className="stat-icon bg-warning">
+                                <i className="fas fa-calendar"></i>
+                              </div>
+                            </div>
+                          </Card.Body>
+                        </Card>
+                      </Col>
+                    </Row>
+                  )}
+
+                  {/* Filters */}
+                  <Card className="modern-card mb-3">
+                    <Card.Body>
+                      <div className="d-flex justify-content-between align-items-center mb-3">
+                        <h6 className="mb-0">
+                          <i className="fas fa-filter me-2"></i>
+                          Bộ lọc
+                        </h6>
+                        <div>
+                          <Button
+                            variant="outline-secondary"
+                            size="sm"
+                            onClick={() => setShowActivityFilters(!showActivityFilters)}
+                            className="me-2"
+                          >
+                            <i className={`fas fa-chevron-${showActivityFilters ? 'up' : 'down'}`}></i>
+                            {showActivityFilters ? ' Ẩn' : ' Hiện'} bộ lọc
+                          </Button>
+                          <Button
+                            variant="success"
+                            size="sm"
+                            onClick={() => exportActivityLogs('csv')}
+                            className="me-2"
+                          >
+                            <i className="fas fa-download me-2"></i>
+                            Export CSV
+                          </Button>
+                        </div>
+                      </div>
+
+                      {showActivityFilters && (
+                        <Row className="mt-3">
+                          <Col md={3}>
+                            <Form.Group className="mb-3">
+                              <Form.Label>Bối cảnh sự kiện</Form.Label>
+                              <Form.Select
+                                value={activityFilters.event_context}
+                                onChange={(e) => setActivityFilters({ ...activityFilters, event_context: e.target.value })}
+                              >
+                                <option value="">Tất cả</option>
+                                <option value="authentication">Xác thực</option>
+                                <option value="navigation">Điều hướng</option>
+                                <option value="interaction">Tương tác</option>
+                                <option value="api_call">API Call</option>
+                                <option value="custom">Tùy chỉnh</option>
+                              </Form.Select>
+                            </Form.Group>
+                          </Col>
+                          <Col md={3}>
+                            <Form.Group className="mb-3">
+                              <Form.Label>Loại sự kiện</Form.Label>
+                              <Form.Select
+                                value={activityFilters.event_type}
+                                onChange={(e) => setActivityFilters({ ...activityFilters, event_type: e.target.value })}
+                              >
+                                <option value="">Tất cả</option>
+                                <option value="login">Đăng nhập</option>
+                                <option value="logout">Đăng xuất</option>
+                                <option value="click">Click</option>
+                                <option value="hover">Hover</option>
+                                <option value="page_view">Xem trang</option>
+                                <option value="scroll">Scroll</option>
+                                <option value="api_call">API Call</option>
+                              </Form.Select>
+                            </Form.Group>
+                          </Col>
+                          <Col md={3}>
+                            <Form.Group className="mb-3">
+                              <Form.Label>Tên người dùng</Form.Label>
+                              <Form.Control
+                                type="text"
+                                placeholder="Tìm theo username..."
+                                value={activityFilters.username}
+                                onChange={(e) => setActivityFilters({ ...activityFilters, username: e.target.value })}
+                              />
+                            </Form.Group>
+                          </Col>
+                          <Col md={3}>
+                            <Form.Group className="mb-3">
+                              <Form.Label>Component</Form.Label>
+                              <Form.Control
+                                type="text"
+                                placeholder="Tên component..."
+                                value={activityFilters.component}
+                                onChange={(e) => setActivityFilters({ ...activityFilters, component: e.target.value })}
+                              />
+                            </Form.Group>
+                          </Col>
+                          <Col md={12}>
+                            <hr className="my-3" />
+                            <h6 className="mb-3">
+                              <i className="fas fa-calendar-alt me-2"></i>
+                              Lọc theo thời gian
+                            </h6>
+                          </Col>
+                          <Col md={3}>
+                            <Form.Group className="mb-3">
+                              <Form.Label>Ngày bắt đầu</Form.Label>
+                              <Form.Control
+                                type="date"
+                                value={activityFilters.start_date_only}
+                                onChange={(e) => {
+                                  const newFilters = { ...activityFilters, start_date_only: e.target.value };
+                                  // Tự động kết hợp với start_time nếu có
+                                  if (e.target.value && activityFilters.start_time) {
+                                    newFilters.start_date = `${e.target.value}T${activityFilters.start_time}`;
+                                  } else if (e.target.value) {
+                                    newFilters.start_date = `${e.target.value}T00:00:00`;
+                                  } else {
+                                    newFilters.start_date = '';
+                                  }
+                                  setActivityFilters(newFilters);
+                                }}
+                              />
+                            </Form.Group>
+                          </Col>
+                          <Col md={3}>
+                            <Form.Group className="mb-3">
+                              <Form.Label>Thời gian bắt đầu (HH:mm:ss)</Form.Label>
+                              <Form.Control
+                                type="time"
+                                step="1"
+                                value={activityFilters.start_time}
+                                onChange={(e) => {
+                                  const newFilters = { ...activityFilters, start_time: e.target.value };
+                                  // Tự động kết hợp với start_date_only nếu có
+                                  if (activityFilters.start_date_only && e.target.value) {
+                                    newFilters.start_date = `${activityFilters.start_date_only}T${e.target.value}`;
+                                  } else if (activityFilters.start_date_only) {
+                                    newFilters.start_date = `${activityFilters.start_date_only}T00:00:00`;
+                                  } else {
+                                    newFilters.start_date = '';
+                                  }
+                                  setActivityFilters(newFilters);
+                                }}
+                              />
+                            </Form.Group>
+                          </Col>
+                          <Col md={3}>
+                            <Form.Group className="mb-3">
+                              <Form.Label>Ngày kết thúc</Form.Label>
+                              <Form.Control
+                                type="date"
+                                value={activityFilters.end_date_only}
+                                onChange={(e) => {
+                                  const newFilters = { ...activityFilters, end_date_only: e.target.value };
+                                  // Tự động kết hợp với end_time nếu có
+                                  if (e.target.value && activityFilters.end_time) {
+                                    newFilters.end_date = `${e.target.value}T${activityFilters.end_time}`;
+                                  } else if (e.target.value) {
+                                    newFilters.end_date = `${e.target.value}T23:59:59`;
+                                  } else {
+                                    newFilters.end_date = '';
+                                  }
+                                  setActivityFilters(newFilters);
+                                }}
+                              />
+                            </Form.Group>
+                          </Col>
+                          <Col md={3}>
+                            <Form.Group className="mb-3">
+                              <Form.Label>Thời gian kết thúc (HH:mm:ss)</Form.Label>
+                              <Form.Control
+                                type="time"
+                                step="1"
+                                value={activityFilters.end_time}
+                                onChange={(e) => {
+                                  const newFilters = { ...activityFilters, end_time: e.target.value };
+                                  // Tự động kết hợp với end_date_only nếu có
+                                  if (activityFilters.end_date_only && e.target.value) {
+                                    newFilters.end_date = `${activityFilters.end_date_only}T${e.target.value}`;
+                                  } else if (activityFilters.end_date_only) {
+                                    newFilters.end_date = `${activityFilters.end_date_only}T23:59:59`;
+                                  } else {
+                                    newFilters.end_date = '';
+                                  }
+                                  setActivityFilters(newFilters);
+                                }}
+                              />
+                            </Form.Group>
+                          </Col>
+                          <Col md={12}>
+                            <div className="mb-3">
+                              <small className="text-muted">
+                                <i className="fas fa-info-circle me-1"></i>
+                                Hoặc sử dụng datetime-local (tự động cập nhật):
+                              </small>
+                            </div>
+                          </Col>
+                          <Col md={6}>
+                            <Form.Group className="mb-3">
+                              <Form.Label>Từ ngày và giờ (datetime-local)</Form.Label>
+                              <Form.Control
+                                type="datetime-local"
+                                step="1"
+                                value={activityFilters.start_date}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  const newFilters = { ...activityFilters, start_date: value };
+                                  // Tách ngày và giờ
+                                  if (value) {
+                                    const [date, time] = value.split('T');
+                                    newFilters.start_date_only = date || '';
+                                    newFilters.start_time = time || '';
+                                  } else {
+                                    newFilters.start_date_only = '';
+                                    newFilters.start_time = '';
+                                  }
+                                  setActivityFilters(newFilters);
+                                }}
+                              />
+                            </Form.Group>
+                          </Col>
+                          <Col md={6}>
+                            <Form.Group className="mb-3">
+                              <Form.Label>Đến ngày và giờ (datetime-local)</Form.Label>
+                              <Form.Control
+                                type="datetime-local"
+                                step="1"
+                                value={activityFilters.end_date}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  const newFilters = { ...activityFilters, end_date: value };
+                                  // Tách ngày và giờ
+                                  if (value) {
+                                    const [date, time] = value.split('T');
+                                    newFilters.end_date_only = date || '';
+                                    newFilters.end_time = time || '';
+                                  } else {
+                                    newFilters.end_date_only = '';
+                                    newFilters.end_time = '';
+                                  }
+                                  setActivityFilters(newFilters);
+                                }}
+                              />
+                            </Form.Group>
+                          </Col>
+                          <Col md={12}>
+                            <hr className="my-3" />
+                          </Col>
+                          <Col md={12}>
+                            <Form.Group className="mb-3">
+                              <Form.Label>Tìm kiếm</Form.Label>
+                              <Form.Control
+                                type="text"
+                                placeholder="Tìm kiếm..."
+                                value={activityFilters.search}
+                                onChange={(e) => setActivityFilters({ ...activityFilters, search: e.target.value })}
+                              />
+                            </Form.Group>
+                          </Col>
+                          <Col md={12}>
+                            <Button
+                              variant="primary"
+                              onClick={() => {
+                                fetchActivityLogs(1);
+                                fetchActivityStats();
+                              }}
+                              className="me-2"
+                            >
+                              <i className="fas fa-search me-2"></i>
+                              Áp dụng bộ lọc
+                            </Button>
+                            <Button
+                              variant="outline-secondary"
+                              onClick={() => {
+                                setActivityFilters({
+                                  event_context: '',
+                                  event_type: '',
+                                  component: '',
+                                  username: '',
+                                  start_date: '',
+                                  end_date: '',
+                                  start_date_only: '',
+                                  start_time: '',
+                                  end_date_only: '',
+                                  end_time: '',
+                                  search: ''
+                                });
+                                fetchActivityLogs(1);
+                                fetchActivityStats();
+                              }}
+                            >
+                              <i className="fas fa-times me-2"></i>
+                              Xóa bộ lọc
+                            </Button>
+                          </Col>
+                        </Row>
+                      )}
+                    </Card.Body>
+                  </Card>
+
+                  {/* Activity Logs Table - luôn hiển thị bảng, loading chỉ trong tbody để giảm cảm giác delay */}
+                  <div className="session-table-container" style={{ overflowX: 'auto' }}>
+                    <Table className="session-table" responsive hover>
+                      <thead>
+                        <tr>
+                          <th style={{ minWidth: '150px' }}>Thời gian</th>
+                          <th style={{ minWidth: '120px' }}>Tên người dùng</th>
+                          <th style={{ minWidth: '150px' }}>Người bị ảnh hưởng</th>
+                          <th style={{ minWidth: '120px' }}>Bối cảnh</th>
+                          <th style={{ minWidth: '120px' }}>Component</th>
+                          <th style={{ minWidth: '150px' }}>Tên sự kiện</th>
+                          <th style={{ minWidth: '250px' }}>Mô tả</th>
+                          <th style={{ minWidth: '150px' }}>Nguồn gốc</th>
+                          <th style={{ minWidth: '120px' }}>Địa chỉ IP</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activityLoading && activityLogs.length === 0 ? (
+                          <tr>
+                            <td colSpan="9" className="text-center py-4">
+                              <Spinner animation="border" size="sm" className="me-2" />
+                              Đang tải nhật ký hoạt động...
+                            </td>
+                          </tr>
+                        ) : activityLogs.length > 0 ? (
+                              activityLogs.map((log) => (
+                                <tr 
+                                  key={log.id}
+                                  style={{ cursor: 'pointer' }}
+                                  onClick={() => {
+                                    setSelectedActivityLog(log);
+                                    setShowActivityDetailModal(true);
+                                  }}
+                                  className="activity-log-row"
+                                >
+                                  <td>
+                                    <div className="text-nowrap">
+                                      {new Date(log.created_at).toLocaleString('vi-VN')}
+                                    </div>
+                                    <small className="text-muted">
+                                      {log.time_category === 'just_now' && '(Vừa xong)'}
+                                      {log.time_category === 'recent' && '(Gần đây)'}
+                                      {log.time_category === 'today' && '(Hôm nay)'}
+                                    </small>
+                                  </td>
+                                  <td>
+                                    <div>
+                                      <strong>{log.username || 'Ẩn danh'}</strong>
+                                      {log.user_email && (
+                                        <div className="text-muted" style={{ fontSize: '0.75rem', marginTop: '2px' }}>
+                                          {log.user_email}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <Badge bg={
+                                      log.user_role === 'superadmin' || log.user_role === 'Quản trị viên cấp cao' ? 'danger' :
+                                      log.user_role === 'admin' || log.user_role === 'Quản trị viên' ? 'warning' :
+                                      log.user_role === 'staff' || log.user_role === 'Nhân viên' ? 'info' : 'secondary'
+                                    }>
+                                      {formatUserRole(log.user_role)}
+                                    </Badge>
+                                  </td>
+                                  <td>
+                                    {log.affected_username ? (
+                                      <div>
+                                        <strong>{log.affected_username}</strong>
+                                        <br />
+                                        <small className="text-muted">ID: {log.affected_user_id}</small>
+                                      </div>
+                                    ) : (
+                                      <span className="text-muted">-</span>
+                                    )}
+                                  </td>
+                                  <td>
+                                    <Badge bg={
+                                      log.event_context === 'authentication' ? 'success' :
+                                      log.event_context === 'navigation' ? 'primary' :
+                                      log.event_context === 'interaction' ? 'info' :
+                                      log.event_context === 'api_call' ? 'warning' : 'secondary'
+                                    }>
+                                      {formatEventContext(log.event_context)}
+                                    </Badge>
+                                  </td>
+                                  <td>
+                                    <code className="text-primary">{log.component || '-'}</code>
+                                  </td>
+                                  <td>
+                                    <Badge bg="light" text="dark">
+                                      {formatEventType(log.event_type)}
+                                    </Badge>
+                                    <div className="mt-1 small">{log.event_name}</div>
+                                  </td>
+                                  <td>
+                                    <div className="text-truncate" style={{ maxWidth: '250px' }} title={log.description}>
+                                      {log.description}
+                                    </div>
+                                    {log.page_duration && (
+                                      <small className="text-muted d-block">
+                                        <i className="fas fa-clock me-1"></i>
+                                        {log.page_duration}s
+                                      </small>
+                                    )}
+                                    {log.scroll_depth && (
+                                      <small className="text-muted d-block">
+                                        <i className="fas fa-arrows-alt-v me-1"></i>
+                                        {log.scroll_depth}% scroll
+                                      </small>
+                                    )}
+                                  </td>
+                                  <td>
+                                    <div className="text-truncate" style={{ maxWidth: '150px' }} title={log.origin}>
+                                      {log.origin || log.page_url || '-'}
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <code className="text-info">{log.ip_address}</code>
+                                  </td>
+                                </tr>
+                              ))
+                        ) : (
+                          <tr>
+                            <td colSpan="9" className="text-center py-4">
+                              <i className="fas fa-inbox fa-3x text-muted mb-3"></i>
+                              <p className="text-muted">Không có nhật ký hoạt động</p>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </Table>
+                  </div>
+
+                  {/* Pagination */}
+                  {!activityLoading && activityPagination.totalPages > 1 && (
+                    <div className="mt-3">
+                      <Pagination
+                        currentPage={activityPagination.page}
+                        totalPages={activityPagination.totalPages}
+                        onPageChange={(page) => fetchActivityLogs(page)}
+                        maxVisiblePages={5}
+                        showFirstLast={true}
+                      />
+                    </div>
+                  )}
+
+                </Tab.Pane>
               </Tab.Content>
             </Tab.Container>
           </div>
+
+          {/* Activity Log Detail Modal */}
+          <Modal 
+            show={showActivityDetailModal} 
+            onHide={() => setShowActivityDetailModal(false)}
+            size="lg"
+          >
+            <Modal.Header closeButton>
+              <Modal.Title>
+                <i className="fas fa-info-circle me-2"></i>
+                Chi tiết Nhật ký Hoạt động
+              </Modal.Title>
+            </Modal.Header>
+            <Modal.Body>
+              {selectedActivityLog && (
+                <div>
+                  {/* Thông tin cơ bản */}
+                  <Card className="mb-3">
+                    <Card.Header className="bg-primary text-white">
+                      <h6 className="mb-0">
+                        <i className="fas fa-user me-2"></i>
+                        Thông tin Người dùng
+                      </h6>
+                    </Card.Header>
+                    <Card.Body>
+                      <Row>
+                        <Col md={6}>
+                          <div className="mb-2">
+                            <strong>Tên người dùng:</strong>
+                            <div>
+                              {selectedActivityLog.username || 'Ẩn danh'}
+                              {selectedActivityLog.user_email && (
+                                <div className="text-muted" style={{ fontSize: '0.85rem', marginTop: '2px' }}>
+                                  {selectedActivityLog.user_email}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="mb-2">
+                            <strong>Vai trò:</strong>
+                            <div>
+                              <Badge bg={
+                                selectedActivityLog.user_role === 'superadmin' || selectedActivityLog.user_role === 'Quản trị viên cấp cao' ? 'danger' :
+                                selectedActivityLog.user_role === 'admin' || selectedActivityLog.user_role === 'Quản trị viên' ? 'warning' :
+                                selectedActivityLog.user_role === 'staff' || selectedActivityLog.user_role === 'Nhân viên' ? 'info' : 'secondary'
+                              }>
+                                {formatUserRole(selectedActivityLog.user_role)}
+                              </Badge>
+                            </div>
+                          </div>
+                          {selectedActivityLog.user_id && (
+                            <div className="mb-2">
+                              <strong>User ID:</strong>
+                              <div><code>{selectedActivityLog.user_id}</code></div>
+                            </div>
+                          )}
+                        </Col>
+                        <Col md={6}>
+                          {selectedActivityLog.affected_username && (
+                            <>
+                              <div className="mb-2">
+                                <strong>Người bị ảnh hưởng:</strong>
+                                <div>{selectedActivityLog.affected_username}</div>
+                              </div>
+                              <div className="mb-2">
+                                <strong>Affected User ID:</strong>
+                                <div><code>{selectedActivityLog.affected_user_id}</code></div>
+                              </div>
+                            </>
+                          )}
+                        </Col>
+                      </Row>
+                    </Card.Body>
+                  </Card>
+
+                  {/* Thông tin sự kiện */}
+                  <Card className="mb-3">
+                    <Card.Header className="bg-info text-white">
+                      <h6 className="mb-0">
+                        <i className="fas fa-calendar-alt me-2"></i>
+                        Thông tin Sự kiện
+                      </h6>
+                    </Card.Header>
+                    <Card.Body>
+                      <Row>
+                        <Col md={6}>
+                          <div className="mb-2">
+                            <strong>Thời gian:</strong>
+                            <div>{new Date(selectedActivityLog.created_at).toLocaleString('vi-VN')}</div>
+                          </div>
+                          <div className="mb-2">
+                            <strong>Bối cảnh:</strong>
+                            <div>
+                              <Badge bg={
+                                selectedActivityLog.event_context === 'authentication' ? 'success' :
+                                selectedActivityLog.event_context === 'navigation' ? 'primary' :
+                                selectedActivityLog.event_context === 'interaction' ? 'info' :
+                                selectedActivityLog.event_context === 'api_call' ? 'warning' : 'secondary'
+                              }>
+                                {formatEventContext(selectedActivityLog.event_context)}
+                              </Badge>
+                            </div>
+                          </div>
+                          <div className="mb-2">
+                            <strong>Loại sự kiện:</strong>
+                            <div>
+                              <Badge bg="light" text="dark">
+                                {formatEventType(selectedActivityLog.event_type)}
+                              </Badge>
+                            </div>
+                          </div>
+                          <div className="mb-2">
+                            <strong>Tên sự kiện:</strong>
+                            <div><code>{selectedActivityLog.event_name}</code></div>
+                          </div>
+                        </Col>
+                        <Col md={6}>
+                          <div className="mb-2">
+                            <strong>Component:</strong>
+                            <div><code>{selectedActivityLog.component || '-'}</code></div>
+                          </div>
+                          <div className="mb-2">
+                            <strong>Mô tả:</strong>
+                            <div>{selectedActivityLog.description || '-'}</div>
+                          </div>
+                          {selectedActivityLog.target_element && (
+                            <div className="mb-2">
+                              <strong>Element:</strong>
+                              <div><code>{selectedActivityLog.target_element}</code></div>
+                            </div>
+                          )}
+                        </Col>
+                      </Row>
+                    </Card.Body>
+                  </Card>
+
+                  {/* Thông tin kỹ thuật */}
+                  <Card className="mb-3">
+                    <Card.Header className="bg-secondary text-white">
+                      <h6 className="mb-0">
+                        <i className="fas fa-server me-2"></i>
+                        Thông tin Kỹ thuật
+                      </h6>
+                    </Card.Header>
+                    <Card.Body>
+                      <Row>
+                        <Col md={6}>
+                          <div className="mb-2">
+                            <strong>Địa chỉ IP:</strong>
+                            <div><code className="text-info">{selectedActivityLog.ip_address}</code></div>
+                          </div>
+                          <div className="mb-2">
+                            <strong>Nguồn gốc:</strong>
+                            <div className="text-truncate" title={selectedActivityLog.origin}>
+                              {selectedActivityLog.origin || selectedActivityLog.page_url || '-'}
+                            </div>
+                          </div>
+                          <div className="mb-2">
+                            <strong>Page URL:</strong>
+                            <div className="text-truncate" title={selectedActivityLog.page_url}>
+                              {selectedActivityLog.page_url || '-'}
+                            </div>
+                          </div>
+                          {selectedActivityLog.session_id && (
+                            <div className="mb-2">
+                              <strong>Session ID:</strong>
+                              <div><code className="small">{selectedActivityLog.session_id}</code></div>
+                            </div>
+                          )}
+                        </Col>
+                        <Col md={6}>
+                          {selectedActivityLog.device_info && (
+                            <>
+                              <div className="mb-2">
+                                <strong>User Agent:</strong>
+                                <div className="small text-muted">
+                                  {typeof selectedActivityLog.device_info === 'object' 
+                                    ? selectedActivityLog.device_info.userAgent 
+                                    : selectedActivityLog.device_info}
+                                </div>
+                              </div>
+                              {typeof selectedActivityLog.device_info === 'object' && (
+                                <>
+                                  <div className="mb-2">
+                                    <strong>Platform:</strong>
+                                    <div>{selectedActivityLog.device_info.platform || '-'}</div>
+                                  </div>
+                                  <div className="mb-2">
+                                    <strong>Mobile:</strong>
+                                    <div>{selectedActivityLog.device_info.mobile ? 'Có' : 'Không'}</div>
+                                  </div>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </Col>
+                      </Row>
+                    </Card.Body>
+                  </Card>
+
+                  {/* Thông tin chi tiết */}
+                  {(selectedActivityLog.page_duration || selectedActivityLog.hover_duration || selectedActivityLog.scroll_depth || selectedActivityLog.coordinates) && (
+                    <Card className="mb-3">
+                      <Card.Header className="bg-success text-white">
+                        <h6 className="mb-0">
+                          <i className="fas fa-chart-line me-2"></i>
+                          Thông tin Chi tiết
+                        </h6>
+                      </Card.Header>
+                      <Card.Body>
+                        <Row>
+                          {selectedActivityLog.page_duration && (
+                            <Col md={4}>
+                              <div className="mb-2">
+                                <strong>
+                                  <i className="fas fa-clock me-1"></i>
+                                  Thời gian ở trang:
+                                </strong>
+                                <div>{selectedActivityLog.page_duration} giây</div>
+                              </div>
+                            </Col>
+                          )}
+                          {selectedActivityLog.hover_duration && (
+                            <Col md={4}>
+                              <div className="mb-2">
+                                <strong>
+                                  <i className="fas fa-hand-pointer me-1"></i>
+                                  Thời gian hover:
+                                </strong>
+                                <div>{selectedActivityLog.hover_duration}ms</div>
+                              </div>
+                            </Col>
+                          )}
+                          {selectedActivityLog.scroll_depth && (
+                            <Col md={4}>
+                              <div className="mb-2">
+                                <strong>
+                                  <i className="fas fa-arrows-alt-v me-1"></i>
+                                  Độ sâu scroll:
+                                </strong>
+                                <div>{selectedActivityLog.scroll_depth}%</div>
+                              </div>
+                            </Col>
+                          )}
+                          {selectedActivityLog.coordinates && (
+                            <Col md={12}>
+                              <div className="mb-2">
+                                <strong>
+                                  <i className="fas fa-crosshairs me-1"></i>
+                                  Tọa độ:
+                                </strong>
+                                <div>
+                                  {typeof selectedActivityLog.coordinates === 'object' ? (
+                                    <>
+                                      X: {selectedActivityLog.coordinates.x}, Y: {selectedActivityLog.coordinates.y}
+                                      {selectedActivityLog.coordinates.pageX && (
+                                        <> (Page: {selectedActivityLog.coordinates.pageX}, {selectedActivityLog.coordinates.pageY})</>
+                                      )}
+                                    </>
+                                  ) : (
+                                    selectedActivityLog.coordinates
+                                  )}
+                                </div>
+                              </div>
+                            </Col>
+                          )}
+                        </Row>
+                      </Card.Body>
+                    </Card>
+                  )}
+
+                  {/* API Call Info */}
+                  {(selectedActivityLog.api_method || selectedActivityLog.api_endpoint) && (
+                    <Card className="mb-3">
+                      <Card.Header className="bg-warning text-dark">
+                        <h6 className="mb-0">
+                          <i className="fas fa-exchange-alt me-2"></i>
+                          Thông tin API Call
+                        </h6>
+                      </Card.Header>
+                      <Card.Body>
+                        <Row>
+                          {selectedActivityLog.api_method && (
+                            <Col md={4}>
+                              <div className="mb-2">
+                                <strong>Method:</strong>
+                                <div><Badge bg="primary">{selectedActivityLog.api_method}</Badge></div>
+                              </div>
+                            </Col>
+                          )}
+                          {selectedActivityLog.api_endpoint && (
+                            <Col md={8}>
+                              <div className="mb-2">
+                                <strong>Endpoint:</strong>
+                                <div><code>{selectedActivityLog.api_endpoint}</code></div>
+                              </div>
+                            </Col>
+                          )}
+                          {selectedActivityLog.api_status_code && (
+                            <Col md={4}>
+                              <div className="mb-2">
+                                <strong>Status Code:</strong>
+                                <div>
+                                  <Badge bg={
+                                    selectedActivityLog.api_status_code >= 500 ? 'danger' :
+                                    selectedActivityLog.api_status_code >= 400 ? 'warning' :
+                                    selectedActivityLog.api_status_code >= 300 ? 'info' : 'success'
+                                  }>
+                                    {selectedActivityLog.api_status_code}
+                                  </Badge>
+                                </div>
+                              </div>
+                            </Col>
+                          )}
+                          {selectedActivityLog.api_response_time && (
+                            <Col md={4}>
+                              <div className="mb-2">
+                                <strong>Response Time:</strong>
+                                <div>{selectedActivityLog.api_response_time}ms</div>
+                              </div>
+                            </Col>
+                          )}
+                        </Row>
+                      </Card.Body>
+                    </Card>
+                  )}
+
+                  {/* Event Data */}
+                  {selectedActivityLog.event_data && (
+                    <Card>
+                      <Card.Header className="bg-dark text-white">
+                        <h6 className="mb-0">
+                          <i className="fas fa-database me-2"></i>
+                          Dữ liệu Sự kiện
+                        </h6>
+                      </Card.Header>
+                      <Card.Body>
+                        <pre className="bg-light p-3 rounded" style={{ maxHeight: '300px', overflow: 'auto', fontSize: '12px' }}>
+                          {JSON.stringify(selectedActivityLog.event_data, null, 2)}
+                        </pre>
+                      </Card.Body>
+                    </Card>
+                  )}
+                </div>
+              )}
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="secondary" onClick={() => setShowActivityDetailModal(false)}>
+                Đóng
+              </Button>
+            </Modal.Footer>
+          </Modal>
 
           {/* Add IP Whitelist Modal */}
           <Modal show={showWhitelistModal} onHide={() => setShowWhitelistModal(false)}>

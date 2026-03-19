@@ -113,62 +113,235 @@
     color: #1f2937;
 }
 
-.modules-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 1.5rem;
+.section-description {
+    margin: -0.5rem 0 1rem 0;
+    color: #6b7280;
+    font-size: 0.95rem;
 }
 
-.module-card {
+.external-services-section .component-container.border-color {
+    border-left: 3px solid #8b5cf6;
+}
+
+/* Layout theo status-container-example */
+.components-container.one-column {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.component-container.border-color {
     border: 1px solid #e5e7eb;
     border-radius: 8px;
-    padding: 1.5rem;
-    background: white;
-    transition: all 0.3s ease;
+    margin-bottom: 0.5rem;
+    overflow: hidden;
 }
 
-.module-card:hover {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    transform: translateY(-2px);
+.component-container.border-color:last-child {
+    margin-bottom: 0;
 }
 
-.module-header {
+.component-inner-container {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    gap: 0.75rem 1.5rem;
+}
+
+.component-inner-container .name {
+    font-weight: 600;
+    font-size: 1rem;
+    color: #1f2937;
+    min-width: 180px;
+}
+
+.component-name-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.component-inner-container .component-description {
+    font-size: 0.8rem;
+    color: #6b7280;
+    font-weight: 400;
+}
+
+.external-service-inner .component-name-block {
+    min-width: 200px;
+}
+
+.component-inner-container .component-status {
+    font-size: 0.9rem;
+    color: #4b5563;
+    margin-left: auto;
+}
+
+.component-inner-container.status-green {
+    border-left: 4px solid #1e8542;
+}
+
+.component-inner-container.status-yellow {
+    border-left: 4px solid #cd8812;
+}
+
+.component-inner-container.status-red {
+    border-left: 4px solid #ef4444;
+}
+
+/* Nhấp nháy màu đỏ nhẹ khi module ngừng hoạt động */
+.component-inner-container.status-red.showcased {
+    animation: status-red-blink 2s ease-in-out infinite;
+}
+
+@keyframes status-red-blink {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+        background-color: transparent;
+    }
+    50% {
+        box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.300);
+        background-color: rgba(239, 68, 68, 0.300);
+    }
+}
+
+.component-inner-container.status-optional {
+    border-left: 4px solid #94a3b8;
+}
+
+.status-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    font-size: 0.9rem;
+    font-weight: bold;
+}
+
+.status-icon-button.status-icon-operational {
+    background: #1e8542;
+    color: white;
+}
+
+.status-icon-button.status-icon-degraded {
+    background: #cd8812;
+    color: white;
+}
+
+.status-icon-button.status-icon-down {
+    background: #ef4444;
+    color: white;
+}
+
+.status-icon-button.status-icon-optional {
+    background: #94a3b8;
+    color: white;
+}
+
+.uptime-90-days-wrapper {
+    flex: 1 1 100%;
+    margin-top: 0.5rem;
+}
+
+.availability-time-line-graphic {
+    display: block;
+    width: 100%;
+    min-width: 100%;
+    height: 34px;
+}
+
+.legend {
     display: flex;
     align-items: center;
-    margin-bottom: 1rem;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: #6b7280;
 }
 
-.module-status-dot {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    margin-right: 0.75rem;
-    animation: pulse 2s infinite;
+.legend .spacer {
+    flex: 1;
+    min-width: 1rem;
 }
 
-.module-header h4 {
-    margin: 0;
-    font-size: 1.1rem;
+.legend-item-uptime-value {
+    font-weight: 600;
     color: #1f2937;
 }
 
-.module-details {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
+/* Uptime Tooltip */
+.uptime-tooltip {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 10000;
+    pointer-events: none;
 }
 
-.module-status {
-    margin: 0;
-    font-weight: 500;
-    color: #374151;
+.uptime-tooltip-pointer {
+    position: fixed;
+    width: 0;
+    height: 0;
+    transform: translate(-50%, -100%);
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-bottom: 8px solid #1f2937;
 }
 
-.module-port,
-.module-last-checked {
-    margin: 0;
+.uptime-tooltip-box {
+    position: fixed;
+    min-width: 200px;
+    max-width: 280px;
+    padding: 1rem;
+    background: #1f2937;
+    color: #f9fafb;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.uptime-tooltip-date {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 0.5rem;
+}
+
+.uptime-tooltip-outages .no-outages-msg,
+.uptime-tooltip-outages .no-data-msg {
     font-size: 0.875rem;
-    color: #6b7280;
+    color: #d1d5db;
+}
+
+.uptime-tooltip-outages .outage-field {
+    font-size: 0.875rem;
+}
+
+.uptime-tooltip-outages .outage-field .label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.uptime-tooltip-outages .outage-field.partial .label {
+    color: #fcd34d;
+}
+
+.uptime-tooltip-outages .outage-field.major .label {
+    color: #f87171;
+}
+
+.uptime-tooltip-outages .outage-field .value {
+    color: #d1d5db;
+}
+
+.uptime-day {
+    cursor: pointer;
+}
+
+.uptime-day:hover {
+    opacity: 0.9;
 }
 
 .uptime-controls {
@@ -296,27 +469,437 @@
     font-weight: 500;
 }
 
+/* Skeleton loading - hiển thị layout ngay khi vào trang */
+.status-skeleton .status-info {
+    width: 100%;
+}
+
+.skeleton-line,
+.skeleton-title,
+.skeleton-timestamp,
+.skeleton-name,
+.skeleton-status {
+    display: inline-block;
+    height: 1em;
+    border-radius: 4px;
+    background: linear-gradient(
+        90deg,
+        #e5e7eb 0%,
+        #f3f4f6 50%,
+        #e5e7eb 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.skeleton-title { height: 1.75rem; }
+.skeleton-timestamp { height: 0.9rem; margin-top: 0.5rem; }
+.status-module-skeleton .skeleton-name { min-width: 180px; }
+.status-module-skeleton .skeleton-status { margin-left: auto; }
+.skeleton-icon {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: linear-gradient(
+        90deg,
+        #e5e7eb 0%,
+        #f3f4f6 50%,
+        #e5e7eb 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.skeleton-uptime-bars {
+    height: 34px;
+    width: 100%;
+    max-width: 100%;
+    border-radius: 4px;
+    background: linear-gradient(
+        90deg,
+        #e5e7eb 0%,
+        #f3f4f6 50%,
+        #e5e7eb 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.status-module-skeleton .legend .skeleton-line {
+    height: 0.85rem;
+}
+
+.status-module-skeleton .component-inner-container {
+    border-left-color: #e5e7eb;
+}
+
+@keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* ========== Máy tính bảng (tablet) ========== */
+@media (max-width: 1024px) {
+    .status-page {
+        padding: 1.25rem;
+    }
+
+    .status-container {
+        border-radius: 10px;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+    }
+
+    .status-header {
+        padding: 2rem 1.5rem;
+    }
+
+    .status-header h1 {
+        font-size: 2.1rem;
+    }
+
+    .status-subtitle {
+        font-size: 1rem;
+    }
+
+    .overall-status {
+        padding: 1.5rem;
+    }
+
+    .status-info h2 {
+        font-size: 1.5rem;
+    }
+
+    .modules-section,
+    .uptime-section,
+    .incidents-section {
+        padding: 1.5rem;
+    }
+
+    .modules-section h3,
+    .uptime-section h3,
+    .incidents-section h3 {
+        font-size: 1.35rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .component-inner-container {
+        padding: 0.875rem 1rem;
+        gap: 0.5rem 1rem;
+    }
+
+    .component-inner-container .name {
+        min-width: 140px;
+        font-size: 0.95rem;
+    }
+
+    .external-service-inner .component-name-block {
+        min-width: 160px;
+    }
+
+    .legend {
+        font-size: 0.75rem;
+    }
+
+    .uptime-controls {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .incident-card {
+        padding: 1.25rem;
+    }
+
+    .incident-header {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .incident-meta {
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+
+    .status-footer {
+        padding: 1.5rem;
+    }
+}
+
+/* ========== Điện thoại / tablet nhỏ ========== */
 @media (max-width: 768px) {
     .status-page {
         padding: 1rem;
     }
 
-    .status-header h1 {
-        font-size: 2rem;
+    .status-container {
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
     }
 
-    .modules-grid {
-        grid-template-columns: 1fr;
+    .status-header {
+        padding: 1.75rem 1rem;
+    }
+
+    .status-header h1 {
+        font-size: 1.75rem;
+        line-height: 1.3;
+    }
+
+    .status-subtitle {
+        font-size: 0.95rem;
     }
 
     .overall-status {
         flex-direction: column;
         text-align: center;
+        padding: 1.25rem;
     }
 
     .status-indicator {
         margin-right: 0;
+        margin-bottom: 0.75rem;
+    }
+
+    .status-info h2 {
+        font-size: 1.35rem;
+    }
+
+    .status-timestamp {
+        font-size: 0.85rem;
+    }
+
+    .modules-section,
+    .uptime-section,
+    .incidents-section {
+        padding: 1.25rem;
+    }
+
+    .modules-section h3,
+    .uptime-section h3,
+    .incidents-section h3 {
+        font-size: 1.2rem;
         margin-bottom: 1rem;
+    }
+
+    .section-description {
+        font-size: 0.875rem;
+    }
+
+    .component-inner-container {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 0.875rem 1rem;
+        gap: 0.5rem;
+    }
+
+    .component-inner-container .name {
+        min-width: 0;
+        width: 100%;
+        font-size: 0.95rem;
+    }
+
+    .component-inner-container .component-status {
+        margin-left: 0;
+        order: 2;
+    }
+
+    .component-container.border-color {
+        position: relative;
+    }
+
+    .component-inner-container .status-icon-button {
+        position: absolute;
+        top: 0.875rem;
+        right: 1rem;
+    }
+
+    .component-inner-container {
+        padding-right: 2.75rem;
+    }
+
+    .external-service-inner .component-name-block {
+        min-width: 0;
+    }
+
+    .uptime-90-days-wrapper {
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+
+    .availability-time-line-graphic {
+        min-width: 0;
+    }
+
+    .legend {
+        font-size: 0.7rem;
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+
+    .legend .spacer {
+        min-width: 0.5rem;
+    }
+
+    .uptime-controls {
+        margin-bottom: 1rem;
+    }
+
+    .uptime-controls button {
+        padding: 0.5rem 0.875rem;
+        font-size: 0.8125rem;
+    }
+
+    .uptime-chart {
+        padding: 0.875rem;
+    }
+
+    .incident-card {
+        padding: 1rem;
+    }
+
+    .incident-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .incident-header h4 {
+        font-size: 1rem;
+    }
+
+    .incident-status {
+        font-size: 0.7rem;
+    }
+
+    .incident-description {
+        font-size: 0.9rem;
+    }
+
+    .incident-meta {
+        font-size: 0.8125rem;
+    }
+
+    .status-footer {
+        padding: 1.25rem 1rem;
+        font-size: 0.875rem;
+    }
+
+    /* Skeleton mobile */
+    .status-module-skeleton .skeleton-name {
+        max-width: 60%;
+    }
+
+    .skeleton-uptime-bars {
+        height: 28px;
+    }
+}
+
+/* ========== Điện thoại nhỏ ========== */
+@media (max-width: 576px) {
+    .status-page {
+        padding: 0.75rem;
+    }
+
+    .status-container {
+        border-radius: 6px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    }
+
+    .status-header {
+        padding: 1.5rem 0.75rem;
+    }
+
+    .status-header h1 {
+        font-size: 1.5rem;
+    }
+
+    .status-subtitle {
+        font-size: 0.875rem;
+    }
+
+    .overall-status {
+        padding: 1rem;
+    }
+
+    .status-info h2 {
+        font-size: 1.2rem;
+    }
+
+    .modules-section,
+    .uptime-section,
+    .incidents-section {
+        padding: 1rem;
+    }
+
+    .modules-section h3,
+    .uptime-section h3,
+    .incidents-section h3 {
+        font-size: 1.1rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .component-inner-container {
+        padding: 0.75rem;
+        padding-right: 2.5rem;
+    }
+
+    .component-inner-container .status-icon-button {
+        top: 0.75rem;
+        right: 0.75rem;
+        width: 22px;
+        height: 22px;
+        font-size: 0.8rem;
+    }
+
+    .uptime-90-days-wrapper .legend {
+        font-size: 0.65rem;
+    }
+
+    .availability-time-line-graphic {
+        height: 28px;
+    }
+
+    .uptime-controls {
+        flex-direction: column;
+    }
+
+    .uptime-controls button {
+        width: 100%;
+    }
+
+    .incident-card {
+        padding: 0.875rem;
+    }
+
+    .status-footer {
+        padding: 1rem 0.75rem;
+        font-size: 0.8125rem;
+    }
+
+    /* Tooltip thu nhỏ trên màn hình nhỏ */
+    .uptime-tooltip-box {
+        min-width: 160px;
+        max-width: 90vw;
+        padding: 0.75rem;
+    }
+
+    .uptime-tooltip-date {
+        font-size: 0.875rem;
+    }
+}
+
+/* ========== Rất nhỏ (điện thoại portrait) ========== */
+@media (max-width: 380px) {
+    .status-header h1 {
+        font-size: 1.35rem;
+    }
+
+    .status-info h2 {
+        font-size: 1.1rem;
+    }
+
+    .component-inner-container .name,
+    .component-inner-container .component-status {
+        font-size: 0.875rem;
     }
 }
 

@@ -11,33 +11,38 @@ const PieChart = ({
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
   
+  const hoverColors = (colors || []).map(color => {
+    const c = (color || '').replace('#', '');
+    if (!c) return 'rgba(200,200,200,0.9)';
+    const r = parseInt(c.substring(0, 2), 16);
+    const g = parseInt(c.substring(2, 4), 16);
+    const b = parseInt(c.substring(4, 6), 16);
+    return `rgba(${Math.min(r + 20, 255)}, ${Math.min(g + 20, 255)}, ${Math.min(b + 20, 255)}, 0.9)`;
+  });
+
   useEffect(() => {
-    // Destroy previous chart instance if it exists
-    if (chartInstance.current) {
-      chartInstance.current.destroy();
-    }
-    
     if (!chartRef.current) return;
-    
-    // Create new chart
+
     const ctx = chartRef.current.getContext('2d');
-    
+
+    if (chartInstance.current) {
+      const chart = chartInstance.current;
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = data;
+      chart.data.datasets[0].backgroundColor = colors.slice(0, (data || []).length);
+      chart.data.datasets[0].hoverBackgroundColor = hoverColors.slice(0, (data || []).length);
+      chart.update('active');
+      return;
+    }
+
     chartInstance.current = new Chart(ctx, {
       type: 'pie',
       data: {
         labels: labels,
         datasets: [{
           data: data,
-          backgroundColor: colors.slice(0, data.length),
-          hoverBackgroundColor: colors.map(color => {
-            // Brighten the color a bit on hover
-            const c = color.substring(1); // Remove #
-            const r = parseInt(c.substring(0, 2), 16);
-            const g = parseInt(c.substring(2, 4), 16);
-            const b = parseInt(c.substring(4, 6), 16);
-            // Lighten by 10%
-            return `rgba(${Math.min(r + 20, 255)}, ${Math.min(g + 20, 255)}, ${Math.min(b + 20, 255)}, 0.9)`;
-          }),
+          backgroundColor: colors.slice(0, (data || []).length),
+          hoverBackgroundColor: hoverColors.slice(0, (data || []).length),
           hoverBorderColor: "rgba(234, 236, 244, 1)",
         }],
       },
@@ -48,26 +53,15 @@ const PieChart = ({
           title: {
             display: !!title,
             text: title,
-            font: {
-              size: 14,
-              weight: 'bold'
-            }
+            font: { size: 14, weight: 'bold' }
           },
-          legend: {
-            position: 'bottom',
-            labels: {
-              boxWidth: 12
-            }
-          },
+          legend: { position: 'bottom', labels: { boxWidth: 12 } },
           tooltip: {
             backgroundColor: "rgb(255,255,255)",
             bodyColor: "#858796",
             titleColor: "#6e707e",
             titleMarginBottom: 10,
-            titleFont: {
-              size: 14,
-              weight: 'bold'
-            },
+            titleFont: { size: 14, weight: 'bold' },
             borderColor: '#dddfeb',
             borderWidth: 1,
             caretPadding: 10,
@@ -76,14 +70,16 @@ const PieChart = ({
         cutout: '0%',
       },
     });
-    
-    // Cleanup on unmount
+  }, [data, labels, colors, title]);
+
+  useEffect(() => {
     return () => {
       if (chartInstance.current) {
         chartInstance.current.destroy();
+        chartInstance.current = null;
       }
     };
-  }, [data, labels, colors, title]);
+  }, []);
   
   return (
     <div style={{ height: height + 'px', position: 'relative' }}>

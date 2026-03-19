@@ -1,0 +1,2510 @@
+/* --- Trang lịch phòng họp - full trang, chừa TopHeader + Navbar, không trống trên/2 bên --- */
+.receptionist-page.receptionist-calendar-wrap {
+  /* Bù padding-top của main-content-with-header (20px) và padding ngang của container-fluid px-2 (0.5rem) */
+  margin-top: -20px;
+  margin-left: -0.5rem;
+  margin-right: -0.5rem;
+  width: calc(100% + 1rem);
+  padding: 0 0.5rem 1rem 0.5rem;
+  max-width: none;
+  background: #fff;
+  min-height: calc(100vh - 60px);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== Calendar Redesign V2 ===== */
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .calendar-redesign-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-toolbar.gcal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 16px;
+  border: 1px solid #dbe3f4;
+  background: linear-gradient(135deg, #ffffff 0%, #f5f8ff 100%);
+  box-shadow: 0 14px 34px rgba(22, 53, 117, 0.1);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-main-group,
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-action-group {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-main-group {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-action-group {
+  flex: 0 0 auto;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-btn {
+  border-radius: 10px;
+  border-color: #d4deef;
+  color: #3a4f77;
+  transition: all 0.2s ease;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-btn:hover {
+  border-color: #bfd0ee;
+  transform: translateY(-1px);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-btn.primary,
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-primary-btn,
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-btn.primary i,
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-primary-btn i {
+  color: #fff !important;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-btn.today {
+  background: #fff;
+  font-weight: 600;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-mode-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  background: #edf3ff;
+  border: 1px solid #d4e2fd;
+  color: #365f9f;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 0.35rem 0.7rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-nav-title-row {
+  flex: 0 0 auto;
+  min-width: 0;
+  justify-content: center;
+  gap: 0.2rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-nav-title-row .toolbar-title-wrap {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-title.gcal-title {
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: #1f365e;
+  min-width: 0;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-status-strip {
+  margin-bottom: 0;
+  gap: 0.48rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-status-row .meeting-room-status-strip {
+  flex: 1 1 auto;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-status-row .meeting-room-legend {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-status-strip .status-pill {
+  border-radius: 10px;
+  padding: 0.36rem 0.62rem;
+  font-weight: 600;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.25rem 0.15rem 0;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-legend .legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #536b92;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-legend .legend-item em {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-legend .legend-approved em { background: #33b074; }
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-legend .legend-pending em { background: #f3a300; }
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-legend .legend-rejected em { background: #e64b3f; }
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-legend .legend-note i { color: #2f66d4; }
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-calendar-surface {
+  border-radius: 16px;
+  border: 1px solid #dbe5f6;
+  box-shadow: 0 18px 38px rgba(18, 50, 112, 0.08);
+  background: linear-gradient(180deg, #fbfdff 0%, #ffffff 22%);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .calendar-view-stage {
+  animation: calendarViewSwitch 0.3s ease-out;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .calendar-table th,
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .calendar-table td {
+  border-color: #e5edf9;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .day-table-24h .col-slot-24h,
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .week-table-24h .col-slot-24h {
+  transition: background-color 0.18s ease, box-shadow 0.2s ease;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .day-table-24h .col-slot-24h:hover,
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .week-table-24h .col-slot-24h:hover {
+  background: linear-gradient(90deg, #f2f7ff 0%, #f9fbff 100%);
+  box-shadow: inset 3px 0 0 #2a76f4;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .calendar-event-modern {
+  border-radius: 8px;
+  padding: 0.22rem 0.48rem;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 5px 12px rgba(32, 102, 196, 0.2);
+  transition: transform 0.17s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .calendar-event-modern:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px rgba(24, 85, 170, 0.27);
+  filter: saturate(1.05);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .event-bar.pending {
+  background: linear-gradient(135deg, #f5b022 0%, #e69a00 100%);
+  color: #1f1f1f;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .event-bar.approved {
+  background: linear-gradient(135deg, #2293ef 0%, #1a66e3 100%);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .event-bar.rejected {
+  background: linear-gradient(135deg, #f2695f 0%, #d6392e 100%);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-month-view.gcal-style .month-th {
+  background: #f8fbff;
+  color: #4f6690;
+  font-weight: 700;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-month-view.gcal-style .month-td {
+  height: 96px;
+  min-height: 96px;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-month-view.gcal-style .month-td:hover {
+  background: #f2f7ff;
+  box-shadow: inset 0 0 0 1px #d2e2fd;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-month-view.gcal-style .month-event-chip.calendar-event-chip-modern {
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  transition: transform 0.18s ease, box-shadow 0.2s ease;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-month-view.gcal-style .month-event-chip.calendar-event-chip-modern:hover {
+  transform: translateX(1px);
+  box-shadow: 0 6px 14px rgba(24, 85, 170, 0.25);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-month-card {
+  border-radius: 14px;
+  border: 1px solid #dbe5f8;
+  background: linear-gradient(140deg, #fff 0%, #f8fbff 100%);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-month-card:hover {
+  border-color: #b9cef3;
+  box-shadow: 0 12px 24px rgba(26, 71, 147, 0.16);
+}
+
+@keyframes calendarViewSwitch {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 1200px) {
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-toolbar.gcal-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-main-group,
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-action-group {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-nav-title-row {
+    flex: 1 1 100%;
+  }
+}
+
+@media (max-width: 767px) {
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-status-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.45rem;
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-status-row .meeting-room-legend {
+    justify-content: flex-start;
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-toolbar.gcal-toolbar {
+    border-radius: 12px;
+    padding: 0.6rem;
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .toolbar-mode-pill {
+    order: 3;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-view-switch {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .meeting-room-view-switch .view-switch-btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-month-view.gcal-style .month-td {
+    height: 72px;
+    min-height: 72px;
+  }
+}
+
+@media (max-width: 520px) {
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Trang công khai /dat-phong-cong-khai: không Navbar, body full trang (không container) */
+.main-content.public-booking-page-layout,
+.main-content-with-header.public-booking-page-layout {
+  margin-left: 0;
+  padding: 0;
+  max-width: none;
+}
+.receptionist-page.receptionist-calendar-wrap.is-public {
+  margin: 0;
+  width: 100%;
+  padding: 1rem;
+  min-height: 100vh;
+}
+
+.meeting-room-loading-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  min-height: 220px;
+  border-radius: 16px;
+  border: 1px solid #dbe6fb;
+  background: linear-gradient(135deg, #f8fbff 0%, #eef5ff 100%);
+  color: #1f3f78;
+  font-weight: 500;
+  animation: fadeInSlide 0.35s ease-out;
+}
+
+.meeting-room-loading-card.is-error {
+  color: #8a1c1c;
+  border-color: #f1caca;
+  background: linear-gradient(135deg, #fff6f6 0%, #fff 100%);
+}
+
+.meeting-room-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid #c3d6fb;
+  border-top-color: #2165e5;
+  animation: spin360 0.8s linear infinite;
+}
+
+.meeting-room-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr;
+  gap: 1rem;
+  border-radius: 18px;
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 1rem;
+  border: 1px solid #d8e6ff;
+  background: radial-gradient(circle at 10% 20%, #f3f8ff 0%, #edf4ff 48%, #f8fbff 100%);
+  overflow: hidden;
+  animation: fadeInSlide 0.45s ease-out;
+}
+
+.meeting-room-hero::after {
+  content: '';
+  position: absolute;
+  right: -65px;
+  top: -65px;
+  width: 180px;
+  height: 180px;
+  background: radial-gradient(circle, rgba(33, 101, 229, 0.18) 0%, rgba(33, 101, 229, 0) 72%);
+  pointer-events: none;
+}
+
+.meeting-room-hero-main h1 {
+  margin: 0.5rem 0 0.35rem;
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: #1d3561;
+}
+
+.meeting-room-hero-main p {
+  margin: 0;
+  color: #44608f;
+  font-size: 0.93rem;
+  line-height: 1.45;
+}
+
+.meeting-room-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid #c9ddff;
+  background: #fff;
+  color: #2556b8;
+  padding: 0.3rem 0.72rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.meeting-room-hero-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+}
+
+.meeting-room-hero-stats .hero-stat-card {
+  border-radius: 12px;
+  border: 1px solid #d6e3fb;
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(6px);
+  padding: 0.55rem 0.65rem;
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+.meeting-room-hero-stats .hero-stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(25, 66, 145, 0.12);
+}
+
+.meeting-room-hero-stats .hero-stat-card span {
+  display: block;
+  font-size: 0.73rem;
+  color: #5d739a;
+}
+
+.meeting-room-hero-stats .hero-stat-card strong {
+  display: block;
+  margin-top: 0.12rem;
+  color: #173d84;
+  font-size: 1.1rem;
+}
+
+.meeting-room-hero-side {
+  display: flex;
+}
+
+.hero-next-event-card {
+  width: 100%;
+  border: 1px solid #d4e2fc;
+  border-radius: 14px;
+  background: #fff;
+  padding: 0.85rem;
+  box-shadow: 0 8px 24px rgba(40, 87, 180, 0.12);
+  align-self: stretch;
+}
+
+.hero-next-event-card h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.92rem;
+  color: #2b4f90;
+}
+
+.next-event-title {
+  margin: 0 0 0.3rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #1f335d;
+}
+
+.next-event-meta,
+.next-event-empty {
+  margin: 0.15rem 0;
+  font-size: 0.82rem;
+  color: #60779d;
+}
+
+.next-event-meta i {
+  color: #2f66d4;
+  margin-right: 0.2rem;
+}
+
+
+/* Toolbar giống Google: Hôm nay, < >, title h1, dropdown, nút Đặt phòng */
+.receptionist-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid #dbe5f7;
+  box-shadow: 0 8px 22px rgba(18, 52, 116, 0.09);
+  backdrop-filter: blur(10px);
+  animation: fadeInSlide 0.45s ease-out;
+}
+
+.meeting-room-view-switch {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 11px;
+  border: 1px solid #d5def2;
+  background: #f5f8ff;
+  padding: 0.2rem;
+}
+
+.meeting-room-view-switch .view-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #4f6489;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.38rem 0.6rem;
+  transition: all 0.2s ease;
+}
+
+.meeting-room-view-switch .view-switch-btn.active {
+  color: #fff;
+  background: linear-gradient(135deg, #1976f3 0%, #1a5bd3 100%);
+  box-shadow: 0 6px 14px rgba(27, 86, 188, 0.28);
+}
+
+.meeting-room-view-switch .view-switch-btn:hover:not(.active) {
+  background: rgba(28, 93, 197, 0.12);
+}
+
+.meeting-room-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-bottom: 0.7rem;
+  animation: fadeInSlide 0.35s ease-out;
+}
+
+.meeting-room-status-strip .status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.33rem 0.7rem;
+  border: 1px solid transparent;
+}
+
+.meeting-room-status-strip .status-pill.approved {
+  background: #e8f8ef;
+  color: #0f7d49;
+  border-color: #c3ebd5;
+}
+
+.meeting-room-status-strip .status-pill.pending {
+  background: #fff5e2;
+  color: #9b6200;
+  border-color: #f6deb0;
+}
+
+.meeting-room-status-strip .status-pill.neutral {
+  background: #edf3ff;
+  color: #365c9b;
+  border-color: #d6e3fe;
+}
+
+.meeting-room-calendar-surface {
+  animation: fadeInUp 0.3s ease-out;
+}
+
+.receptionist-year-view {
+  padding: 1rem;
+}
+
+.receptionist-year-view .year-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.receptionist-year-view .year-month-card {
+  border: 1px solid #dae3f3;
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.72rem;
+  text-align: left;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.receptionist-year-view .year-month-card:hover {
+  transform: translateY(-1px);
+  border-color: #bcd0f1;
+  box-shadow: 0 8px 18px rgba(47, 87, 164, 0.12);
+}
+
+.receptionist-year-view .year-month-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.receptionist-year-view .year-month-card-header h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  color: #2a477a;
+}
+
+.receptionist-year-view .year-month-card-header span {
+  font-size: 0.76rem;
+  color: #5f759e;
+}
+
+.receptionist-year-view .year-month-card-stats {
+  margin-top: 0.62rem;
+  display: flex;
+  gap: 0.35rem;
+}
+
+.receptionist-year-view .year-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.receptionist-year-view .year-chip.approved {
+  background: #e8f8ef;
+  color: #0f7d49;
+}
+
+.receptionist-year-view .year-chip.pending {
+  background: #fff5e2;
+  color: #9b6200;
+}
+
+.gcal-toolbar .toolbar-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  border: 1px solid #dadce0;
+  background: #fff;
+  cursor: pointer;
+  color: #3c4043;
+  font-weight: 500;
+}
+
+.gcal-toolbar .toolbar-btn:hover {
+  background: #f8f9fa;
+}
+
+.gcal-toolbar .toolbar-btn.today {
+  min-width: 88px;
+}
+
+.gcal-toolbar .toolbar-btn.nav {
+  width: 40px;
+  padding: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gcal-toolbar .toolbar-btn.primary,
+.gcal-toolbar .gcal-primary-btn {
+  background: #039be5;
+  border-color: #039be5;
+  color: #fff;
+}
+
+.gcal-toolbar .toolbar-btn.primary:hover,
+.gcal-toolbar .gcal-primary-btn:hover {
+  background: #0288d1;
+  border-color: #0288d1;
+}
+
+/* Tiêu đề lịch = h1 giống Google (XuJrye), bọc để mở picker tháng/năm */
+.gcal-toolbar .toolbar-title-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+.gcal-toolbar .toolbar-title.gcal-title {
+  font-size: 1.375rem;
+  font-weight: 400;
+  color: #3c4043;
+  min-width: 200px;
+  text-align: center;
+  margin: 0;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.gcal-toolbar .toolbar-title.gcal-title:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+.gcal-toolbar .month-year-picker-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+  background: #fff;
+  border: 1px solid #dadce0;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  padding: 12px 14px;
+  z-index: 1000;
+  min-width: 180px;
+}
+
+/* Modal chọn ngày/tháng/năm bên dưới toolbar-title */
+.gcal-date-picker-modal {
+  min-width: 260px;
+  padding: 10px 12px 14px;
+}
+.gcal-date-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.gcal-date-picker-nav {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #3c4043;
+  font-size: 1.25rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.gcal-date-picker-nav:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+.gcal-date-picker-title-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 1;
+  justify-content: center;
+}
+.gcal-date-picker-month,
+.gcal-date-picker-year {
+  font-size: 0.875rem;
+  /* Đủ padding-right để chữ không bị che bởi mũi tên dropdown (Tháng 10/11/12, năm 4 chữ số) */
+  padding: 6px 32px 6px 10px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.gcal-date-picker-month {
+  min-width: 118px; /* Đủ cho "Tháng 12" */
+}
+.gcal-date-picker-year {
+  width: 88px;
+  min-width: 88px; /* Đủ cho năm 4 chữ số + mũi tên */
+}
+.gcal-date-picker-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+  padding: 0 2px;
+}
+.gcal-date-picker-weekday {
+  font-size: 0.7rem;
+  color: #5f6368;
+  text-align: center;
+  font-weight: 500;
+}
+.gcal-date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.gcal-date-picker-day {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #3c4043;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.gcal-date-picker-day:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
+}
+.gcal-date-picker-day.today {
+  background: #1a73e8;
+  color: #fff;
+}
+.gcal-date-picker-day.today:hover:not(:disabled) {
+  background: #1765cc;
+  color: #fff;
+}
+.gcal-date-picker-day.other-month {
+  color: #9aa0a6;
+}
+.gcal-date-picker-day.other-month:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: #5f6368;
+}
+
+.gcal-toolbar .month-year-picker-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.gcal-toolbar .month-year-picker-row .form-select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Nhóm: nút Trước + tiêu đề tháng + nút Sau */
+.toolbar-nav-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.toolbar-nav-title-row .toolbar-title-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.toolbar-spacer {
+  flex: 1;
+  min-width: 1rem;
+}
+
+.gcal-toolbar .toolbar-btn.gcal-public-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Modal Link công khai + QR */
+.gcal-public-link-modal {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  max-width: 420px;
+  width: 90%;
+  z-index: 1100;
+  max-height: 90vh;
+  overflow: auto;
+}
+.gcal-public-link-modal .modal-body {
+  padding: 1rem 1.25rem 1.25rem;
+}
+.gcal-public-link-row {
+  margin-bottom: 1.25rem;
+}
+.gcal-public-link-input-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.gcal-public-link-input {
+  flex: 1;
+  min-width: 0;
+  border: none !important;
+  border-radius: 0;
+  padding: 8px 12px;
+  font-size: 0.875rem;
+}
+.gcal-public-link-input:focus {
+  box-shadow: none;
+  outline: none;
+}
+.gcal-public-link-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  border: none;
+  background: #f1f3f4;
+  color: #3c4043;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.gcal-public-link-icon-btn:hover {
+  background: #e8eaed;
+  color: #1a73e8;
+}
+.gcal-public-link-icon-btn:focus {
+  outline: none;
+}
+a.gcal-public-link-icon-btn {
+  text-decoration: none;
+}
+.gcal-public-qr-section .form-label {
+  margin-bottom: 0.5rem;
+}
+.gcal-public-qr-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+.gcal-public-qr-wrap canvas.gcal-public-qr-code {
+  display: block;
+  border-radius: 8px;
+}
+.gcal-public-qr-download {
+  align-self: center;
+}
+
+.gcal-toolbar .toolbar-select.gcal-select {
+  padding: 0.5rem 2.25rem 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #dadce0;
+  font-size: 0.875rem;
+  background: #fff;
+  color: #3c4043;
+  cursor: pointer;
+  min-height: 40px;
+}
+
+/* Select chế độ xem (Ngày/Tuần/Tháng) luôn cạnh nút Hôm nay */
+.gcal-toolbar .toolbar-select.gcal-select-view-mode {
+  width: auto;
+  min-width: 90px;
+  max-width: 120px;
+}
+
+.receptionist-calendar {
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #dadce0;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+@keyframes spin360 {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeInSlide {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 992px) {
+  .receptionist-year-view .year-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .meeting-room-hero {
+    grid-template-columns: 1fr;
+  }
+  .meeting-room-hero-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .receptionist-year-view .year-grid {
+    grid-template-columns: 1fr;
+  }
+  .meeting-room-hero {
+    padding: 0.9rem;
+    border-radius: 14px;
+  }
+  .meeting-room-hero-main h1 {
+    font-size: 1.15rem;
+  }
+  .meeting-room-hero-stats {
+    grid-template-columns: 1fr;
+  }
+  .meeting-room-view-switch {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .meeting-room-view-switch .view-switch-btn {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* Bảng lịch chung */
+.calendar-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.calendar-table th,
+.calendar-table td {
+  border: 1px solid #e8eaed;
+  vertical-align: top;
+}
+
+/* --- Day view --- */
+.receptionist-day-view {
+  padding: 0;
+}
+
+.day-table .col-day {
+  width: 180px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #3c4043;
+  background: #f8f9fa;
+}
+
+.day-table .col-slot {
+  padding: 0.6rem 0.75rem;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.day-table .col-slot:hover {
+  background: #f8f9fa;
+}
+
+/* Day view 24h: mỗi hàng = 1 giờ (06:00 – 23:00) */
+.day-table-24h .col-time { width: auto; }
+.day-table-24h .col-day {
+  width: 160px;
+  vertical-align: middle;
+  font-size: 0.85rem;
+}
+.day-table-24h .col-slot-24h {
+  min-height: 36px;
+  border-left: 3px solid #039be5;
+  padding: 0.4rem 0.6rem;
+}
+.slot-time-24h {
+  display: inline-block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #3c4043;
+  margin-bottom: 0.2rem;
+}
+
+/* --- Week view --- */
+.receptionist-week-view {
+  overflow-x: auto;
+}
+
+.week-table .col-day {
+  width: 100px;
+  padding: 0.4rem 0.3rem;
+  font-weight: 500;
+  font-size: 0.75rem;
+  background: #f8f9fa;
+  color: #3c4043;
+}
+
+.week-table .col-day.today {
+  background: #e3f2fd;
+  color: #039be5;
+  font-weight: 600;
+}
+
+.week-table .col-slot {
+  min-width: 64px;
+  padding: 0.25rem 0.3rem;
+  min-height: 34px;
+  cursor: pointer;
+}
+
+.week-table .col-slot:hover {
+  background: #f8f9fa;
+}
+
+/* Week view 24h: hàng = giờ (24h), cột = 7 ngày */
+.week-table-24h .col-hour-label {
+  width: 52px;
+  padding: 0.25rem 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #5f6368;
+  background: #f8f9fa;
+  white-space: nowrap;
+}
+.week-table-24h .col-slot-24h {
+  min-height: 30px;
+  border-left: 2px solid #e8eaed;
+  padding: 0.2rem 0.25rem;
+}
+.week-table-24h .col-slot-24h:hover {
+  background: #f0f7ff;
+}
+
+/* Thanh sự kiện (màu #039be5 giống Google) */
+.event-bar {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.4rem;
+  margin: 0.15rem 0;
+  border-radius: 4px;
+  background: #039be5;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-bar.small {
+  font-size: 0.7rem;
+  padding: 0.12rem 0.28rem;
+}
+
+.event-bar .event-time {
+  font-weight: 600;
+  margin-right: 0.25rem;
+  opacity: 0.95;
+}
+
+/* Pending / approved màu nhẹ hơn */
+.event-bar.pending { background: #f9ab00; color: #1a1a1a; }
+.event-bar.rejected { background: #ea4335; color: #fff; }
+
+.event-bar.draggable { cursor: grab; }
+.event-bar.draggable:active { cursor: grabbing; }
+.event-bar.dragging { opacity: 0.6; }
+
+.col-slot.drop-target.drag-over {
+  background: #e8f0fe;
+  outline: 2px dashed #039be5;
+  outline-offset: -2px;
+}
+
+/* --- Month view: giống mẫu Google Calendar (calendar.md) --- */
+.receptionist-month-view {
+  padding: 0;
+}
+
+.receptionist-month-view.gcal-style .month-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+/* Header: Thứ hai ... Chủ nhật (ẩn full trên mobile, hiện short) */
+.receptionist-month-view.gcal-style .month-th {
+  padding: 0.35rem 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #5f6368;
+  background: #fff;
+  text-align: center;
+  border-bottom: 1px solid #e8eaed;
+}
+
+.month-th-short { display: none; }
+@media (max-width: 768px) {
+  .month-th-full { display: none; }
+  .month-th-short { display: inline; }
+}
+
+.receptionist-month-view.gcal-style .month-week-row {
+  vertical-align: top;
+}
+
+.receptionist-month-view.gcal-style .month-td {
+  min-height: 80px;
+  height: 80px;
+  padding: 0 2px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  border: 1px solid #e8eaed;
+  vertical-align: top;
+  background: #ffffff;
+}
+
+.receptionist-month-view.gcal-style .month-td:not(.other-month) {
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px #f2f6fd;
+}
+
+.receptionist-month-view.gcal-style .month-td:hover {
+  background: #f8f9fa;
+}
+
+.receptionist-month-view.gcal-style .month-td:not(.other-month):hover {
+  background: #eef4ff;
+  box-shadow: inset 0 0 0 1px #dce8ff;
+}
+
+.receptionist-month-view.gcal-style .month-td.other-month {
+  background: #f8f9fc;
+  border-color: #f3f5f9;
+  box-shadow: inset 0 0 0 1px #f7f9fc;
+}
+
+.receptionist-month-view.gcal-style .month-td.other-month:hover {
+  background: #f7f8fb;
+  box-shadow: inset 0 0 0 1px #f6f8fc;
+}
+
+.receptionist-month-view.gcal-style .month-date-row {
+  padding: 2px 4px 0;
+}
+
+.receptionist-month-view.gcal-style .month-day-num {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1f365e;
+  margin: 0;
+}
+
+.receptionist-month-view.gcal-style .month-td.other-month .month-day-num,
+.receptionist-month-view.gcal-style .month-day-num.other-month-num {
+  color: #c1c8d3;
+  font-weight: 400;
+}
+
+/* Hôm nay: vòng tròn xanh như Google */
+.receptionist-month-view.gcal-style .month-td.today .month-day-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 50%;
+  background: #039be5;
+  color: #fff;
+  font-weight: 500;
+  font-size: 0.75rem;
+}
+
+/* Dải sự kiện trong ô (event strip) */
+.receptionist-month-view.gcal-style .month-event-strip {
+  min-height: 2em;
+  padding: 0 3px 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* Chip sự kiện giống Google: màu #03e569, bo góc */
+.receptionist-month-view.gcal-style .month-event-chip {
+  font-size: 0.65rem;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: #03e569;
+  color: #000000;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-left: 2px solid #03e569;
+  cursor: pointer;
+}
+
+.receptionist-month-view.gcal-style .month-event-chip.timed {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.receptionist-month-view.gcal-style .event-chip-time {
+  font-weight: 600;
+  flex-shrink: 0;
+  font-size: 0.6rem;
+}
+
+.receptionist-month-view.gcal-style .event-chip-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.receptionist-month-view.gcal-style .month-event-chip.pending {
+  background: #f9aa008f;
+  border-left-color: #f9aa008f;
+  color: #ffffff;
+}
+
+.receptionist-month-view.gcal-style .month-event-chip.rejected {
+  background: #ea443549;
+  border-left-color: #ea443549;
+  color: #fff;
+}
+
+.receptionist-month-view.gcal-style .month-event-chip.draggable {
+  cursor: grab;
+}
+.receptionist-month-view.gcal-style .month-event-chip.draggable:active {
+  cursor: grabbing;
+}
+.receptionist-month-view.gcal-style .month-event-chip.dragging {
+  opacity: 0.6;
+}
+
+/* Sự kiện ở ô không thuộc tháng hiện tại: hiển thị mờ hơn */
+.receptionist-month-view.gcal-style .month-event-chip.other-month-chip {
+  opacity: 0.35;
+  filter: brightness(0.88) saturate(0.8);
+}
+.receptionist-month-view.gcal-style .month-more.other-month-chip {
+  opacity: 0.35;
+  color: #adb5c2;
+}
+
+.receptionist-month-view.gcal-style .month-td.drop-target.drag-over {
+  background: #e8f0fea6;
+  outline: 2px dashed #16e5037a;
+  outline-offset: -2px;
+}
+
+.receptionist-month-view.gcal-style .month-more {
+  font-size: 0.65rem;
+  color: #5f6368;
+  padding: 0 3px;
+}
+
+/* --- Đăng ký định kỳ (trong modal) --- */
+.recurrence-block {
+  background: #f8f9fa;
+  border-color: #e8eaed !important;
+}
+.recurrence-block .form-label.small {
+  font-weight: 600;
+  color: #3c4043;
+}
+
+/* Modal xem thông tin: khối Định kỳ chi tiết */
+.recurrence-view-detail {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 10px 12px;
+  border: 1px solid #e8eaed;
+}
+.recurrence-view-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.recurrence-view-row:last-child {
+  margin-bottom: 0;
+}
+.recurrence-view-row .text-muted {
+  min-width: 140px;
+}
+
+/* --- Modal Đăng ký phòng họp: nền rất nhạt, khung bo tròn (override style global) --- */
+.receptionist-booking-backdrop.modal-backdrop,
+.receptionist-booking-backdrop.gcal-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.08) !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1050;
+}
+
+.receptionist-booking-backdrop.gcal-modal-backdrop-centered {
+  align-items: center;
+  justify-content: center;
+}
+
+.receptionist-booking-backdrop.gcal-modal-backdrop-anchored {
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.receptionist-booking-modal.gcal-modal.gcal-modal-anchored {
+  width: 600px !important;
+  max-width: calc(100vw - 24px) !important;
+}
+
+/* Khung modal bo tròn rõ, không bị override bởi .modal-content global */
+.receptionist-booking-modal.receptionist-modal,
+.receptionist-booking-modal.gcal-modal {
+  background: #fff !important;
+  border-radius: 20px !important;
+  width: 600px !important;
+  max-width: calc(100vw - 24px) !important;
+  min-width: 0;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex !important;
+  flex-direction: column !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  border: none !important;
+}
+
+.receptionist-booking-modal .modal-header.gcal-modal-header {
+  flex-shrink: 0;
+  border-radius: 20px 20px 0 0;
+  background: #fff !important;
+  color: #3c4043 !important;
+}
+
+.receptionist-booking-modal .modal-body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Form (chỉnh sửa đặt phòng) bọc body + footer: cần flex để chân modal luôn hiện */
+.receptionist-booking-modal.gcal-modal form {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.receptionist-booking-modal .modal-footer.gcal-modal-footer {
+  flex-shrink: 0;
+  border-radius: 0 0 20px 20px;
+}
+
+.gcal-modal .modal-header.gcal-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #e8eaed;
+  padding: 1rem 1.25rem;
+}
+
+.gcal-modal .modal-title.gcal-modal-title {
+  font-size: 1.25rem;
+  font-weight: 400;
+  color: #3c4043;
+  margin: 0;
+}
+
+/* Nút đóng dạng icon X giống Google */
+.gcal-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  color: #5f6368;
+}
+
+.gcal-modal-close:hover {
+  background: #f1f3f4;
+  color: #3c4043;
+}
+
+.gcal-modal-close svg {
+  fill: currentColor;
+}
+
+.gcal-modal .modal-body {
+  padding: 1.25rem 1.5rem;
+}
+
+.gcal-modal .modal-footer.gcal-modal-footer {
+  border-top: 1px solid #e8eaed;
+  padding: 1rem 1.5rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+/* Nút Hủy (text) và Gửi (primary) giống Google */
+.gcal-btn {
+  padding: 0.5rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+}
+
+.gcal-btn-text {
+  background: transparent;
+  color: #039be5;
+}
+
+.gcal-btn-text:hover {
+  background: rgba(3, 155, 229, 0.08);
+}
+
+.gcal-btn-primary {
+  background: #039be5;
+  color: #fff;
+}
+
+.gcal-btn-primary:hover {
+  background: #0288d1;
+}
+
+.gcal-btn-success {
+  background: #2e7d32;
+  color: #fff;
+}
+.gcal-btn-success:hover:not(:disabled) {
+  background: #1b5e20;
+}
+.gcal-btn-success:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.receptionist-modal .form-label {
+  font-size: 0.875rem;
+  color: #3c4043;
+  margin-bottom: 0.35rem;
+  display: block;
+  font-weight: 500;
+}
+.receptionist-modal .mb-3 .form-label {
+  margin-bottom: 0.4rem;
+}
+
+.receptionist-modal .form-control,
+.receptionist-modal .form-select {
+  border-radius: 8px;
+  border: 1px solid #dadce0;
+  font-size: 0.875rem;
+  min-height: 38px;
+}
+
+.receptionist-modal .mb-3 .form-control[type="text"] {
+  min-height: 40px;
+  padding: 0.5rem 0.75rem;
+}
+
+.receptionist-modal .form-control:focus,
+.receptionist-modal .form-select:focus {
+  border-color: #039be5;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(3, 155, 229, 0.2);
+}
+
+.gcal-modal .gcal-alert {
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+.gcal-alert-success {
+  background: #e6f4ea;
+  color: #137333;
+}
+
+.gcal-alert-error {
+  background: #fce8e6;
+  color: #c5221f;
+}
+
+/* ========== Responsive: Tablet (768px - 1024px) ========== */
+@media (max-width: 1024px) {
+  .receptionist-page.receptionist-calendar-wrap {
+    margin-left: -0.25rem;
+    margin-right: -0.25rem;
+    width: calc(100% + 0.5rem);
+    padding: 0 0.5rem 1rem;
+  }
+
+  .receptionist-toolbar {
+    gap: 0.5rem 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .gcal-toolbar .toolbar-title.gcal-title {
+    font-size: 1.125rem;
+    min-width: 160px;
+  }
+
+  .gcal-toolbar .toolbar-btn {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8125rem;
+  }
+
+  .gcal-toolbar .toolbar-btn.today {
+    min-width: 72px;
+  }
+
+  .day-table .col-day {
+    width: 160px;
+    padding: 0.75rem;
+  }
+
+  .day-table-24h .col-day {
+    width: 140px;
+  }
+
+  .week-table .col-day {
+    width: 90px;
+    padding: 0.35rem 0.25rem;
+    font-size: 0.75rem;
+  }
+
+  .week-table .col-slot {
+    min-width: 64px;
+    min-height: 36px;
+  }
+
+  .week-table-24h .col-hour-label {
+    width: 52px;
+    font-size: 0.75rem;
+  }
+
+  .receptionist-month-view.gcal-style .month-td {
+    min-height: 72px;
+    height: 72px;
+    padding: 0 1px;
+    font-size: 0.8rem;
+  }
+
+  .receptionist-month-view.gcal-style .month-event-chip {
+    font-size: 0.65rem;
+    padding: 2px 4px;
+  }
+
+  .receptionist-booking-modal.receptionist-modal,
+  .receptionist-booking-modal.gcal-modal {
+    width: 92vw !important;
+    max-width: 560px !important;
+  }
+
+  .gcal-modal .modal-body {
+    padding: 1rem 1.25rem;
+  }
+
+  .gcal-modal .modal-footer.gcal-modal-footer {
+    padding: 0.75rem 1.25rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+}
+
+/* ========== Responsive: Mobile (< 768px) ========== */
+@media (max-width: 767px) {
+  .receptionist-page.receptionist-calendar-wrap {
+    margin-top: -12px;
+    margin-left: 0;
+    margin-right: 0;
+    width: 100%;
+    padding: 0 0.5rem 0.75rem;
+    min-height: calc(100vh - 56px);
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.is-public {
+    padding: 0.75rem 0.5rem;
+    min-height: 100vh;
+  }
+
+  .receptionist-toolbar {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    padding: 0.5rem 0;
+  }
+
+  .gcal-toolbar .toolbar-btn.today,
+  .gcal-toolbar .toolbar-select.gcal-select-view-mode {
+    order: 0;
+  }
+
+  /* Hàng 2: [Trước] [Tháng 6, 2026, 34 sự kiện] [Sau] cùng một dòng */
+  .toolbar-nav-title-row {
+    flex: 1 1 100%;
+    width: 100%;
+    order: 1;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+  }
+
+  .toolbar-spacer,
+  .gcal-toolbar .gcal-public-link-btn,
+  .gcal-toolbar .gcal-primary-btn {
+    order: 2;
+  }
+
+  .toolbar-nav-title-row .toolbar-title-wrap {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .toolbar-nav-title-row .toolbar-btn.nav {
+    flex-shrink: 0;
+  }
+
+  .gcal-toolbar .toolbar-title.gcal-title {
+    font-size: 1rem;
+    min-width: 0;
+    width: 100%;
+    padding: 6px 8px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .gcal-toolbar .toolbar-btn.today {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .gcal-toolbar .toolbar-btn.nav {
+    width: 36px;
+    padding: 0.4rem;
+    flex-shrink: 0;
+  }
+
+  .toolbar-spacer {
+    display: none;
+  }
+
+  .gcal-toolbar .toolbar-select.gcal-select:not(.gcal-select-view-mode) {
+    flex: 1 1 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .gcal-toolbar .toolbar-select.gcal-select-view-mode {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 88px;
+  }
+
+  .gcal-toolbar .gcal-primary-btn {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+
+  /* Trên mobile nhỏ: ẩn chữ "Lịch công khai", chỉ hiện icon */
+  .gcal-toolbar .gcal-public-link-btn .toolbar-btn-label {
+    display: none;
+  }
+
+  .receptionist-calendar {
+    min-height: 320px;
+    border-radius: 6px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Day view mobile */
+  .receptionist-day-view {
+    overflow-x: auto;
+  }
+
+  .day-table .col-day {
+    width: 100px;
+    min-width: 100px;
+    padding: 0.5rem;
+    font-size: 0.8rem;
+  }
+
+  .day-table .col-slot,
+  .day-table-24h .col-slot-24h {
+    min-width: 180px;
+    min-height: 40px;
+    padding: 0.5rem;
+  }
+
+  .day-table-24h .col-day {
+    width: 80px;
+    min-width: 80px;
+  }
+
+  .slot-time-24h {
+    font-size: 0.8rem;
+  }
+
+  .event-bar {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.4rem;
+  }
+
+  /* Week view mobile: horizontal scroll */
+  .receptionist-week-view {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .week-table .col-day {
+    width: 64px;
+    min-width: 64px;
+    padding: 0.25rem 2px;
+    font-size: 0.7rem;
+  }
+
+  .week-table .col-slot {
+    min-width: 56px;
+    min-height: 32px;
+    padding: 2px;
+  }
+
+  .week-table-24h .col-hour-label {
+    width: 44px;
+    min-width: 44px;
+    padding: 0.25rem 2px;
+    font-size: 0.7rem;
+  }
+
+  /* Month view mobile */
+  .receptionist-month-view.gcal-style .month-th {
+    padding: 0.25rem 1px;
+    font-size: 0.65rem;
+  }
+
+  .receptionist-month-view.gcal-style .month-td {
+    min-height: 56px;
+    height: 56px;
+    padding: 0 1px;
+    font-size: 0.75rem;
+  }
+
+  .receptionist-month-view.gcal-style .month-date-row {
+    padding: 2px 4px 0;
+  }
+
+  .receptionist-month-view.gcal-style .month-day-num {
+    font-size: 0.75rem;
+  }
+
+  .receptionist-month-view.gcal-style .month-td.today .month-day-num {
+    min-width: 22px;
+    height: 22px;
+    padding: 0 4px;
+  }
+
+  .receptionist-month-view.gcal-style .month-event-strip {
+    min-height: 1.8em;
+    padding: 0 2px 2px;
+    gap: 1px;
+  }
+
+  .receptionist-month-view.gcal-style .month-event-chip {
+    font-size: 0.6rem;
+    padding: 1px 3px;
+    border-radius: 2px;
+  }
+
+  .receptionist-month-view.gcal-style .month-event-chip.timed .event-chip-time {
+    font-size: 0.55rem;
+  }
+
+  .receptionist-month-view.gcal-style .month-more {
+    font-size: 0.6rem;
+  }
+
+  /* Modals: full width on mobile */
+  .receptionist-booking-backdrop.gcal-modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .receptionist-booking-modal.receptionist-modal,
+  .receptionist-booking-modal.gcal-modal,
+  .receptionist-booking-modal.gcal-modal.gcal-modal-anchored {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 92vh;
+    border-radius: 16px 16px 0 0 !important;
+    margin: 0;
+  }
+
+  .receptionist-booking-modal .modal-header.gcal-modal-header {
+    border-radius: 16px 16px 0 0;
+    padding: 0.75rem 1rem;
+  }
+
+  .gcal-modal .modal-title.gcal-modal-title {
+    font-size: 1.0625rem;
+  }
+
+  .gcal-modal-close {
+    width: 36px;
+    height: 36px;
+  }
+
+  .gcal-modal .modal-body {
+    padding: 1rem;
+  }
+
+  .gcal-modal .modal-footer.gcal-modal-footer {
+    padding: 0.75rem 1rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .gcal-modal .modal-footer.gcal-modal-footer .gcal-btn {
+    flex: 1 1 auto;
+    min-width: 80px;
+  }
+
+  /* Form: stack columns on mobile */
+  .receptionist-booking-modal .row.g-2 .col-6 {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+
+  .receptionist-booking-modal .modal-body .row .col-6 {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+
+  .receptionist-modal .form-label,
+  .receptionist-modal .form-control,
+  .receptionist-modal .form-select {
+    font-size: 0.875rem;
+  }
+
+  .recurrence-block {
+    padding: 0.75rem !important;
+  }
+
+  .recurrence-block .d-flex.flex-wrap.gap-3 {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem !important;
+  }
+
+  /* Date picker modal */
+  .gcal-date-picker-modal {
+    min-width: 0;
+    width: 100%;
+    max-width: 280px;
+    padding: 8px 10px 12px;
+  }
+
+  .gcal-date-picker-day {
+    width: 28px;
+    height: 28px;
+    font-size: 0.75rem;
+  }
+
+  .gcal-date-picker-month,
+  .gcal-date-picker-year {
+    font-size: 0.8125rem;
+    padding: 4px 24px 4px 8px;
+  }
+
+  .month-year-picker-dropdown {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    max-width: calc(100vw - 24px);
+  }
+
+  /* Public link modal */
+  .gcal-public-link-modal {
+    width: 95%;
+    max-width: none;
+    max-height: 85vh;
+    border-radius: 12px;
+  }
+
+  .gcal-public-link-modal .modal-body {
+    padding: 0.75rem 1rem 1rem;
+  }
+
+  .gcal-public-link-input-wrap {
+    flex-direction: column;
+  }
+
+  .gcal-public-link-icon-btn {
+    width: 100%;
+    padding: 0.5rem;
+  }
+
+  .gcal-public-qr-wrap canvas.gcal-public-qr-code {
+    max-width: 160px;
+    max-height: 160px;
+  }
+
+  /* Viewing modal: stack row */
+  .receptionist-booking-modal .mb-3 .row.g-2 .col-6 {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+
+  .recurrence-view-row .text-muted {
+    min-width: 100%;
+  }
+}
+
+/* ========== Extra small mobile (< 480px) ========== */
+@media (max-width: 480px) {
+  .receptionist-toolbar {
+    padding: 0.25rem 0;
+  }
+
+  .gcal-toolbar .toolbar-title.gcal-title {
+    font-size: 0.9375rem;
+  }
+
+  .receptionist-month-view.gcal-style .month-td {
+    min-height: 48px;
+    height: 48px;
+  }
+
+  .receptionist-month-view.gcal-style .month-event-strip {
+    min-height: 1.4em;
+  }
+
+  .receptionist-month-view.gcal-style .month-event-chip {
+    font-size: 0.55rem;
+    padding: 1px 2px;
+  }
+
+  .gcal-modal .modal-footer.gcal-modal-footer {
+    flex-direction: column;
+  }
+
+  .gcal-modal .modal-footer.gcal-modal-footer .gcal-btn {
+    width: 100%;
+  }
+}
+
+/* ===== Year month cells with date grid (image-like) ===== */
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-month-card {
+  padding: 0.72rem 0.72rem 0.65rem;
+  overflow: hidden;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-month-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.15rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-month-weekdays span {
+  text-align: center;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #5f6f8c;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-month-days-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.16rem 0.12rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-month-day {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  border-radius: 6px;
+  font-size: 0.98rem;
+  color: #2f3e57;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-month-day.other {
+  color: #a7b3c6;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-month-day.today {
+  background: #1b67df;
+  color: #fff;
+  font-weight: 700;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-month-card:hover .year-month-day:not(.today) {
+  background: #f5f8ff;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-month-card-stats {
+  margin-top: 0.46rem;
+}
+
+@media (max-width: 767px) {
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-year-view .year-month-day {
+    min-height: 22px;
+    font-size: 0.86rem;
+  }
+}
+
+/* ===== Modal Redesign Pro ===== */
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-booking-backdrop.gcal-modal-backdrop {
+  backdrop-filter: blur(6px);
+  background: radial-gradient(circle at 20% 10%, rgba(36, 93, 192, 0.14) 0%, rgba(12, 24, 46, 0.64) 62%);
+  animation: modalBackdropFadeIn 0.24s ease-out;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-booking-backdrop.gcal-modal-backdrop.booking-modal-no-blur {
+  backdrop-filter: none !important;
+  background: transparent !important;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-booking-modal.gcal-modal,
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-booking-modal.gcal-public-link-modal {
+  border-radius: 18px;
+  border: 1px solid #dce6f8;
+  background: linear-gradient(180deg, #fdfefe 0%, #ffffff 22%);
+  box-shadow: 0 26px 60px rgba(13, 37, 84, 0.28);
+  animation: modalCardPopIn 0.28s ease-out;
+  overflow: hidden;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-booking-modal.gcal-modal .modal-header.gcal-modal-header,
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-booking-modal.gcal-public-link-modal .modal-header.gcal-modal-header {
+  position: relative;
+  border-bottom: 1px solid #e6eefc;
+  background: linear-gradient(130deg, #f6f9ff 0%, #eef4ff 100%);
+  padding: 0.82rem 1rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-booking-modal .modal-header.gcal-modal-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, #2b78f3 0%, #46c0ff 55%, rgba(70, 192, 255, 0) 100%);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-modal .modal-title.gcal-modal-title {
+  margin: 0;
+  color: #1e3a69;
+  font-size: 1.08rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-modal .modal-body {
+  padding: 1rem 1.08rem 0.9rem;
+  scrollbar-width: thin;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-modal .modal-footer.gcal-modal-footer {
+  border-top: 1px solid #e6eefc;
+  background: #fbfdff;
+  padding: 0.78rem 1rem;
+  gap: 0.55rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-modal-close {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid #d7e3f8;
+  background: #ffffff;
+  color: #45669d;
+  transition: all 0.18s ease;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-modal-close:hover {
+  transform: translateY(-1px);
+  color: #1d5fd4;
+  border-color: #b8cef2;
+  box-shadow: 0 6px 16px rgba(33, 94, 193, 0.2);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-modal .form-label {
+  font-weight: 600;
+  color: #36537f;
+  font-size: 0.8rem;
+  margin-bottom: 0.32rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-modal .form-control,
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-modal .form-select {
+  border-radius: 10px;
+  border: 1px solid #d6e2f6;
+  background: #fcfdff;
+  color: #243f66;
+  min-height: 40px;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-modal .form-control:focus,
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-modal .form-select:focus {
+  border-color: #78a8ff;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(59, 124, 239, 0.16);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-alert {
+  border-radius: 10px;
+  border: 1px solid transparent;
+  padding: 0.55rem 0.72rem;
+  font-weight: 600;
+  font-size: 0.84rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-alert.gcal-alert-success {
+  border-color: #c8ebd7;
+  background: #ecfbf3;
+  color: #166f43;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-alert.gcal-alert-error {
+  border-color: #f3c9c9;
+  background: #fff3f3;
+  color: #9f2f2f;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .recurrence-block {
+  border: 1px solid #d8e6fd !important;
+  border-radius: 12px !important;
+  background: linear-gradient(145deg, #f8fbff 0%, #f3f8ff 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .recurrence-block .badge.bg-secondary {
+  border-radius: 999px;
+  background: #2f6edb !important;
+  padding: 0.32rem 0.52rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-btn {
+  border-radius: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  transition: transform 0.16s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-btn:hover {
+  transform: translateY(-1px);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-btn.gcal-btn-primary {
+  box-shadow: 0 9px 20px rgba(36, 99, 203, 0.24);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-btn.gcal-btn-text {
+  border: 1px solid #dbe6f9;
+  background: #fff;
+  color: #406195;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-btn.gcal-btn-text.text-danger {
+  border-color: #f0c9c9;
+  color: #b83535 !important;
+  background: #fff8f8;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-btn.gcal-btn-success {
+  box-shadow: 0 9px 20px rgba(24, 140, 73, 0.23);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-public-link-modal .modal-body {
+  padding: 1rem 1.08rem 1.08rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-public-link-input-wrap {
+  border-radius: 10px;
+  border-color: #d5e2f8;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-public-link-icon-btn {
+  width: 42px;
+  background: linear-gradient(180deg, #f8faff 0%, #eff5ff 100%);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-public-qr-wrap {
+  border: 1px dashed #d3e1f8;
+  border-radius: 12px;
+  padding: 0.85rem 0.7rem;
+  background: #fbfdff;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .gcal-public-qr-wrap canvas.gcal-public-qr-code {
+  border: 1px solid #d8e5f8;
+  box-shadow: 0 8px 18px rgba(49, 92, 175, 0.15);
+}
+
+@keyframes modalBackdropFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalCardPopIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-booking-backdrop.gcal-modal-backdrop,
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-booking-modal.gcal-modal,
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .receptionist-booking-modal.gcal-public-link-modal {
+    animation: none;
+  }
+}
+
+/* ===== Public Link Modal Stabilization ===== */
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-backdrop {
+  backdrop-filter: blur(3px);
+  background: rgba(15, 26, 46, 0.36) !important;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern {
+  position: relative !important;
+  left: auto !important;
+  top: auto !important;
+  transform: none !important;
+  z-index: auto !important;
+  width: min(460px, calc(100vw - 24px)) !important;
+  max-width: min(460px, calc(100vw - 24px)) !important;
+  max-height: min(92vh, 760px);
+  overflow: hidden;
+  margin: 0 !important;
+  display: block !important;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .modal-body {
+  padding: 1rem 1rem 1.05rem !important;
+  overflow-y: auto;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-link-row {
+  margin-bottom: 1rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-link-input-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px 42px;
+  gap: 0;
+  border-radius: 12px;
+  border: 1px solid #d4e0f7;
+  overflow: hidden;
+  background: #fff;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-link-input {
+  border: none !important;
+  border-right: 1px solid #e3ecfb !important;
+  padding: 0.6rem 0.72rem;
+  font-size: 0.85rem;
+  line-height: 1.25;
+  background: #fcfdff;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-link-input:focus {
+  box-shadow: none;
+  outline: none;
+  background: #fff;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-link-icon-btn {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  border: none;
+  border-left: 1px solid #e3ecfb;
+  background: linear-gradient(180deg, #f7faff 0%, #edf4ff 100%);
+  color: #2f5ea8;
+  transition: all 0.18s ease;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-link-icon-btn:hover {
+  background: linear-gradient(180deg, #edf4ff 0%, #e5efff 100%);
+  color: #1149a2;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-qr-section {
+  margin-top: 0.35rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-qr-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  border: 1px dashed #cfdff8;
+  border-radius: 12px;
+  background: #fbfdff;
+  padding: 0.85rem 0.75rem;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-qr-code {
+  border-radius: 10px;
+  border: 1px solid #d7e4fa;
+  box-shadow: 0 8px 18px rgba(38, 81, 162, 0.14);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-qr-download {
+  min-height: 40px;
+  padding: 0.48rem 0.9rem;
+  border-radius: 10px;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-qr-download-modern {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-width: 148px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
+  border: 1px solid #0d47a1;
+  box-shadow: 0 8px 18px rgba(13, 71, 161, 0.28);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-qr-download-modern:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+  box-shadow: 0 12px 20px rgba(13, 71, 161, 0.33);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-qr-download-modern:active {
+  transform: translateY(0);
+}
+
+.receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-qr-download-modern:focus-visible {
+  outline: 3px solid rgba(25, 118, 210, 0.25);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern {
+    width: calc(100vw - 14px) !important;
+    max-width: calc(100vw - 14px) !important;
+    border-radius: 14px;
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .modal-body {
+    padding: 0.8rem 0.75rem 0.9rem !important;
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-link-input-wrap {
+    grid-template-columns: 1fr;
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-link-input {
+    border-right: none !important;
+    border-bottom: 1px solid #e3ecfb !important;
+  }
+
+  .receptionist-page.receptionist-calendar-wrap.gcal-theme .public-link-modal-modern .gcal-public-link-icon-btn {
+    width: 100%;
+    min-width: 0;
+    border-left: none;
+    border-top: 1px solid #e3ecfb;
+  }
+}

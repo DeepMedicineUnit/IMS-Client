@@ -107,23 +107,12 @@ const StudentCourses = () => {
         };
         sortByOrder(rootCategories);
 
-        console.log('[StudentCourses] Category tree built:', rootCategories);
-        console.log('[StudentCourses] Categories with courses_count > 0:', 
-          rootCategories.filter(cat => (cat.courses_count || 0) > 0).map(cat => ({
-            id: cat.category_id,
-            name: cat.category_name,
-            courses_count: cat.courses_count
-          }))
-        );
-
         setCategoryTree(rootCategories);
 
         // Auto-load courses for all categories that have courses_count > 0
         const loadCoursesRecursively = async (cats) => {
           for (const cat of cats) {
-            console.log(`[StudentCourses] Checking category ${cat.category_name} (ID: ${cat.category_id}): courses_count=${cat.courses_count}, children_count=${cat.children_count}`);
             if (cat.courses_count > 0) {
-              console.log(`[StudentCourses] Auto-loading courses for category ${cat.category_name} (ID: ${cat.category_id})`);
               // Load courses for this category
               loadCategoryCourses(cat.category_id);
             }
@@ -136,7 +125,6 @@ const StudentCourses = () => {
         
         // Start loading courses after a short delay to avoid blocking UI
         setTimeout(() => {
-          console.log('[StudentCourses] Starting auto-load courses for categories');
           loadCoursesRecursively(rootCategories);
         }, 100);
       } else {
@@ -151,20 +139,15 @@ const StudentCourses = () => {
   };
 
   const toggleCategory = async (categoryId) => {
-    console.log(`[StudentCourses] Toggling category ID: ${categoryId}`);
     const newExpanded = new Set(expandedCategories);
     if (newExpanded.has(categoryId)) {
-      console.log(`[StudentCourses] Collapsing category ${categoryId}`);
       newExpanded.delete(categoryId);
     } else {
-      console.log(`[StudentCourses] Expanding category ${categoryId}`);
       newExpanded.add(categoryId);
       // Load courses if not already loaded
       if (!categoryCourses[categoryId]) {
-        console.log(`[StudentCourses] Courses not loaded yet, loading for category ${categoryId}`);
         await loadCategoryCourses(categoryId);
       } else {
-        console.log(`[StudentCourses] Courses already loaded for category ${categoryId}:`, categoryCourses[categoryId]);
       }
     }
     setExpandedCategories(newExpanded);
@@ -172,27 +155,22 @@ const StudentCourses = () => {
 
   const loadCategoryCourses = async (categoryId) => {
     try {
-      console.log(`[StudentCourses] Loading courses for category ID: ${categoryId}`);
       const response = await api.get(
         `/lms/courses?category_id=${categoryId}&for_student=true`
       );
-      console.log(`[StudentCourses] Courses API response for category ${categoryId}:`, response.data);
       
       const coursesData = response.data?.data;
-      console.log(`[StudentCourses] Courses data structure:`, coursesData);
       
       const courses = coursesData && Array.isArray(coursesData.courses) 
         ? coursesData.courses 
         : (Array.isArray(coursesData) ? coursesData : []);
       
-      console.log(`[StudentCourses] Parsed courses for category ${categoryId}:`, courses.length, courses);
 
       setCategoryCourses(prev => {
         const updated = {
           ...prev,
           [categoryId]: courses
         };
-        console.log(`[StudentCourses] Updated categoryCourses state:`, updated);
         return updated;
       });
     } catch (error) {
@@ -345,15 +323,6 @@ const StudentCourses = () => {
 
     // Debug log for rendering
     if (hasCoursesCount || hasCourses) {
-      console.log(`[StudentCourses] Rendering category "${category.category_name}" (ID: ${category.category_id}):`, {
-        level,
-        isExpanded,
-        courses_count: category.courses_count,
-        children_count: category.children_count,
-        hasCourses,
-        courses: courses.length,
-        coursesData: courses
-      });
     }
 
     return (
@@ -432,16 +401,13 @@ const StudentCourses = () => {
 
         {isExpanded && (() => {
           if (hasCourses) {
-            console.log(`[StudentCourses] Rendering ${courses.length} courses for category "${category.category_name}" (ID: ${category.category_id})`);
           } else if (hasCoursesCount) {
-            console.log(`[StudentCourses] Category "${category.category_name}" (ID: ${category.category_id}) has courses_count=${category.courses_count} but courses array is empty`);
           }
           return null;
         })()}
 
         {isExpanded && hasCourses && courses.map((course) => {
           const coursePaddingLeft = (level + 1) * indentSize + 12;
-          console.log(`[StudentCourses] Rendering course for category "${category.category_name}" (ID: ${category.category_id}):`, course);
           return (
             <tr 
               key={course.course_id}
@@ -623,8 +589,6 @@ const StudentCourses = () => {
                     </tr>
                   ) : (
                     (() => {
-                      console.log('[StudentCourses] Rendering category tree with', categoryTree.length, 'root categories');
-                      console.log('[StudentCourses] Current categoryCourses state:', categoryCourses);
                       return categoryTree.map((category) => renderTreeItem(category));
                     })()
                   )}

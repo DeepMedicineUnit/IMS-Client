@@ -2,19 +2,13 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import usePageTitle from '../../hooks/usePageTitle';
 import './StatusPage.css';
+import { getApiBaseURL } from '../../utils/api';
 
 // Tạo axios instance dựa trên port hiện tại
-// Trong Docker, sử dụng proxy qua setupProxy.js (relative URL)
-// Outside Docker, kết nối trực tiếp đến API Gateway
-const getApiBaseURL = () => {
-    // Luôn sử dụng relative URL để proxy hoạt động (setupProxy.js sẽ xử lý)
-    // Proxy sẽ forward requests đến gateway service trong Docker network
-    return '/api';
-};
-
+// Sử dụng getApiBaseURL() từ utils/api.js để đảm bảo đúng port trong production (8043)
 const statusApi = axios.create({
     baseURL: getApiBaseURL(),
-    timeout: 5000,
+    timeout: 15000,
     headers: {
         'Content-Type': 'application/json'
     }
@@ -28,11 +22,11 @@ const StatusPage = () => {
     const [loading, setLoading] = useState(true);
     const [selectedPeriod, setSelectedPeriod] = useState(90);
     const [displayedIncidentsCount, setDisplayedIncidentsCount] = useState(5);
+    const [uptimeTooltip, setUptimeTooltip] = useState({ visible: false, date: null, pct: null, x: 0, y: 0, moduleName: '' });
 
     useEffect(() => {
         loadStatus();
         loadIncidents();
-        loadUptime();
         
         // Auto-refresh every 30 seconds
         const interval = setInterval(() => {
@@ -57,6 +51,7 @@ const StatusPage = () => {
                 success: false,
                 status: 'unknown',
                 modules: {},
+                externalServices: {},
                 timestamp: new Date().toISOString()
             });
         } finally {
@@ -144,8 +139,87 @@ const StatusPage = () => {
         });
     };
 
+    // Lấy dữ liệu uptime 90 ngày cho module
+    const getUptimeBarsForModule = (moduleKey) => {
+        if (!uptime?.uptime?.length) return Array(90).fill(null);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const bars = [];
+        for (let i = 89; i >= 0; i--) {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            const dateStr = d.toISOString().slice(0, 10);
+            const row = uptime.uptime.find(
+                (r) => String(r.module_name) === String(moduleKey) && 
+                String(r.date).slice(0, 10) === dateStr
+            );
+            const pct = row ? parseFloat(row.uptime_percentage) : null;
+            bars.push(pct);
+        }
+        return bars;
+    };
+
+    const getUptimePercentForModule = (moduleKey) => {
+        const bars = getUptimeBarsForModule(moduleKey);
+        const withData = bars.filter((b) => b !== null);
+        if (withData.length === 0) return 100;
+        return (withData.reduce((s, v) => s + v, 0) / withData.length).toFixed(2);
+    };
+
+    const getStatusIcon = (status) => {
+        if (status === 'operational') return '✓';
+        if (status === 'down') return '✗';
+        return '!';
+    };
+
+    const getDateForBarIndex = (idx) => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const d = new Date(today);
+        d.setDate(d.getDate() - (89 - idx));
+        return d;
+    };
+
+    const formatTooltipDate = (date) => {
+        return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    };
+
     return (
         <div className="status-page">
+            {/* Uptime Tooltip */}
+            <div id="uptime-tooltip" className={`uptime-tooltip ${uptimeTooltip.visible ? 'visible' : ''}`} style={{ display: uptimeTooltip.visible ? 'block' : 'none' }} role="tooltip">
+                <div className="uptime-tooltip-pointer" style={{ left: uptimeTooltip.x, top: uptimeTooltip.y }} />
+                <div className="uptime-tooltip-box" style={{ left: uptimeTooltip.x - 80, top: (uptimeTooltip.y || 0) + 10 }}>
+                    <div className="uptime-tooltip-content">
+                        {uptimeTooltip.date && (
+                            <>
+                                <div className="uptime-tooltip-date">{formatTooltipDate(uptimeTooltip.date)}</div>
+                                <div className="uptime-tooltip-outages">
+                                    {uptimeTooltip.pct === null && (
+                                        <div className="no-data-msg">Không có dữ liệu cho ngày này.</div>
+                                    )}
+                                    {uptimeTooltip.pct !== null && uptimeTooltip.pct >= 100 && (
+                                        <div className="no-outages-msg">Không có downtime được ghi nhận trong ngày này.</div>
+                                    )}
+                                    {uptimeTooltip.pct !== null && uptimeTooltip.pct > 0 && uptimeTooltip.pct < 100 && (
+                                        <div className="outage-field partial">
+                                            <span className="label">Sự cố một phần</span>
+                                            <span className="value">Uptime {uptimeTooltip.pct}%</span>
+                                        </div>
+                                    )}
+                                    {uptimeTooltip.pct !== null && uptimeTooltip.pct === 0 && (
+                                        <div className="outage-field major">
+                                            <span className="label">Sự cố nghiêm trọng</span>
+                                            <span className="value">Không hoạt động</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            </div>
+
             <div className="status-container">
                 {/* Header */}
                 <header className="status-header">
@@ -155,11 +229,40 @@ const StatusPage = () => {
                     </p>
                 </header>
 
-                {/* Loading State */}
+                {/* Skeleton khi đang tải - hiển thị layout ngay, không đợi vài giây trống */}
                 {loading && !status && (
-                    <div className="loading-section">
-                        <div className="loading">Đang tải dữ liệu...</div>
-                    </div>
+                    <>
+                        <div className="overall-status status-skeleton">
+                            <div className="status-info">
+                                <div className="skeleton-line skeleton-title" style={{ width: '180px' }} aria-hidden="true" />
+                                <div className="skeleton-line skeleton-timestamp" style={{ width: '220px' }} aria-hidden="true" />
+                            </div>
+                        </div>
+                        <div className="modules-section">
+                            <h3>Modules nội bộ</h3>
+                            <div className="components-container one-column">
+                                {[...Array(12)].map((_, i) => (
+                                    <div key={i} className="component-container border-color status-module-skeleton">
+                                        <div className="component-inner-container status-green showcased">
+                                            <span className="skeleton-line skeleton-name" style={{ width: `${160 + (i % 3) * 40}px` }} aria-hidden="true" />
+                                            <span className="skeleton-line skeleton-status" style={{ width: '120px' }} aria-hidden="true" />
+                                            <span className="skeleton-icon" aria-hidden="true" />
+                                            <div className="uptime-90-days-wrapper">
+                                                <div className="skeleton-uptime-bars" aria-hidden="true" />
+                                                <div className="legend">
+                                                    <span className="skeleton-line" style={{ width: '80px' }} aria-hidden="true" />
+                                                    <div className="spacer" />
+                                                    <span className="skeleton-line" style={{ width: '70px' }} aria-hidden="true" />
+                                                    <div className="spacer" />
+                                                    <span className="skeleton-line" style={{ width: '60px' }} aria-hidden="true" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </>
                 )}
 
                 {/* Overall Status */}
@@ -174,34 +277,114 @@ const StatusPage = () => {
                     </div>
                 )}
 
-                {/* Modules Status */}
+                {/* Modules Status - Layout theo status-container-example */}
                 {status && status.modules && (
                     <div className="modules-section">
-                        <h3>Tất cả các module</h3>
-                        <div className="modules-grid">
-                            {Object.entries(status.modules).map(([key, module]) => (
-                                <div key={key} className="module-card">
-                                    <div className="module-header">
-                                        <span 
-                                            className="module-status-dot"
-                                            style={{ backgroundColor: getModuleStatusColor(module.status) }}
-                                        ></span>
-                                        <h4>{module.name}</h4>
+                        <h3>Modules nội bộ</h3>
+                        <div className="components-container one-column">
+                            {Object.entries(status.modules).map(([key, module]) => {
+                                const statusClass = module.status === 'operational' ? 'status-green' : 
+                                    module.status === 'down' ? 'status-red' : 'status-yellow';
+                                const bars = getUptimeBarsForModule(key);
+                                const uptimePercent = getUptimePercentForModule(key);
+                                const statusText = module.status === 'operational' ? 'Hoạt động bình thường' :
+                                    module.status === 'degraded' ? 'Hiệu suất giảm' :
+                                    module.status === 'down' ? 'Không hoạt động' : 'Không xác định';
+                                return (
+                                    <div key={key} className="component-container border-color">
+                                        <div className={`component-inner-container ${statusClass} showcased`} data-component-status={module.status}>
+                                            <span className="name">{module.name}</span>
+                                            <span className="component-status">{statusText}</span>
+                                            <span className={`status-icon-button status-icon-${module.status}`} aria-label={statusText} title={statusText}>
+                                                {getStatusIcon(module.status)}
+                                            </span>
+                                            <div className="uptime-90-days-wrapper">
+                                                <svg className="availability-time-line-graphic" preserveAspectRatio="none" height="34" viewBox="0 0 448 34">
+                                                    {bars.map((pct, idx) => {
+                                                        const fill = pct === null ? '#e5e7eb' :
+                                                            pct >= 100 ? '#1e8542' : pct > 0 ? '#cd8812' : '#ef4444';
+                                                        const dateForBar = getDateForBarIndex(idx);
+                                                        return (
+                                                            <rect
+                                                                key={idx}
+                                                                height="34"
+                                                                width="3"
+                                                                x={idx * 5}
+                                                                y="0"
+                                                                fill={fill}
+                                                                className={`uptime-day day-${idx}`}
+                                                                role="tab"
+                                                                tabIndex={idx === 0 ? 0 : -1}
+                                                                aria-describedby="uptime-tooltip"
+                                                                onMouseEnter={(e) => {
+                                                                    const rect = e.target.getBoundingClientRect();
+                                                                    setUptimeTooltip({
+                                                                        visible: true,
+                                                                        date: dateForBar,
+                                                                        pct,
+                                                                        x: rect.left + rect.width / 2,
+                                                                        y: rect.bottom,
+                                                                        moduleName: module.name
+                                                                    });
+                                                                }}
+                                                                onMouseLeave={() => setUptimeTooltip({ visible: false, date: null, pct: null, x: 0, y: 0, moduleName: '' })}
+                                                            />
+                                                        );
+                                                    })}
+                                                </svg>
+                                                <div className="legend">
+                                                    <div className="legend-item light legend-item-date-range">
+                                                        <span className="availability-time-line-legend-day-count">90</span> ngày trước
+                                                    </div>
+                                                    <div className="spacer"></div>
+                                                    <div className="legend-item legend-item-uptime-value">
+                                                        <span>Uptime {uptimePercent}%</span>
+                                                    </div>
+                                                    <div className="spacer"></div>
+                                                    <div className="legend-item light legend-item-date-range">Hôm nay</div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="module-details">
-                                        <p className="module-status">
-                                            {module.status === 'operational' ? 'Hoạt động bình thường' :
-                                             module.status === 'degraded' ? 'Hiệu suất giảm' :
-                                             module.status === 'down' ? 'Không hoạt động' : 'Không xác định'}
-                                        </p>
-                                        {module.lastChecked && (
-                                            <p className="module-last-checked">
-                                                Kiểm tra: {formatDate(module.lastChecked)}
-                                            </p>
-                                        )}
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                {/* External Services (Third-party) */}
+                {status && status.externalServices && Object.keys(status.externalServices).length > 0 && (
+                    <div className="modules-section external-services-section">
+                        <h3>Dịch vụ bên thứ 3</h3>
+                        <p className="section-description">
+                            Các API và dịch vụ ngoài hệ thống được sử dụng (Google, email, geocoding, v.v.)
+                        </p>
+                        <div className="components-container one-column">
+                            {Object.entries(status.externalServices).map(([key, svc]) => {
+                                const statusClass = svc.status === 'optional' ? 'status-optional' :
+                                    svc.status === 'operational' ? 'status-green' : 
+                                    svc.status === 'down' ? 'status-red' : 'status-yellow';
+                                const statusText = svc.status === 'operational' ? 'Hoạt động bình thường' :
+                                    svc.status === 'degraded' ? 'Hiệu suất giảm' :
+                                    svc.status === 'down' ? 'Không hoạt động' :
+                                    svc.status === 'optional' ? (svc.note || 'Tùy chọn') : 'Không xác định';
+                                return (
+                                    <div key={key} className="component-container border-color">
+                                        <div className={`component-inner-container ${statusClass} showcased external-service-inner`}>
+                                            <div className="component-name-block">
+                                                <span className="name">{svc.name}</span>
+                                                {svc.description && (
+                                                    <span className="component-description">{svc.description}</span>
+                                                )}
+                                            </div>
+                                            <span className="component-status">{statusText}</span>
+                                            <span className={`status-icon-button status-icon-${svc.status}`} aria-label={statusText}>
+                                                {svc.status === 'optional' ? '○' : getStatusIcon(svc.status)}
+                                            </span>
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 )}

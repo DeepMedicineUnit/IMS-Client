@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Button, ButtonGroup, Dropdown } from 'react-bootstrap';
-import api from '../utils/api';
+import api, { getUploadsBaseURL } from '../utils/api';
 
 const RichTextEditor = ({ value, onChange, placeholder = "Nhập nội dung..." }) => {
   const editorRef = useRef(null);
@@ -234,16 +234,14 @@ const RichTextEditor = ({ value, onChange, placeholder = "Nhập nội dung..." 
       const formData = new FormData();
       formData.append('image', file);
 
-      const response = await api.post('/tickets/upload-comment-image', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
+      // Không set Content-Type để axios tự set multipart/form-data với boundary
+      const response = await api.post('/tickets/upload-comment-image', formData);
 
       if (response.data.success) {
         const imageUrl = response.data.data.url || response.data.data.path;
         const img = document.createElement('img');
-        img.src = imageUrl.startsWith('http') ? imageUrl : `/api${imageUrl}`;
+        const base = getUploadsBaseURL();
+        img.src = imageUrl.startsWith('http') ? imageUrl : (base ? `${base.replace(/\/$/, '')}${imageUrl}` : imageUrl);
         img.style.maxWidth = '100%';
         img.style.height = 'auto';
         img.style.display = 'block';
@@ -515,19 +513,20 @@ const RichTextEditor = ({ value, onChange, placeholder = "Nhập nội dung..." 
           if (imageFile) {
             try {
               setUploading(true);
+              // Clipboard trả về Blob/File có thể không có name → multer trả 400. Đảm bảo gửi File có tên và type.
+              const fileToUpload = (imageFile instanceof File && imageFile.name)
+                ? imageFile
+                : new File([imageFile], 'pasted-image.png', { type: imageFile.type || 'image/png' });
               const formData = new FormData();
-              formData.append('image', imageFile);
+              formData.append('image', fileToUpload);
               
-              const response = await api.post('/tickets/upload-comment-image', formData, {
-                headers: {
-                  'Content-Type': 'multipart/form-data'
-                }
-              });
+              const response = await api.post('/tickets/upload-comment-image', formData);
               
               if (response.data.success) {
                 const imageUrl = response.data.data.url || response.data.data.path;
                 const img = document.createElement('img');
-                img.src = imageUrl.startsWith('http') ? imageUrl : `/api${imageUrl}`;
+                const base = getUploadsBaseURL();
+                img.src = imageUrl.startsWith('http') ? imageUrl : (base ? `${base.replace(/\/$/, '')}${imageUrl}` : imageUrl);
                 img.style.maxWidth = '100%';
                 img.style.height = 'auto';
                 img.style.display = 'block';
@@ -615,6 +614,7 @@ const RichTextEditor = ({ value, onChange, placeholder = "Nhập nội dung..." 
           minHeight: '150px',
           maxHeight: '400px',
           overflowY: 'auto',
+          overflowX: 'hidden',
           padding: '12px',
           outline: 'none',
           fontSize: '14px',
@@ -622,7 +622,13 @@ const RichTextEditor = ({ value, onChange, placeholder = "Nhập nội dung..." 
           fontFamily: 'Arial, sans-serif',
           cursor: 'text',
           userSelect: 'text',
-          WebkitUserSelect: 'text'
+          WebkitUserSelect: 'text',
+          wordWrap: 'break-word',
+          overflowWrap: 'anywhere',
+          wordBreak: 'break-all',
+          whiteSpace: 'normal',
+          maxWidth: '100%',
+          boxSizing: 'border-box'
         }}
         data-placeholder={placeholder}
         onFocus={(e) => {
@@ -679,6 +685,12 @@ const RichTextEditor = ({ value, onChange, placeholder = "Nhập nội dung..." 
           cursor: text !important;
           user-select: text;
           -webkit-user-select: text;
+          word-wrap: break-word !important;
+          overflow-wrap: anywhere !important;
+          word-break: break-all !important;
+          white-space: normal !important;
+          max-width: 100% !important;
+          box-sizing: border-box !important;
         }
         .rich-text-editor [contenteditable]:empty:before {
           content: attr(data-placeholder);
@@ -693,15 +705,25 @@ const RichTextEditor = ({ value, onChange, placeholder = "Nhập nội dung..." 
         .rich-text-editor [contenteditable]:focus:empty:before {
           color: #6c757d;
         }
+        .rich-text-editor [contenteditable] * {
+          cursor: inherit;
+          word-wrap: break-word !important;
+          overflow-wrap: anywhere !important;
+          word-break: break-all !important;
+          white-space: normal !important;
+          max-width: 100% !important;
+          box-sizing: border-box !important;
+        }
+        .rich-text-editor [contenteditable] pre,
+        .rich-text-editor [contenteditable] code {
+          white-space: pre-wrap !important;
+        }
         .rich-text-editor img {
           max-width: 100%;
           height: auto;
           display: block;
           margin: 10px 0;
           cursor: pointer;
-        }
-        .rich-text-editor [contenteditable] * {
-          cursor: inherit;
         }
         .rich-text-editor .rich-text-link {
           color: #0066cc !important;

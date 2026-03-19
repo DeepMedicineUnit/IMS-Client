@@ -143,6 +143,8 @@ const QuestionBank = () => {
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   const [bulkPoints, setBulkPoints] = useState(1);
   const [lastClickedIndex, setLastClickedIndex] = useState(null); // For Shift-Click selection
+  const [bulkEditQuestions, setBulkEditQuestions] = useState([]); // All questions for bulk edit (from API, across all pages)
+  const [bulkEditLoading, setBulkEditLoading] = useState(false); // Loading state when preparing bulk edit via API
   const [bulkEditFilters, setBulkEditFilters] = useState({
     enableTypeFilter: false,
     selectedTypes: ['mcq', 'multiple_response', 'true_false', 'short_answer', 'essay'],
@@ -162,6 +164,7 @@ const QuestionBank = () => {
   // Sorting state
   const [sortColumn, setSortColumn] = useState(null);
   const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
+  const ENABLE_QUESTION_POLLING = false; // Polling large lists can freeze the UI
 
   // Handle column sorting
   const handleSort = (column) => {
@@ -294,6 +297,23 @@ const QuestionBank = () => {
     }
   }, [showImportModal]);
 
+  // When conditions loaded (có currentCounts), tính trạng thái điều kiện cho Staff ngay khi mở modal (chưa có preview)
+  useEffect(() => {
+    if (!showImportModal || !isLMSStaff() || !questionConditions) return;
+    const existing = questionConditions.currentCounts;
+    if (existing) {
+      const result = checkConditionsMet([], existing);
+      setConditionsMet(result.met);
+      setConditionsStatus(result.status);
+    } else {
+      setConditionsMet(true);
+      setConditionsStatus(null);
+    }
+  }, [showImportModal, questionConditions]);
+
+  // Staff đã đạt đủ số lượng câu hỏi được phép (không cho phép vượt) -> chặn import thêm
+  const staffImportLimitReached = isLMSStaff() && questionConditions && questionConditions.totalQuestions != null && !questionConditions.allowExceed && conditionsStatus?.totalQuestions && (conditionsStatus.totalQuestions.current >= conditionsStatus.totalQuestions.required);
+
   // Fetch question conditions
   const fetchQuestionConditions = async () => {
     try {
@@ -307,14 +327,20 @@ const QuestionBank = () => {
     }
   };
 
-  // Check if conditions are met based on previewed questions
-  const checkConditionsMet = (questions) => {
+  // Check if conditions are met: questions = batch (e.g. preview); existingCounts = from API (đã import trước đó)
+  const checkConditionsMet = (questions, existingCounts = null) => {
     if (!questionConditions || !isLMSStaff()) {
       return { met: true, status: null };
     }
 
+    const existing = existingCounts || questionConditions.currentCounts || null;
+    const existingTotal = (existing && typeof existing.total === 'number') ? existing.total : 0;
+    const existingTypes = (existing && existing.questionTypes) ? existing.questionTypes : {};
+    const existingDiffs = (existing && existing.difficulties) ? existing.difficulties : {};
+    const existingBlooms = (existing && existing.bloomLevels) ? existing.bloomLevels : {};
+
     const status = {
-      totalQuestions: { required: questionConditions.totalQuestions, current: questions.length, met: true },
+      totalQuestions: { required: questionConditions.totalQuestions, current: existingTotal + questions.length, met: true },
       questionTypes: {},
       difficulties: {},
       bloomLevels: {}
@@ -322,17 +348,18 @@ const QuestionBank = () => {
 
     const allowExceed = questionConditions.allowExceed === true || questionConditions.allowExceed === 1;
 
-    // Check total questions
+    // Check total questions (existing + batch)
     if (questionConditions.totalQuestions !== null) {
       const totalRequired = parseInt(questionConditions.totalQuestions) || 0;
-      const totalCurrent = questions.length;
+      const totalCurrent = existingTotal + questions.length;
+      status.totalQuestions.current = totalCurrent;
       status.totalQuestions.met = totalCurrent >= totalRequired;
       status.totalQuestions.exceeded = !allowExceed && totalCurrent > totalRequired;
     }
 
     // Check question types
     if (questionConditions.questionTypes) {
-      const typeCounts = {};
+      const typeCounts = { ...existingTypes };
       questions.forEach(q => {
         const type = q.question_type || 'mcq';
         typeCounts[type] = (typeCounts[type] || 0) + 1;
@@ -352,7 +379,7 @@ const QuestionBank = () => {
 
     // Check difficulties
     if (questionConditions.difficulties) {
-      const difficultyCounts = {};
+      const difficultyCounts = { ...existingDiffs };
       questions.forEach(q => {
         const diff = q.difficulty_level || 'medium';
         difficultyCounts[diff] = (difficultyCounts[diff] || 0) + 1;
@@ -372,7 +399,7 @@ const QuestionBank = () => {
 
     // Check bloom levels
     if (questionConditions.bloomLevels) {
-      const bloomCounts = {};
+      const bloomCounts = { ...existingBlooms };
       questions.forEach(q => {
         const bloom = q.bloom_level || null;
         if (bloom) {
@@ -412,10 +439,11 @@ const QuestionBank = () => {
     return { met: allMet, status };
   };
 
-  // Check topic name exists when Staff enters topic name
+  // Check topic name exists when Staff/QA/Mod enters topic name
   useEffect(() => {
     const checkTopicName = async () => {
-      if (!isLMSStaff() || !importTemplateOptions.topic_name?.trim()) {
+      const canUseTopicName = isLMSStaff() || isLMSQA() || isLMSMod();
+      if (!canUseTopicName || !importTemplateOptions.topic_name?.trim()) {
         setTopicNameExists(false);
         return;
       }
@@ -440,7 +468,7 @@ const QuestionBank = () => {
     };
 
     checkTopicName();
-  }, [importTemplateOptions.topic_name, isLMSStaff]);
+  }, [importTemplateOptions.topic_name, isLMSStaff, isLMSQA, isLMSMod]);
 
   // Fetch answer statistics for questions
   const fetchAnswerStatistics = async (questionIds) => {
@@ -460,16 +488,41 @@ const QuestionBank = () => {
     }
   };
 
-  // Initial fetch
+  // Track if we're currently fetching to prevent loops
+  const isFetchingRef = React.useRef(false);
+
+  // Reset to page 1 when filters change (but don't fetch yet)
   useEffect(() => {
-    if (hasLMSQAPermission()) {
-      fetchQuestions();
-    }
+    setPagination(prev => {
+      if (prev.page === 1) return prev; // Already on page 1, no change needed
+      return { ...prev, page: 1 };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.search, filters.topic_id, filters.bloom_level, currentUser]);
+  }, [filters.search, filters.topic_id, filters.bloom_level, filters.question_type, filters.difficulty, filters.status]);
+
+  // Fetch when filters change (will use page 1 after reset)
+  useEffect(() => {
+    if (!hasLMSQAPermission() || isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    fetchQuestions().finally(() => {
+      isFetchingRef.current = false;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.search, filters.topic_id, filters.bloom_level, filters.question_type, filters.difficulty, filters.status, currentUser]);
+
+  // Fetch when page changes (separate effect to avoid loop)
+  useEffect(() => {
+    if (!hasLMSQAPermission() || isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    fetchQuestions().finally(() => {
+      isFetchingRef.current = false;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagination.page, pageSize]);
 
   // Background polling for questions - only update if data changed
   useEffect(() => {
+    if (!ENABLE_QUESTION_POLLING) return;
     if (!hasLMSQAPermission()) return;
     
     let pollInterval;
@@ -488,9 +541,10 @@ const QuestionBank = () => {
         if (filters.topic_id) params.append('topic_id', filters.topic_id);
         if (filters.bloom_level) params.append('bloom_level', filters.bloom_level);
         
-        // Gửi limit lớn để lấy tất cả câu hỏi
-        params.append('limit', '10000');
-        params.append('page', '1');
+        // Keep polling lightweight: only current page
+        const limit = pageSize > 0 ? pageSize : 20;
+        params.append('limit', String(limit));
+        params.append('page', String(pagination.page || 1));
 
         const response = await api.get(`/lms/questions?${params.toString()}`);
         const questionsData = response.data?.data;
@@ -508,9 +562,7 @@ const QuestionBank = () => {
         setQuestions(currentQuestions => {
           if (hasQuestionsDataChanged(currentQuestions, newQuestions)) {
             // Fetch answer statistics for QA role when questions change
-            if (isLMSQA() && newQuestions.length > 0) {
-              fetchAnswerStatistics(newQuestions.map(q => q.question_id));
-            }
+            if (isLMSQA() && newQuestions.length > 0) fetchAnswerStatistics(newQuestions.map(q => q.question_id));
             return newQuestions;
           }
           return currentQuestions; // No changes, keep current data
@@ -537,7 +589,7 @@ const QuestionBank = () => {
         clearInterval(pollInterval);
       }
     };
-  }, [filters.search, filters.topic_id, filters.bloom_level, currentUser]);
+  }, [ENABLE_QUESTION_POLLING, filters.search, filters.topic_id, filters.bloom_level, pageSize, pagination.page, currentUser]);
 
   // Background polling for topics - only update if data changed
   useEffect(() => {
@@ -664,20 +716,23 @@ const QuestionBank = () => {
       setLoading(true);
       const params = new URLSearchParams();
 
-      // Chỉ gửi search và topic_id lên API (các filter khác sẽ xử lý ở client-side)
+      // Use server-side filtering + pagination to avoid freezing UI
       if (filters.search) params.append('search', filters.search);
       if (filters.topic_id) params.append('topic_id', filters.topic_id);
       if (filters.bloom_level) params.append('bloom_level', filters.bloom_level);
+      if (filters.question_type) params.append('question_type', filters.question_type);
+      if (filters.difficulty) params.append('difficulty_level', filters.difficulty);
+      if (filters.status) params.append('approval_status', filters.status);
       
-      // Gửi limit lớn để lấy tất cả câu hỏi (hoặc ít nhất là 10000 để đảm bảo lấy đủ)
-      // API mặc định chỉ trả về 50, nên cần gửi limit lớn
-      params.append('limit', '10000');
-      params.append('page', '1');
+      const limit = pageSize > 0 ? pageSize : 20;
+      params.append('limit', String(limit));
+      params.append('page', String(pagination.page || 1));
 
       const response = await api.get(`/lms/questions?${params.toString()}`);
       
       const questionsData = response.data?.data;
       let questionsList = [];
+      const serverPagination = questionsData?.pagination;
       
       if (Array.isArray(questionsData)) {
         questionsList = questionsData;
@@ -685,10 +740,31 @@ const QuestionBank = () => {
         questionsList = questionsData.questions;
       }
       
-      // Debug: Log số lượng câu hỏi nhận được
-      console.log('Questions received from API:', questionsList.length);
-      
       setQuestions(questionsList);
+      if (serverPagination) {
+        setPagination(prev => {
+          // Only update if values actually changed to avoid triggering useEffect loops
+          const newPage = serverPagination.page || prev.page;
+          const newLimit = serverPagination.limit || limit;
+          const newTotalItems = serverPagination.total || 0;
+          const newTotalPages = serverPagination.pages || 0;
+          
+          if (prev.page === newPage && 
+              prev.limit === newLimit && 
+              prev.totalItems === newTotalItems && 
+              prev.totalPages === newTotalPages) {
+            return prev; // No change, return same object to avoid re-render
+          }
+          
+          return {
+            ...prev,
+            page: newPage,
+            limit: newLimit,
+            totalItems: newTotalItems,
+            totalPages: newTotalPages
+          };
+        });
+      }
       
       // Fetch answer statistics for QA role
       if (isLMSQA() && questionsList.length > 0) {
@@ -1068,6 +1144,10 @@ const QuestionBank = () => {
   const handleImportQuestions = async (e) => {
     e.preventDefault();
 
+    if (staffImportLimitReached) {
+      showAlertMessage('Bạn đã đạt đủ số lượng câu hỏi được phép. Không thể import thêm.', 'warning');
+      return;
+    }
     if (!importFile) {
       showAlertMessage('Vui lòng chọn file để import', 'warning');
       return;
@@ -1082,8 +1162,8 @@ const QuestionBank = () => {
       formData.append('file', importFile);
       formData.append('format', importFormat);
       
-      // Gửi các giá trị từ form để áp dụng vào các câu hỏi được import
-      if (isLMSStaff() && importTemplateOptions.topic_name?.trim()) {
+      // Gửi các giá trị từ form để áp dụng vào các câu hỏi được import (Staff/QA/Mod có thể dùng topic_name)
+      if ((isLMSStaff() || isLMSQA() || isLMSMod()) && importTemplateOptions.topic_name?.trim()) {
         formData.append('topic_name', importTemplateOptions.topic_name.trim());
       } else if (importTemplateOptions.topic_id) {
         formData.append('topic_id', importTemplateOptions.topic_id);
@@ -1501,9 +1581,8 @@ const QuestionBank = () => {
         format: importFormat
       };
 
-      // For Staff: send topic_name from form if provided
-      // Backend will use this topic_name for all questions
-      if (isLMSStaff() && importTemplateOptions.topic_name?.trim()) {
+      // For Staff/QA/Mod: send topic_name from form if provided (backend will find or create topic)
+      if ((isLMSStaff() || isLMSQA() || isLMSMod()) && importTemplateOptions.topic_name?.trim()) {
         requestBody.topic_name = importTemplateOptions.topic_name.trim();
       }
 
@@ -1584,15 +1663,11 @@ const QuestionBank = () => {
       params.append('format', importFormat);
       params.append('template', 'true');
       
-      // For Staff: use topic_name, for others: use topic_id
-      if (isLMSStaff()) {
-        if (importTemplateOptions.topic_name) {
-          params.append('topic_name', importTemplateOptions.topic_name);
-        }
-      } else {
-        if (importTemplateOptions.topic_id) {
-          params.append('topic_id', importTemplateOptions.topic_id);
-        }
+      // Staff/QA/Mod: có thể dùng topic_name (tạo mới) hoặc topic_id (chủ đề có sẵn)
+      if ((isLMSStaff() || isLMSQA() || isLMSMod()) && importTemplateOptions.topic_name?.trim()) {
+        params.append('topic_name', importTemplateOptions.topic_name.trim());
+      } else if (importTemplateOptions.topic_id) {
+        params.append('topic_id', importTemplateOptions.topic_id);
       }
       
       if (importTemplateOptions.question_type) {
@@ -1828,11 +1903,46 @@ const QuestionBank = () => {
   };
 
   // Handle bulk edit points
-  const handleBulkEdit = () => {
-    // Auto-select all filtered questions (based on current filters, not just displayed page)
-    // This allows editing all questions matching filters, not just the 20 on current page
-    const allFilteredQuestionIds = filteredQuestions.map(q => q.question_id);
-    setSelectedQuestions(allFilteredQuestionIds);
+  const handleBulkEdit = async () => {
+    try {
+      setBulkEditLoading(true);
+
+      // Lấy toàn bộ danh sách câu hỏi phù hợp bộ lọc hiện tại thông qua API (bỏ qua phân trang)
+      const params = new URLSearchParams();
+      if (filters.search) params.append('search', filters.search);
+      if (filters.topic_id) params.append('topic_id', filters.topic_id);
+      if (filters.bloom_level) params.append('bloom_level', filters.bloom_level);
+      if (filters.question_type) params.append('question_type', filters.question_type);
+      if (filters.difficulty) params.append('difficulty_level', filters.difficulty);
+      if (filters.status) params.append('approval_status', filters.status);
+
+      // Lấy tối đa tất cả câu hỏi khớp bộ lọc (server đã giới hạn hợp lý)
+      params.append('limit', '999999');
+      params.append('page', '1');
+
+      const response = await api.get(`/lms/questions?${params.toString()}`);
+      const questionsData = response.data?.data;
+
+      let allQuestions = [];
+      if (Array.isArray(questionsData)) {
+        allQuestions = questionsData;
+      } else if (questionsData && Array.isArray(questionsData.questions)) {
+        allQuestions = questionsData.questions;
+      }
+
+      if (!allQuestions || allQuestions.length === 0) {
+        setBulkEditQuestions([]);
+        setSelectedQuestions([]);
+        showAlertMessage('Không có câu hỏi nào phù hợp với bộ lọc hiện tại để điều chỉnh điểm hàng loạt', 'warning');
+        return;
+      }
+
+      // Lưu danh sách câu hỏi dùng cho điều chỉnh điểm hàng loạt (tất cả trang)
+      setBulkEditQuestions(allQuestions);
+
+      // Tự động chọn tất cả câu hỏi này
+      const allQuestionIds = allQuestions.map(q => q.question_id);
+      setSelectedQuestions(allQuestionIds);
     
     // Reset filters when opening modal
     setBulkEditFilters({
@@ -1869,14 +1979,26 @@ const QuestionBank = () => {
       }
     });
     setShowBulkEditModal(true);
+    } catch (error) {
+      console.error('Error preparing bulk edit:', error);
+      showAlertMessage(error.response?.data?.message || 'Lỗi khi chuẩn bị dữ liệu điều chỉnh điểm hàng loạt', 'danger');
+    } finally {
+      setBulkEditLoading(false);
+    }
   };
 
   // Get filtered questions for bulk edit
   const getFilteredQuestionsForBulkEdit = () => {
-    if (!questions || questions.length === 0) return [];
+    // Ưu tiên dùng danh sách câu hỏi lấy riêng cho bulk edit (tất cả trang).
+    // Nếu chưa có (trường hợp cũ), fallback về danh sách câu hỏi hiện có.
+    const sourceQuestions = (bulkEditQuestions && bulkEditQuestions.length > 0)
+      ? bulkEditQuestions
+      : questions;
+
+    if (!sourceQuestions || sourceQuestions.length === 0) return [];
     
     // Start with selected questions
-    let filtered = questions.filter(q => selectedQuestions.includes(q.question_id));
+    let filtered = sourceQuestions.filter(q => selectedQuestions.includes(q.question_id));
     
     // Apply topic filter if selected
     if (bulkEditFilters.selectedTopic) {
@@ -1903,11 +2025,17 @@ const QuestionBank = () => {
 
   // Count questions by type/difficulty/bloom from filtered questions (all questions matching current filters, not just displayed page)
   const getQuestionCountsByCategory = () => {
-    if (!filteredQuestions || filteredQuestions.length === 0) return { types: {}, difficulties: {}, blooms: {} };
+    // Khi đã có danh sách dành riêng cho bulk edit (từ API, toàn bộ trang),
+    // dùng danh sách đó để thống kê, tránh chỉ tính trên trang hiện tại.
+    const sourceQuestions = (bulkEditQuestions && bulkEditQuestions.length > 0)
+      ? bulkEditQuestions
+      : filteredQuestions;
+
+    if (!sourceQuestions || sourceQuestions.length === 0) return { types: {}, difficulties: {}, blooms: {} };
     
     const counts = { types: {}, difficulties: {}, blooms: {} };
     
-    filteredQuestions.forEach(q => {
+    sourceQuestions.forEach(q => {
       // Count by type
       if (q.question_type) {
         counts.types[q.question_type] = (counts.types[q.question_type] || 0) + 1;
@@ -2014,6 +2142,7 @@ const QuestionBank = () => {
       setShowBulkEditModal(false);
       setSelectedQuestions([]);
       setLastClickedIndex(null);
+      setBulkEditQuestions([]);
       setBulkPoints(1);
       setBulkEditFilters({
         selectedTopic: '',
@@ -2455,31 +2584,8 @@ const QuestionBank = () => {
     return filtered;
   }, [questions, filters.question_type, filters.difficulty, filters.status, sortColumn, sortDirection, answerStatistics]);
   
-  // Update pagination when filteredQuestions or pageSize changes
-  useEffect(() => {
-    const limit = pageSize === -1 ? filteredQuestions.length : (pageSize > 0 ? pageSize : 20);
-    const totalItems = filteredQuestions.length;
-    const totalPages = Math.ceil(totalItems / limit);
-    setPagination(prev => ({
-      ...prev,
-      limit,
-      totalItems,
-      totalPages,
-      page: prev.page > totalPages && totalPages > 0 ? totalPages : prev.page
-    }));
-  }, [filteredQuestions.length, pageSize]);
-
-  // Áp dụng pagination để hiển thị câu hỏi
-  const displayedQuestions = React.useMemo(() => {
-    const limit = pageSize > 0 ? pageSize : filteredQuestions.length;
-    if (limit === -1) {
-      return filteredQuestions; // Show all
-    }
-    return filteredQuestions.slice(
-      (pagination.page - 1) * limit,
-      pagination.page * limit
-    );
-  }, [filteredQuestions, pagination.page, pageSize]);
+  // Questions are paginated on the server; only sort/filter within the current page.
+  const displayedQuestions = filteredQuestions;
 
   // Filter topics ở client-side (for Mod role)
   const filteredTopics = React.useMemo(() => {
@@ -3914,8 +4020,11 @@ const QuestionBank = () => {
               >
                 <option value="">Tất cả chủ đề</option>
                 {Array.isArray(topics) && topics.map((topic) => {
-                  // Count questions in this topic from filtered questions (all questions matching current filters, not just displayed page)
-                  const count = filteredQuestions.filter(q => 
+                  // Count questions in this topic from bulkEditQuestions (all questions matching current filters, không chỉ trang hiện tại)
+                  const sourceQuestions = (bulkEditQuestions && bulkEditQuestions.length > 0)
+                    ? bulkEditQuestions
+                    : filteredQuestions;
+                  const count = sourceQuestions.filter(q => 
                     q.topic_id == topic.topic_id
                   ).length;
                   
@@ -4238,9 +4347,13 @@ const QuestionBank = () => {
                   ) : (
                     <>
                       <Form.Select
-                        className="form-control-modern"
+                        className="form-control-modern mb-2"
                         value={importTemplateOptions.topic_id}
-                        onChange={(e) => setImportTemplateOptions({ ...importTemplateOptions, topic_id: e.target.value })}
+                        onChange={(e) => setImportTemplateOptions({
+                          ...importTemplateOptions,
+                          topic_id: e.target.value,
+                          topic_name: '' // Clear topic name when chọn chủ đề có sẵn
+                        })}
                       >
                         <option value="">Không chọn (để trống)</option>
                         {Array.isArray(topics) && topics.map((topic) => (
@@ -4249,9 +4362,44 @@ const QuestionBank = () => {
                           </option>
                         ))}
                       </Form.Select>
-                      <Form.Text className="text-muted">
-                        Nếu chọn, file mẫu sẽ có sẵn chủ đề này
+                      <Form.Text className="text-muted d-block mb-2">
+                        Chọn chủ đề có sẵn. File mẫu sẽ có sẵn chủ đề này.
                       </Form.Text>
+                      <Form.Label className="mt-2">Hoặc nhập tên chủ đề mới</Form.Label>
+                      <Form.Control
+                        type="text"
+                        className={`form-control-modern ${importTemplateOptions.topic_name?.trim() ? (topicNameExists ? 'is-invalid' : (!checkingTopicName && !topicNameExists ? 'is-valid' : '')) : ''}`}
+                        placeholder="Nhập tên chủ đề (sẽ tạo nếu chưa có)"
+                        value={importTemplateOptions.topic_name || ''}
+                        onChange={(e) => {
+                          setImportTemplateOptions({
+                            ...importTemplateOptions,
+                            topic_name: e.target.value,
+                            topic_id: '' // Clear topic_id khi điền tên mới
+                          });
+                          setTopicNameExists(false);
+                        }}
+                        autoComplete="off"
+                      />
+                      {importTemplateOptions.topic_name?.trim() && (
+                        <>
+                          {checkingTopicName && (
+                            <Form.Text className="text-muted">
+                              <i className="fas fa-spinner fa-spin me-1"></i>Đang kiểm tra...
+                            </Form.Text>
+                          )}
+                          {!checkingTopicName && topicNameExists && (
+                            <Form.Text className="text-danger">
+                              <i className="fas fa-exclamation-circle me-1"></i>Tên chủ đề đã tồn tại. Vui lòng nhập tên khác.
+                            </Form.Text>
+                          )}
+                          {!checkingTopicName && !topicNameExists && (
+                            <Form.Text className="text-success">
+                              <i className="fas fa-check-circle me-1"></i>Tên chủ đề có thể sử dụng (sẽ tạo mới nếu chưa có).
+                            </Form.Text>
+                          )}
+                        </>
+                      )}
                     </>
                   )}
                 </Form.Group>
@@ -4367,7 +4515,10 @@ const QuestionBank = () => {
               <Button 
                 variant="outline-info" 
                 onClick={handleDownloadTemplate}
-                disabled={isLMSStaff() && (!importTemplateOptions.topic_name?.trim() || topicNameExists || checkingTopicName)}
+                disabled={
+                  (isLMSStaff() && (!importTemplateOptions.topic_name?.trim() || topicNameExists || checkingTopicName)) ||
+                  ((isLMSQA() || isLMSMod()) && importTemplateOptions.topic_name?.trim() && (topicNameExists || checkingTopicName))
+                }
               >
                 <i className="fas fa-download me-2"></i>Tải file mẫu
               </Button>
@@ -4376,7 +4527,7 @@ const QuestionBank = () => {
                   Vui lòng nhập tên chủ đề để tải file mẫu
                 </Form.Text>
               )}
-              {isLMSStaff() && importTemplateOptions.topic_name?.trim() && topicNameExists && (
+              {(isLMSStaff() || isLMSQA() || isLMSMod()) && importTemplateOptions.topic_name?.trim() && topicNameExists && (
                 <Form.Text className="text-danger text-center">
                   Tên chủ đề đã tồn tại. Vui lòng nhập tên khác để tải file mẫu.
                 </Form.Text>
@@ -4385,14 +4536,33 @@ const QuestionBank = () => {
 
             <hr />
 
+            {isLMSStaff() && conditionsStatus && (
+              <Alert variant={conditionsMet && !staffImportLimitReached ? "success" : "danger"} className="mb-3">
+                <strong><i className={`fas ${staffImportLimitReached ? 'fa-ban' : conditionsMet ? 'fa-check-circle' : 'fa-exclamation-circle'} me-2`}></i>
+                  Trạng thái điều kiện nhập câu hỏi:
+                </strong>
+                {questionConditions?.totalQuestions != null && (
+                  <div className="mt-2">
+                    Tổng số câu hỏi: <strong>{conditionsStatus.totalQuestions?.current ?? 0}</strong> / <strong>{conditionsStatus.totalQuestions?.required}</strong>
+                    {staffImportLimitReached && (
+                      <div className="mt-2 text-danger">
+                        <strong>Bạn đã đạt đủ số lượng câu hỏi được phép. Không thể import thêm.</strong>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Alert>
+            )}
+
             <Form.Group className="mb-3">
               <Form.Label>Chọn file để import *</Form.Label>
               <Form.Control
                 type="file"
                 className="form-control-modern"
-                accept={importFormat === 'excel' ? '.xlsx,.xls' : importFormat === 'word' ? '.docx,.doc' : '.txt'}
+                accept={importFormat === 'excel' ? '.xlsx,.xls' : importFormat === 'word' ? '.docx' : '.txt'}
                 onChange={(e) => setImportFile(e.target.files[0])}
                 required
+                disabled={staffImportLimitReached}
               />
               <Form.Text className="text-muted">
                 Chọn file phù hợp với định dạng đã chọn. Nếu file có chủ đề mới, hệ thống sẽ tự động tạo chủ đề đó.
@@ -4403,6 +4573,27 @@ const QuestionBank = () => {
             {isLMSStaff() && questionConditions && (
               <Alert variant="warning" className="mt-3">
                 <strong><i className="fas fa-info-circle me-2"></i>Điều kiện nhập câu hỏi:</strong>
+                {(() => {
+                  const rawDays = questionConditions.periodDays != null
+                    ? questionConditions.periodDays
+                    : (questionConditions.periodMonths ? questionConditions.periodMonths * 30 : null); // fallback cũ
+                  if (!rawDays || rawDays <= 0) return null;
+                  let value = rawDays;
+                  let unitLabel = 'ngày';
+                  if (rawDays % 30 === 0) {
+                    value = rawDays / 30;
+                    unitLabel = 'tháng';
+                  } else if (rawDays % 7 === 0) {
+                    value = rawDays / 7;
+                    unitLabel = 'tuần';
+                  }
+                  return (
+                    <div className="mt-2 mb-2">
+                      <i className="fas fa-calendar-alt me-2"></i>
+                      <strong>Chỉ tính câu hỏi trong {value} {unitLabel} gần nhất.</strong> Quá thời gian bạn có thể import thêm theo cùng điều kiện.
+                    </div>
+                  );
+                })()}
                 {questionConditions.allowExceed === false && (
                   <div className="mt-2 mb-2">
                     <i className="fas fa-exclamation-triangle text-danger me-2"></i>
@@ -4537,7 +4728,11 @@ const QuestionBank = () => {
               variant="primary" 
               className="btn-edit" 
               type="submit"
-              disabled={isLMSStaff() && (!importTemplateOptions.topic_name?.trim() || topicNameExists || checkingTopicName)}
+              disabled={
+                staffImportLimitReached ||
+                (isLMSStaff() && (!importTemplateOptions.topic_name?.trim() || topicNameExists || checkingTopicName)) ||
+                ((isLMSQA() || isLMSMod()) && importTemplateOptions.topic_name?.trim() && (topicNameExists || checkingTopicName))
+              }
             >
               <i className="fas fa-upload me-2"></i>Import
             </Button>

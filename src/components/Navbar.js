@@ -1,6 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import IconAnimation, { IconAnimation2 } from './icon_animation';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
+
+const DOTLOTTIE_SCRIPT = 'https://unpkg.com/@lottiefiles/dotlottie-wc@0.8.5/dist/dotlottie-wc.js';
+const ensureDotlottie = () => {
+  if (typeof document === 'undefined') return;
+  if (document.querySelector(`script[src="${DOTLOTTIE_SCRIPT}"]`)) return;
+  const s = document.createElement('script');
+  s.type = 'module';
+  s.src = DOTLOTTIE_SCRIPT;
+  document.head.appendChild(s);
+};
 import { useAuth } from '../contexts/AuthContext';
 import './NavbarStyles.css';
 
@@ -28,6 +37,11 @@ const Navbar = () => {
   const [hasApprovedExams, setHasApprovedExams] = useState(false);
   const navbarRef = useRef(null);
   const mobileToggleRef = useRef(null);
+
+  useEffect(() => { ensureDotlottie(); }, []);
+
+  const personalLottie = `${process.env.PUBLIC_URL || ''}/icon_animation_lottie/personal.lottie`;
+  const railExpanderLottie = `${process.env.PUBLIC_URL || ''}/icon_animation_lottie/ims-rail-expander.lottie`;
 
   // Helper function to get effective clinical role based on module_roles (prioritized over role)
   const getEffectiveClinicalRole = () => {
@@ -68,16 +82,57 @@ const Navbar = () => {
     // Hide everything for students at rail-level (handled outside), but
     // allow logic here to still work for other consumers
     if (moduleKey === 'personal') {
-      // Personal is visible for all non-student roles
-      return currentUser.role !== 'student';
+      // Chỉ hiển thị module Cá nhân khi có quyền human_resources (superadmin luôn thấy)
+      if (currentUser.role === 'superadmin') return true;
+      const moduleRoles = currentUser.module_roles || [];
+      return Array.isArray(moduleRoles) && moduleRoles.includes('human_resources');
     }
 
-    // Students have access to LMS by default (for learning purposes)
-    if (moduleKey === 'lms' && currentUser.role === 'student') {
-      return true;
+    // LMS: chỉ cho phép student hoặc có module_roles lms_*
+    // (không auto-allow superadmin nếu không có lms role)
+    if (moduleKey === 'lms') {
+      if (currentUser.role === 'student') return true;
+      const moduleRoles = currentUser.module_roles || [];
+      if (!Array.isArray(moduleRoles)) return false;
+      return (
+        moduleRoles.includes('lms_admin') ||
+        moduleRoles.includes('lms_qa') ||
+        moduleRoles.includes('lms_mod') ||
+        moduleRoles.includes('lms_staff')
+      );
     }
 
-    // Superadmin has access to all modules
+    // Đảm bảo chất lượng: qualityassurance_admin hoặc bất kỳ role evidence_*, qastandard_*, qaselfassessment_*, qatrainingprogram_*, qakpi_*
+    if (moduleKey === 'evidence') {
+      const moduleRoles = currentUser.module_roles || [];
+      if (!Array.isArray(moduleRoles)) return false;
+      if (moduleRoles.includes('qualityassurance_admin')) return true;
+      const qaPrefixes = ['evidence_', 'qastandard_', 'qaselfassessment_', 'qatrainingprogram_', 'qakpi_'];
+      return moduleRoles.some(role => qaPrefixes.some(prefix => role.startsWith(prefix)));
+    }
+
+    // Medical Records: chỉ superadmin hoặc có role medicalrecords_* mới thấy module "Nhập danh sách hồ sơ bệnh án sinh viên"
+    if (moduleKey === 'medical-records') {
+      if (currentUser.role === 'superadmin') return true;
+      const moduleRoles = currentUser.module_roles || [];
+      return moduleRoles.includes('medicalrecords_admin') || moduleRoles.includes('medicalrecords_mod') || moduleRoles.includes('medicalrecords_staff');
+    }
+
+    // Score Scanning: chỉ superadmin hoặc có role score_scanning_* (giống Medical Records)
+    if (moduleKey === 'score-scanning') {
+      if (currentUser.role === 'superadmin') return true;
+      const moduleRoles = currentUser.module_roles || [];
+      return moduleRoles.includes('score_scanning_admin') || moduleRoles.includes('score_scanning_mod') || moduleRoles.includes('score_scanning_staff');
+    }
+
+    // Lễ tân (Receptionist): đăng ký phòng họp, quản lý phòng
+    if (moduleKey === 'receptionist') {
+      if (currentUser.role === 'superadmin') return true;
+      const moduleRoles = currentUser.module_roles || [];
+      return moduleRoles.includes('receptionist_admin') || moduleRoles.includes('meeting_staff');
+    }
+
+    // Superadmin has access to all modules (trừ LMS đã xử lý ở trên)
     if (currentUser.role === 'superadmin') return true;
 
     // Check module_roles array
@@ -113,20 +168,49 @@ const Navbar = () => {
     return moduleRoles.includes('lms_qa');
   };
 
+  // Helper function to check if user has access to LMS Activity Logs (lms_admin, lms_qa)
+  const hasLMSActivityAccess = () => {
+    if (!currentUser) return false;
+
+    const moduleRoles = currentUser.module_roles || [];
+    if (!Array.isArray(moduleRoles)) return false;
+
+    return moduleRoles.includes('lms_admin') || moduleRoles.includes('lms_qa');
+  };
+
   // Get all accessible modules
-  const getAccessibleModules = () => {
+    const getAccessibleModules = () => {
     if (!currentUser) return [];
 
-    const modules = ['personal', 'clinical', 'ims', 'hr', 'lms', 'training', 'library', 'admission', 'research'];
+    const modules = ['personal', 'clinical', 'ims', 'hr', 'lms', 'training', 'library', 'admission', 'research', 'evidence', 'medical-records', 'score-scanning', 'receptionist'];
 
-    // Superadmin has access to all modules
-    if (currentUser.role === 'superadmin') return modules;
+    // Superadmin has access to all modules (trừ LMS nếu không có lms role)
+    if (currentUser.role === 'superadmin') {
+      return modules.filter(m => (m === 'lms' ? hasModuleAccess('lms') : true));
+    }
 
     // Filter modules based on module_roles
     const moduleRoles = currentUser.module_roles || [];
     if (!Array.isArray(moduleRoles)) return [];
 
     return modules.filter(module => {
+      if (module === 'personal') {
+        return moduleRoles.includes('human_resources');
+      }
+      if (module === 'evidence') {
+        if (moduleRoles.includes('qualityassurance_admin')) return true;
+        const qaPrefixes = ['evidence_', 'qastandard_', 'qaselfassessment_', 'qatrainingprogram_', 'qakpi_'];
+        return moduleRoles.some(role => qaPrefixes.some(prefix => role.startsWith(prefix)));
+      }
+      if (module === 'medical-records') {
+        return moduleRoles.some(role => role.startsWith('medicalrecords_'));
+      }
+      if (module === 'score-scanning') {
+        return moduleRoles.some(role => role.startsWith('score_scanning_'));
+      }
+      if (module === 'receptionist') {
+        return moduleRoles.includes('receptionist_admin') || moduleRoles.includes('meeting_staff');
+      }
       return moduleRoles.some(role => role.startsWith(`${module}_`));
     });
   };
@@ -233,6 +317,14 @@ const Navbar = () => {
     } else if (path.startsWith('/research/')) {
       newModule = 'research';
       console.log('[useEffect Route Sync] /research/ route detected, newModule: research');
+    } else if (path.startsWith('/quality-assurance/')) {
+      newModule = 'evidence';
+    } else if (path.startsWith('/medical-records')) {
+      newModule = 'medical-records';
+    } else if (path.startsWith('/score-scanning')) {
+      newModule = 'score-scanning';
+    } else if (path.startsWith('/receptionist')) {
+      newModule = 'receptionist';
     } else if (path.startsWith('/superadmin/users') || path.startsWith('/superadmin/systempage')) {
       // For /superadmin/users and /superadmin/system, preserve current module if it's clinical
       // Otherwise, set to ims (for backward compatibility when coming from ims module)
@@ -241,6 +333,9 @@ const Navbar = () => {
       } else {
         newModule = 'ims'; // Default to ims for other cases
       }
+    } else if (path.startsWith('/superadmin/announcements')) {
+      // Quản lý thông báo thuộc module Hệ thống (IMS)
+      newModule = 'ims';
     } else if (path.startsWith('/superadmin/') || path.startsWith('/admin/') || path.startsWith('/student/') || path.startsWith('/session/')) {
       // Clinical/attendance routes (other superadmin routes not covered above)
       newModule = 'clinical';
@@ -301,13 +396,23 @@ const Navbar = () => {
           console.log('[Module Switch] Already in clinical module, keeping it');
         }
         // Don't change to personal if user has clinical access
-      } else if (activeModule !== 'personal' && hasModuleAccess('personal')) {
-        console.log('[Module Switch] No clinical access, setting to personal');
-        // Other roles default to personal module when on root or unknown routes
-        setActiveModule('personal');
-        localStorage.setItem('imsModule', 'personal');
+      } else if (hasModuleAccess('personal')) {
+        if (activeModule !== 'personal') {
+          console.log('[Module Switch] No clinical access, setting to personal');
+          setActiveModule('personal');
+          localStorage.setItem('imsModule', 'personal');
+        }
       } else {
-        console.log('[Module Switch] No action taken - activeModule:', activeModule, 'hasPersonalAccess:', hasModuleAccess('personal'));
+        // Không có human_resources → đặt module đầu tiên user có quyền
+        const accessible = getAccessibleModules();
+        const first = accessible[0];
+        if (first && activeModule !== first) {
+          console.log('[Module Switch] No personal access, setting to first accessible:', first);
+          setActiveModule(first);
+          localStorage.setItem('imsModule', first);
+        } else {
+          console.log('[Module Switch] No action taken - activeModule:', activeModule, 'hasPersonalAccess:', hasModuleAccess('personal'));
+        }
       }
     }
   }, [location.pathname, currentUser, isLoggedIn, activeModule]);
@@ -489,7 +594,28 @@ const Navbar = () => {
       navigate('/admission/dashboard');
     } else if (moduleKey === 'research') {
       navigate('/research/dashboard');
+    } else if (moduleKey === 'evidence') {
+      navigate('/quality-assurance/dashboard');
+    } else if (moduleKey === 'medical-records') {
+      navigate('/medical-records/dashboard');
+    } else if (moduleKey === 'score-scanning') {
+      navigate('/score-scanning');
+    } else if (moduleKey === 'receptionist') {
+      const recRoles = currentUser?.module_roles || [];
+      const isRecAdmin = currentUser?.role === 'superadmin' || recRoles.includes('receptionist_admin');
+      navigate(isRecAdmin ? '/receptionist/dashboard' : '/receptionist/booking');
     }
+  };
+
+  // Menu tối thiểu khi user không có module nào (chỉ Hồ sơ)
+  const renderProfileOnlyLinks = () => {
+    if (!isLoggedIn) return null;
+    return (
+      <Link to="/profile" className={`nav-icon-link ${isActive('/profile') ? 'active' : ''}`}>
+        <i className="fas fa-user-circle"></i>
+        <span className="nav-text">Hồ sơ</span>
+      </Link>
+    );
   };
 
   // Personal: render navigation links
@@ -573,6 +699,16 @@ const Navbar = () => {
             <i className="fas fa-chart-bar"></i>
             <span className="nav-text">Báo cáo điểm danh</span>
           </Link>
+          <Link to="/admin/attendance-log" className={`nav-icon-link ${isActive('/admin/attendance-log') ? 'active' : ''}`}>
+            <i className="fas fa-history"></i>
+            <span className="nav-text">Nhật ký điểm danh</span>
+          </Link>
+          {currentUser?.role === 'superadmin' && (
+            <Link to="/admin/faceid-evaluation" className={`nav-icon-link ${isActive('/admin/faceid-evaluation') ? 'active' : ''}`}>
+              <i className="fas fa-id-card"></i>
+              <span className="nav-text">Đánh giá</span>
+            </Link>
+          )}
 
           {/* Đã chuyển 'Hệ thống' sang module IMS */}
         </>
@@ -610,6 +746,10 @@ const Navbar = () => {
             <i className="fas fa-chart-bar"></i>
             <span className="nav-text">Báo cáo điểm danh</span>
           </Link>
+          <Link to="/admin/attendance-log" className={`nav-icon-link ${isActive('/admin/attendance-log') ? 'active' : ''}`}>
+            <i className="fas fa-history"></i>
+            <span className="nav-text">Nhật ký điểm danh</span>
+          </Link>
         </>
       );
     }
@@ -634,6 +774,10 @@ const Navbar = () => {
           <Link to="/admin/attendance-reports" className={`nav-icon-link ${isActive('/admin/attendance-reports') ? 'active' : ''}`}>
             <i className="fas fa-chart-bar"></i>
             <span className="nav-text">Báo cáo điểm danh</span>
+          </Link>
+          <Link to="/admin/attendance-log" className={`nav-icon-link ${isActive('/admin/attendance-log') ? 'active' : ''}`}>
+            <i className="fas fa-history"></i>
+            <span className="nav-text">Nhật ký điểm danh</span>
           </Link>
         </>
       );
@@ -764,14 +908,20 @@ const Navbar = () => {
     );
   };
 
+  const hasLMSExamsAccess = () => {
+    if (!currentUser) return false;
+    const moduleRoles = currentUser.module_roles || [];
+    if (!Array.isArray(moduleRoles)) return false;
+    return moduleRoles.includes('lms_qa') || moduleRoles.includes('lms_mod');
+  };
+
   // LMS links
   const renderLMSLinks = () => {
     if (!isLoggedIn) return null;
 
-    // Check if user has lms_qa or lms_mod role
     const moduleRoles = currentUser?.module_roles || [];
     const hasLMSUserManagementAccess = Array.isArray(moduleRoles) && (
-      moduleRoles.includes('lms_qa') || moduleRoles.includes('lms_mod')
+      moduleRoles.includes('lms_qa')
     );
 
     return (
@@ -794,21 +944,25 @@ const Navbar = () => {
           <i className="fas fa-video"></i>
           <span className="nav-text">Lớp học trực tuyến</span>
         </Link>
+        {hasLMSExamsAccess() && (
+          <Link to="/lms/exams" className={`nav-icon-link ${isActive('/lms/exams') ? 'active' : ''}`}>
+            <i className="fas fa-clipboard-check"></i>
+            <span className="nav-text">Kỳ thi & Kiểm tra</span>
+          </Link>
+        )}
         {hasLMSQuestionsAccess() && (
           <>
-            <Link to="/lms/exams" className={`nav-icon-link ${isActive('/lms/exams') ? 'active' : ''}`}>
-              <i className="fas fa-clipboard-check"></i>
-              <span className="nav-text">Kỳ thi & Kiểm tra</span>
-            </Link>
             <Link to="/lms/questions" className={`nav-icon-link ${isActive('/lms/questions') ? 'active' : ''}`}>
               <i className="fas fa-database"></i>
               <span className="nav-text">Ngân hàng câu hỏi</span>
             </Link>
-            <Link to="/lms/grades" className={`nav-icon-link ${isActive('/lms/grades') ? 'active' : ''}`}>
-              <i className="fas fa-list-check"></i>
-              <span className="nav-text">Đánh giá & Điểm số</span>
-            </Link>
           </>
+        )}
+        {hasLMSQAAccess() && (
+          <Link to="/lms/grades" className={`nav-icon-link ${isActive('/lms/grades') ? 'active' : ''}`}>
+            <i className="fas fa-list-check"></i>
+            <span className="nav-text">Đánh giá & Điểm số</span>
+          </Link>
         )}
         {hasLMSQAAccess() && (
           <Link to="/lms/reports" className={`nav-icon-link ${isActive('/lms/reports') ? 'active' : ''}`}>
@@ -816,14 +970,18 @@ const Navbar = () => {
             <span className="nav-text">Báo cáo QA</span>
           </Link>
         )}
-        <Link to="/lms/integrations" className={`nav-icon-link ${isActive('/lms/integrations') ? 'active' : ''}`}>
-          <i className="fas fa-plug"></i>
-          <span className="nav-text">Tích hợp</span>
-        </Link>
-        <Link to="/lms/support" className={`nav-icon-link ${isActive('/lms/support') ? 'active' : ''}`}>
-          <i className="fas fa-headset"></i>
-          <span className="nav-text">Hỗ trợ & Analytics</span>
-        </Link>
+        {hasLMSActivityAccess() && (
+          <Link to="/lms/activity-logs" className={`nav-icon-link ${isActive('/lms/activity-logs') ? 'active' : ''}`}>
+            <i className="fas fa-stream"></i>
+            <span className="nav-text">Nhật ký hoạt động LMS</span>
+          </Link>
+        )}
+        {hasLMSQAAccess() && (
+          <Link to="/lms/mail-settings" className={`nav-icon-link ${isActive('/lms/mail-settings') ? 'active' : ''}`}>
+            <i className="fas fa-envelope"></i>
+            <span className="nav-text">Cài đặt mail</span>
+          </Link>
+        )}
       </>
     );
   };
@@ -1072,6 +1230,167 @@ const Navbar = () => {
     );
   };
 
+  // Evidence links
+  const renderEvidenceLinks = () => {
+    if (!isLoggedIn) return null;
+
+    const moduleRoles = currentUser?.module_roles || [];
+    const isQAAdminOnly = moduleRoles.includes('qualityassurance_admin');
+    const isAdminOrMod = moduleRoles.includes('qualityassurance_admin') || moduleRoles.includes('evidence_mod');
+    const isStaff = moduleRoles.includes('evidence_staff');
+
+    return (
+      <>
+        <Link to="/quality-assurance/dashboard" className={`nav-icon-link ${isActive('/quality-assurance/dashboard') ? 'active' : ''}`}>
+          <i className="fas fa-tachometer-alt"></i>
+          <span className="nav-text">Dashboard</span>
+        </Link>
+        
+        {isQAAdminOnly && (
+          <Link to="/quality-assurance/users" className={`nav-icon-link ${isActive('/quality-assurance/users') ? 'active' : ''}`}>
+            <i className="fas fa-users-cog"></i>
+            <span className="nav-text">Quản lý người dùng</span>
+          </Link>
+        )}
+        {isAdminOrMod && (
+          <>
+            <Link to="/quality-assurance/evidence-storage" className={`nav-icon-link ${isActive('/quality-assurance/evidence-storage') ? 'active' : ''}`}>
+              <i className="fas fa-folder-open"></i>
+              <span className="nav-text">Lưu trữ minh chứng</span>
+            </Link>
+            <Link to="/quality-assurance/reports" className={`nav-icon-link ${isActive('/quality-assurance/reports') ? 'active' : ''}`}>
+              <i className="fas fa-chart-bar"></i>
+              <span className="nav-text">Báo cáo</span>
+            </Link>
+            <Link to="/quality-assurance/mail-settings" className={`nav-icon-link ${isActive('/quality-assurance/mail-settings') ? 'active' : ''}`}>
+              <i className="fas fa-cog"></i>
+              <span className="nav-text">Cài đặt mail</span>
+            </Link>
+          </>
+        )}
+        
+        {isStaff && !isAdminOrMod && (
+          <Link to="/quality-assurance/staff" className={`nav-icon-link ${isActive('/quality-assurance/staff') ? 'active' : ''}`}>
+            <i className="fas fa-file-upload"></i>
+            <span className="nav-text">Lưu trữ minh chứng</span>
+          </Link>
+        )}
+      </>
+    );
+  };
+
+  // Score Scanning links - Quét điểm (chỉ user có score_scanning_* hoặc superadmin; admin thấy thêm Quản lý người dùng)
+  const renderScoreScanningLinks = () => {
+    if (!isLoggedIn) return null;
+    const moduleRoles = currentUser?.module_roles || [];
+    const isSSAdmin = moduleRoles.includes('score_scanning_admin');
+    const isSSAdminOnly = currentUser?.role === 'superadmin' || isSSAdmin; // Superadmin hoặc admin module mới thấy "Quản lý người dùng"
+    const hasSSAccess = currentUser?.role === 'superadmin' || moduleRoles.some(r => r && r.startsWith('score_scanning_'));
+    if (!hasSSAccess) return null;
+    const path = location?.pathname || '';
+    const isListOrDashboard = (path === '/score-scanning' || path.startsWith('/score-scanning/lists/')) && !path.includes('/score-scanning/capture/');
+    return (
+      <>
+        {isSSAdminOnly && (
+          <Link to="/score-scanning/users" className={`nav-icon-link ${isActive('/score-scanning/users') ? 'active' : ''}`}>
+            <i className="fas fa-users-cog"></i>
+            <span className="nav-text">Quản lý người dùng</span>
+          </Link>
+        )}
+        <Link to="/score-scanning/gemini-keys" className={`nav-icon-link ${isActive('/score-scanning/gemini-keys') ? 'active' : ''}`}>
+          <i className="fas fa-key"></i>
+          <span className="nav-text">Quản lý API Key</span>
+        </Link>
+        <Link to="/score-scanning" className={`nav-icon-link ${isListOrDashboard && !path.includes('/score-scanning/gemini-keys') && !path.includes('/score-scanning/users') ? 'active' : ''}`}>
+          <i className="fas fa-clipboard-list"></i>
+          <span className="nav-text">Danh sách điểm</span>
+        </Link>
+      </>
+    );
+  };
+
+  // Medical Records links - chỉ superadmin hoặc có quyền HSBASV (medicalrecords_*)
+  const renderMedicalRecordsLinks = () => {
+    if (!isLoggedIn) return null;
+
+    const moduleRoles = currentUser?.module_roles || [];
+    const hasAccess = currentUser.role === 'superadmin' ||
+                     moduleRoles.includes('medicalrecords_admin') ||
+                     moduleRoles.includes('medicalrecords_mod') ||
+                     moduleRoles.includes('medicalrecords_staff');
+    const isMRAdmin = moduleRoles.includes('medicalrecords_admin');
+    const isMRMod = moduleRoles.includes('medicalrecords_mod');
+    const canAccessManagement = isMRAdmin || isMRMod; // staff chỉ Dashboard, Reports, CI chưa chấm
+
+    if (!hasAccess) return null;
+
+    return (
+      <>
+        <Link to="/medical-records/dashboard" className={`nav-icon-link ${isActive('/medical-records/dashboard') ? 'active' : ''}`}>
+          <i className="fas fa-chart-line"></i>
+          <span className="nav-text">Dashboard</span>
+        </Link>
+        {isMRAdmin && (
+          <Link to="/medical-records/users" className={`nav-icon-link ${isActive('/medical-records/users') ? 'active' : ''}`}>
+            <i className="fas fa-users-cog"></i>
+            <span className="nav-text">Quản lý người dùng</span>
+          </Link>
+        )}
+        {canAccessManagement && (
+          <Link to="/medical-records" className={`nav-icon-link ${isActive('/medical-records') && !isActive('/medical-records/dashboard') && !isActive('/medical-records/users') && !isActive('/medical-records/reports') ? 'active' : ''}`}>
+            <i className="fas fa-file-import"></i>
+            <span className="nav-text">Nhập HSBA</span>
+          </Link>
+        )}
+        <Link to="/medical-records/reports" className={`nav-icon-link ${isActive('/medical-records/reports') ? 'active' : ''}`}>
+          <i className="fas fa-clipboard-list"></i>
+          <span className="nav-text">Theo dõi hồ sơ bệnh án</span>
+        </Link>
+      </>
+    );
+  };
+
+  // Lễ tân: Đăng ký phòng họp, Quản lý Phòng, Duyệt đặt phòng (admin)
+  const renderReceptionistLinks = () => {
+    if (!isLoggedIn) return null;
+    const moduleRoles = currentUser?.module_roles || [];
+    const isReceptionistAdmin = currentUser?.role === 'superadmin' || moduleRoles.includes('receptionist_admin');
+    return (
+      <>
+        {isReceptionistAdmin && (
+          <Link to="/receptionist/dashboard" className={`nav-icon-link ${isActive('/receptionist/dashboard') ? 'active' : ''}`}>
+            <i className="fas fa-chart-pie"></i>
+            <span className="nav-text">Dashboard</span>
+          </Link>
+        )}
+        <Link to="/receptionist/booking" className={`nav-icon-link ${isActive('/receptionist/booking') ? 'active' : ''}`}>
+          <i className="fas fa-calendar-plus"></i>
+          <span className="nav-text">Đăng ký phòng họp</span>
+        </Link>
+        {isReceptionistAdmin && (
+          <>
+          <Link to="/receptionist/users" className={`nav-icon-link ${isActive('/receptionist/users') ? 'active' : ''}`}>
+            <i className="fas fa-users-cog"></i>
+            <span className="nav-text">Quản lý người dùng</span>
+          </Link>
+          <Link to="/receptionist/rooms" className={`nav-icon-link ${isActive('/receptionist/rooms') ? 'active' : ''}`}>
+            <i className="fas fa-door-open"></i>
+            <span className="nav-text">Quản lý Phòng</span>
+          </Link>
+          <Link to="/receptionist/approvals" className={`nav-icon-link ${isActive('/receptionist/approvals') ? 'active' : ''}`}>
+            <i className="fas fa-clipboard-check"></i>
+            <span className="nav-text">Duyệt đặt phòng</span>
+          </Link>
+          <Link to="/receptionist/settings/mail" className={`nav-icon-link ${isActive('/receptionist/settings/mail') ? 'active' : ''}`}>
+            <i className="fas fa-cog"></i>
+            <span className="nav-text">Cài đặt mail</span>
+          </Link>
+          </>
+        )}
+      </>
+    );
+  };
+
   // IMS Ops links (exec dashboard, tickets, SLA, DWH, System, User Management)
   const renderIMSLinks = () => {
     if (!isLoggedIn) return null;
@@ -1084,6 +1403,10 @@ const Navbar = () => {
         <Link to="/superadmin/users" className={`nav-icon-link ${isActive('/superadmin/users') ? 'active' : ''}`}>
           <i className="fas fa-users-cog"></i>
           <span className="nav-text">Quản lý người dùng</span>
+        </Link>
+        <Link to="/superadmin/announcements" className={`nav-icon-link ${isActive('/superadmin/announcements') ? 'active' : ''}`}>
+          <i className="fas fa-bullhorn"></i>
+          <span className="nav-text">Quản lý thông báo</span>
         </Link>
         <Link to="/superadmin/systempage" className={`nav-icon-link ${isActive('/superadmin/systempage') ? 'active' : ''}`}>
           <i className="fas fa-cogs"></i>
@@ -1158,7 +1481,7 @@ const Navbar = () => {
       return (
         <div className="mobile-bottom-navbar">
           <Link to="/student/attendance" className={`mobile-nav-item ${isActive('/student/attendance') ? 'active' : ''}`}>
-            <i className="fas fa-home"></i>
+            <i className="fas fa-clipboard-check"></i>
           </Link>
           <Link to="/student/absence-requests" className={`mobile-nav-item ${isActive('/student/absence-requests') ? 'active' : ''}`}>
             <i className="fas fa-calendar-times"></i>
@@ -1334,9 +1657,9 @@ const Navbar = () => {
 
         case 'lms':
           // Check if user has lms_qa or lms_mod role
-          const moduleRoles = currentUser?.module_roles || [];
-          const hasLMSUserManagementAccess = Array.isArray(moduleRoles) && (
-            moduleRoles.includes('lms_qa') || moduleRoles.includes('lms_mod')
+          const lmsModuleRoles = currentUser?.module_roles || [];
+          const hasLMSUserManagementAccess = Array.isArray(lmsModuleRoles) && (
+            lmsModuleRoles.includes('lms_qa')
           );
           return (
             <>
@@ -1354,18 +1677,22 @@ const Navbar = () => {
               <Link to="/lms/live" className={`mobile-nav-item ${isActive('/lms/live') ? 'active' : ''}`}>
                 <i className="fas fa-video"></i>
               </Link>
+              {hasLMSExamsAccess() && (
+                <Link to="/lms/exams" className={`mobile-nav-item ${isActive('/lms/exams') ? 'active' : ''}`}>
+                  <i className="fas fa-clipboard-check"></i>
+                </Link>
+              )}
               {hasLMSQuestionsAccess() && (
                 <>
-                  <Link to="/lms/exams" className={`mobile-nav-item ${isActive('/lms/exams') ? 'active' : ''}`}>
-                    <i className="fas fa-clipboard-check"></i>
-                  </Link>
                   <Link to="/lms/questions" className={`mobile-nav-item ${isActive('/lms/questions') ? 'active' : ''}`}>
                     <i className="fas fa-database"></i>
                   </Link>
-                  <Link to="/lms/grades" className={`mobile-nav-item ${isActive('/lms/grades') ? 'active' : ''}`}>
-                    <i className="fas fa-list-check"></i>
-                  </Link>
                 </>
+              )}
+              {hasLMSQAAccess() && (
+                <Link to="/lms/grades" className={`mobile-nav-item ${isActive('/lms/grades') ? 'active' : ''}`}>
+                  <i className="fas fa-list-check"></i>
+                </Link>
               )}
               {hasLMSQAAccess() && (
                 <Link to="/lms/reports" className={`mobile-nav-item ${isActive('/lms/reports') ? 'active' : ''}`}>
@@ -1375,6 +1702,16 @@ const Navbar = () => {
               <Link to="/profile" className={`mobile-nav-item ${isActive('/profile') ? 'active' : ''}`}>
                 <i className="fas fa-user"></i>
               </Link>
+              {hasLMSActivityAccess() && (
+                <Link to="/lms/activity-logs" className={`mobile-nav-item ${isActive('/lms/activity-logs') ? 'active' : ''}`}>
+                  <i className="fas fa-stream"></i>
+                </Link>
+              )}
+              {hasLMSQAAccess() && (
+                <Link to="/lms/mail-settings" className={`mobile-nav-item ${isActive('/lms/mail-settings') ? 'active' : ''}`}>
+                  <i className="fas fa-envelope"></i>
+                </Link>
+              )}
             </>
           );
 
@@ -1486,6 +1823,140 @@ const Navbar = () => {
             </>
           );
 
+        case 'evidence':
+          const evidenceModuleRoles = currentUser?.module_roles || [];
+          const isQAAdminOnlyMobile = evidenceModuleRoles.includes('qualityassurance_admin');
+          const isEvidenceAdminOrModMobile = evidenceModuleRoles.includes('qualityassurance_admin') || evidenceModuleRoles.includes('evidence_mod');
+          return (
+            <>
+              <Link to="/quality-assurance/dashboard" className={`mobile-nav-item ${isActive('/quality-assurance/dashboard') ? 'active' : ''}`}>
+                <i className="fas fa-tachometer-alt"></i>
+              </Link>
+              {isQAAdminOnlyMobile && (
+                <Link to="/quality-assurance/users" className={`mobile-nav-item ${isActive('/quality-assurance/users') ? 'active' : ''}`}>
+                  <i className="fas fa-users-cog"></i>
+                </Link>
+              )}
+              {isEvidenceAdminOrModMobile && (
+                <>
+                  <Link to="/quality-assurance/evidence-storage" className={`mobile-nav-item ${isActive('/quality-assurance/evidence-storage') ? 'active' : ''}`}>
+                    <i className="fas fa-folder-open"></i>
+                  </Link>
+                  <Link to="/quality-assurance/reports" className={`mobile-nav-item ${isActive('/quality-assurance/reports') ? 'active' : ''}`}>
+                    <i className="fas fa-chart-bar"></i>
+                  </Link>
+                  <Link to="/quality-assurance/mail-settings" className={`mobile-nav-item ${isActive('/quality-assurance/mail-settings') ? 'active' : ''}`}>
+                    <i className="fas fa-cog"></i>
+                  </Link>
+                </>
+              )}
+              {!isEvidenceAdminOrModMobile && evidenceModuleRoles.includes('evidence_staff') && (
+                <Link to="/quality-assurance/staff" className={`mobile-nav-item ${isActive('/quality-assurance/staff') ? 'active' : ''}`}>
+                  <i className="fas fa-file-upload"></i>
+                </Link>
+              )}
+              <Link to="/profile" className={`mobile-nav-item ${isActive('/profile') ? 'active' : ''}`}>
+                <i className="fas fa-user"></i>
+              </Link>
+            </>
+          );
+
+        case 'score-scanning':
+          const ssModuleRoles = currentUser?.module_roles || [];
+          const hasScoreScanningAccess = currentUser?.role === 'superadmin' || ssModuleRoles.some(r => r && r.startsWith('score_scanning_'));
+          const isSSAdminMobile = ssModuleRoles.includes('score_scanning_admin');
+          if (!hasScoreScanningAccess) return null;
+          const ssPath = location?.pathname || '';
+          const isSSListOrDashboard = (ssPath === '/score-scanning' || ssPath.startsWith('/score-scanning/lists/')) && !ssPath.includes('/score-scanning/capture/');
+          return (
+            <>
+              {isSSAdminMobile && (
+                <Link to="/score-scanning/users" className={`mobile-nav-item ${isActive('/score-scanning/users') ? 'active' : ''}`}>
+                  <i className="fas fa-users-cog"></i>
+                </Link>
+              )}
+              <Link to="/score-scanning/gemini-keys" className={`mobile-nav-item ${isActive('/score-scanning/gemini-keys') ? 'active' : ''}`}>
+                <i className="fas fa-key"></i>
+              </Link>
+              <Link to="/profile" className={`mobile-nav-item ${isActive('/profile') ? 'active' : ''}`}>
+                <i className="fas fa-user"></i>
+              </Link>
+              <Link to="/score-scanning" className={`mobile-nav-item ${isSSListOrDashboard && !ssPath.includes('/score-scanning/gemini-keys') && !ssPath.includes('/score-scanning/users') ? 'active' : ''}`}>
+                <i className="fas fa-clipboard-list"></i>
+              </Link>
+            </>
+          );
+
+        case 'medical-records':
+          const mrModuleRoles = currentUser?.module_roles || [];
+          const hasMedicalRecordsAccess = currentUser.role === 'superadmin' ||
+                                         mrModuleRoles.includes('medicalrecords_admin') ||
+                                         mrModuleRoles.includes('medicalrecords_mod') ||
+                                         mrModuleRoles.includes('medicalrecords_staff');
+          const isMRAdminMobile = mrModuleRoles.includes('medicalrecords_admin');
+          const canAccessManagementMobile = mrModuleRoles.includes('medicalrecords_admin') || mrModuleRoles.includes('medicalrecords_mod');
+          if (!hasMedicalRecordsAccess) return null;
+          return (
+            <>
+              <Link to="/medical-records/dashboard" className={`mobile-nav-item ${isActive('/medical-records/dashboard') ? 'active' : ''}`}>
+                <i className="fas fa-chart-line"></i>
+              </Link>
+              {isMRAdminMobile && (
+                <Link to="/medical-records/users" className={`mobile-nav-item ${isActive('/medical-records/users') ? 'active' : ''}`}>
+                  <i className="fas fa-users-cog"></i>
+                </Link>
+              )}
+              <Link to="/medical-records/reports" className={`mobile-nav-item ${isActive('/medical-records/reports') ? 'active' : ''}`}>
+                <i className="fas fa-clipboard-list"></i>
+              </Link>
+              {canAccessManagementMobile && (
+                <Link to="/medical-records" className={`mobile-nav-item ${isActive('/medical-records') && !isActive('/medical-records/dashboard') && !isActive('/medical-records/users') && !isActive('/medical-records/reports') ? 'active' : ''}`}>
+                  <i className="fas fa-file-medical"></i>
+                </Link>
+              )}
+              <Link to="/profile" className={`mobile-nav-item ${isActive('/profile') ? 'active' : ''}`}>
+                <i className="fas fa-user"></i>
+              </Link>
+            </>
+          );
+
+        case 'receptionist':
+          const recModuleRoles = currentUser?.module_roles || [];
+          const hasReceptionistAccess = currentUser?.role === 'superadmin' || recModuleRoles.includes('receptionist_admin') || recModuleRoles.includes('meeting_staff');
+          const isRecAdminMobile = currentUser?.role === 'superadmin' || recModuleRoles.includes('receptionist_admin');
+          if (!hasReceptionistAccess) return null;
+          return (
+            <>
+              {isRecAdminMobile && (
+                <Link to="/receptionist/dashboard" className={`mobile-nav-item ${isActive('/receptionist/dashboard') ? 'active' : ''}`}>
+                  <i className="fas fa-chart-pie"></i>
+                </Link>
+              )}
+              <Link to="/receptionist/booking" className={`mobile-nav-item ${isActive('/receptionist/booking') ? 'active' : ''}`}>
+                <i className="fas fa-calendar-plus"></i>
+              </Link>
+              <Link to="/receptionist/rooms" className={`mobile-nav-item ${isActive('/receptionist/rooms') ? 'active' : ''}`}>
+                <i className="fas fa-door-open"></i>
+              </Link>
+              {isRecAdminMobile && (
+                <>
+                <Link to="/receptionist/approvals" className={`mobile-nav-item ${isActive('/receptionist/approvals') ? 'active' : ''}`}>
+                  <i className="fas fa-clipboard-check"></i>
+                </Link>
+                <Link to="/receptionist/users" className={`mobile-nav-item ${isActive('/receptionist/users') ? 'active' : ''}`}>
+                  <i className="fas fa-users-cog"></i>
+                </Link>
+                <Link to="/receptionist/settings/mail" className={`mobile-nav-item ${isActive('/receptionist/settings/mail') ? 'active' : ''}`}>
+                  <i className="fas fa-cog"></i>
+                </Link>
+                </>
+              )}
+              <Link to="/profile" className={`mobile-nav-item ${isActive('/profile') ? 'active' : ''}`}>
+                <i className="fas fa-user"></i>
+              </Link>
+            </>
+          );
+
         default:
           // Fallback to clinical module navigation
           if (currentUser?.role === 'superadmin') {
@@ -1576,11 +2047,14 @@ const Navbar = () => {
       {/* IMS left rail - show for all non-student roles; hide entirely for students */}
       {isLoggedIn && currentUser?.role !== 'student' && (
         <div className={`ims-rail d-none d-lg-flex ${isRailCollapsed ? 'collapsed' : ''}`}>
-          {hasModuleAccess('personal') && (
+          {/* Luôn giữ một ô (icon hoặc placeholder) cho vị trí Cá nhân để layout các icon khác không bị xê dịch */}
+          {hasModuleAccess('personal') ? (
             <div className={`ims-icon ims-icon-personal ${activeModule === 'personal' ? 'active' : ''}`} onClick={() => switchModule('personal')}>
-              <IconAnimation width={50} height={50} />
+              <dotlottie-wc src={personalLottie} autoplay loop style={{ width: '50px', height: '50px', display: 'block' }} />
               <span className="ims-tooltip">Cá nhân</span>
             </div>
+          ) : (
+            <div className="ims-icon ims-icon-personal ims-icon-placeholder" aria-hidden="true" />
           )}
           {hasModuleAccess('ims') && (
             <div className={`ims-icon ${activeModule === 'ims' ? 'active' : ''}`} onClick={() => switchModule('ims')}>
@@ -1630,9 +2104,33 @@ const Navbar = () => {
               <span className="ims-tooltip">LMS</span>
             </div>
           )}
+          {hasModuleAccess('evidence') && (
+            <div className={`ims-icon ${activeModule === 'evidence' ? 'active' : ''}`} onClick={() => switchModule('evidence')}>
+              <i className="fas fa-clipboard-check"></i>
+              <span className="ims-tooltip">Đảm bảo chất lượng</span>
+            </div>
+          )}
+          {hasModuleAccess('medical-records') && (
+            <div className={`ims-icon ${activeModule === 'medical-records' ? 'active' : ''}`} onClick={() => switchModule('medical-records')}>
+              <i className="fas fa-file-medical"></i>
+              <span className="ims-tooltip">Theo dõi HSBASV</span>
+            </div>
+          )}
+          {hasModuleAccess('score-scanning') && (
+            <div className={`ims-icon ${activeModule === 'score-scanning' ? 'active' : ''}`} onClick={() => switchModule('score-scanning')}>
+              <i className="fas fa-camera"></i>
+              <span className="ims-tooltip">Quét điểm</span>
+            </div>
+          )}
+          {hasModuleAccess('receptionist') && (
+            <div className={`ims-icon ${activeModule === 'receptionist' ? 'active' : ''}`} onClick={() => switchModule('receptionist')}>
+              <i className="fas fa-concierge-bell"></i>
+              <span className="ims-tooltip">Lễ tân</span>
+            </div>
+          )}
           {/* Collapse control at bottom */}
           <div className="ims-icon ims-icon-toggle" onClick={collapseRail}>
-            <IconAnimation2 width={34} height={34} />
+            <dotlottie-wc src={railExpanderLottie} autoplay loop style={{ width: '34px', height: '34px', display: 'block' }} />
             <span className="ims-tooltip">Ẩn IMS rail</span>
           </div>
         </div>
@@ -1647,7 +2145,7 @@ const Navbar = () => {
         <Link to="/" className="navbar-brand">
           <img src="/logo192.png" alt="Logo" className="logo-small" />
           <img src="/logo512.png" alt="PCTU IMS" className="logo-large" />
-          <span className="brand-text">MedManage IMS</span>
+          <span className="brand-text">PCTU-IMS v2.1.2</span>
         </Link>
 
         {/* Navigation Links */}
@@ -1657,11 +2155,8 @@ const Navbar = () => {
             renderClinicalLinks()
           ) : (
             <>
-              {/* IMS Module Switcher for Mobile - show for clinical_admin, clinical_mod, clinical_staff */}
-              {(() => {
-                const moduleRoles = currentUser?.module_roles || [];
-                return moduleRoles.some(role => ['clinical_admin', 'clinical_mod', 'clinical_staff'].includes(role));
-              })() && (
+              {/* IMS Module Switcher for Mobile - hiện khi user có ít nhất một module (không chỉ clinical) */}
+              {getAccessibleModules().length > 0 && (
                   <div className="mobile-ims-module-switcher d-lg-none">
                     <div className="nav-section-title">Chọn Module</div>
                     <div className="ims-module-grid">
@@ -1673,7 +2168,7 @@ const Navbar = () => {
                             closeMobileMenu();
                           }}
                         >
-                          <IconAnimation width={40} height={40} />
+                          <dotlottie-wc src={personalLottie} autoplay loop style={{ width: '40px', height: '40px', display: 'block' }} />
                           <span>Cá nhân</span>
                         </div>
                       )}
@@ -1773,22 +2268,76 @@ const Navbar = () => {
                           <span>LMS</span>
                         </div>
                       )}
+                      {hasModuleAccess('evidence') && (
+                        <div
+                          className={`ims-module-item ${activeModule === 'evidence' ? 'active' : ''}`}
+                          onClick={() => {
+                            switchModule('evidence');
+                            closeMobileMenu();
+                          }}
+                        >
+                          <i className="fas fa-clipboard-check"></i>
+                          <span>Đảm bảo chất lượng</span>
+                        </div>
+                      )}
+                      {hasModuleAccess('medical-records') && (
+                        <div
+                          className={`ims-module-item ${activeModule === 'medical-records' ? 'active' : ''}`}
+                          onClick={() => {
+                            switchModule('medical-records');
+                            closeMobileMenu();
+                          }}
+                        >
+                          <i className="fas fa-file-medical"></i>
+                          <span>Theo dõi HSBASV</span>
+                        </div>
+                      )}
+                      {hasModuleAccess('score-scanning') && (
+                        <div
+                          className={`ims-module-item ${activeModule === 'score-scanning' ? 'active' : ''}`}
+                          onClick={() => {
+                            switchModule('score-scanning');
+                            closeMobileMenu();
+                          }}
+                        >
+                          <i className="fas fa-camera"></i>
+                          <span>Quét điểm</span>
+                        </div>
+                      )}
+                      {hasModuleAccess('receptionist') && (
+                        <div
+                          className={`ims-module-item ${activeModule === 'receptionist' ? 'active' : ''}`}
+                          onClick={() => {
+                            switchModule('receptionist');
+                            closeMobileMenu();
+                          }}
+                        >
+                          <i className="fas fa-concierge-bell"></i>
+                          <span>Lễ tân</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
 
-              {/* Module-specific navigation links */}
-              {activeModule === 'personal' && renderPersonalLinks()}
-              {activeModule === 'clinical' && renderClinicalLinks()}
-              {activeModule === 'hr' && renderHRLinks()}
-              {activeModule === 'lms' && renderLMSLinks()}
-              {activeModule === 'ims' && renderIMSLinks()}
-              {activeModule === 'training' && renderTrainingLinks()}
-              {activeModule === 'library' && renderLibraryLinks()}
-              {activeModule === 'admission' && renderAdmissionLinks()}
-              {activeModule === 'research' && renderResearchLinks()}
+              {/* Module-specific navigation links - chỉ hiển thị khi user có quyền module đó */}
+              {activeModule === 'personal' && hasModuleAccess('personal') && renderPersonalLinks()}
+              {activeModule === 'clinical' && hasModuleAccess('clinical') && renderClinicalLinks()}
+              {activeModule === 'hr' && hasModuleAccess('hr') && renderHRLinks()}
+              {activeModule === 'lms' && hasModuleAccess('lms') && renderLMSLinks()}
+              {activeModule === 'ims' && hasModuleAccess('ims') && renderIMSLinks()}
+              {activeModule === 'training' && hasModuleAccess('training') && renderTrainingLinks()}
+              {activeModule === 'library' && hasModuleAccess('library') && renderLibraryLinks()}
+              {activeModule === 'admission' && hasModuleAccess('admission') && renderAdmissionLinks()}
+              {activeModule === 'research' && hasModuleAccess('research') && renderResearchLinks()}
+              {activeModule === 'evidence' && hasModuleAccess('evidence') && renderEvidenceLinks()}
+              {activeModule === 'medical-records' && hasModuleAccess('medical-records') && renderMedicalRecordsLinks()}
+              {activeModule === 'score-scanning' && hasModuleAccess('score-scanning') && renderScoreScanningLinks()}
+              {activeModule === 'receptionist' && hasModuleAccess('receptionist') && renderReceptionistLinks()}
               {/* Fallback: if no activeModule or on /profile without module, show personal links as default */}
               {(!activeModule || (location.pathname === '/profile' && !activeModule)) && hasModuleAccess('personal') && renderPersonalLinks()}
+              {/* User không có module nào và không có human_resources: chỉ hiển thị menu Hồ sơ */}
+              {currentUser?.role !== 'student' && getAccessibleModules().length === 0 && renderProfileOnlyLinks()}
             </>
           )}
         </div>
@@ -1799,7 +2348,7 @@ const Navbar = () => {
         </div>
         {isLoggedIn && currentUser?.role !== 'student' && isRailCollapsed && (
           <div className="ims-rail-expander" onClick={expandRail}>
-            <IconAnimation2 width={36} height={36} />
+            <dotlottie-wc src={railExpanderLottie} autoplay loop style={{ width: '36px', height: '36px', display: 'block' }} />
           </div>
         )}
       </div>

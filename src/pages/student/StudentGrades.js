@@ -616,7 +616,6 @@ const StudentGrades = () => {
         <div className="session-list-controls">
           <div className="search-controls">
             <div className="search-input">
-              <i className="fas fa-search"></i>
               <input
                 type="text"
                 placeholder={t('studentGrades.searchPlaceholder')}
