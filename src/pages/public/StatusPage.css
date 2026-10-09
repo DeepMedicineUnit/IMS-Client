@@ -908,3 +908,7 @@
 
 
 
+
+.status-team-message { margin: 20px 24px; padding: 18px 22px; border: 1px solid #ead8a8; border-radius: 12px; background: #fff8e8; color: #705622; line-height: 1.7; }
+.status-team-message strong { display: block; margin-bottom: 5px; }
+.status-team-message p { margin: 0; font-size: 14px; }

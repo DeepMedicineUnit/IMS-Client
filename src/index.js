@@ -1,3 +1,5 @@
+import { getStatusPageRedirect } from './utils/systemStatus';
+import ServerAvailabilityGuard from './components/ServerAvailabilityGuard';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
@@ -28,11 +30,14 @@ const getCurrentPort = () => {
 };
 
 const currentPort = getCurrentPort();
-const isStatusPagePort = currentPort === '3001';
+const isStatusPagePort = currentPort === '3001' || window.location.hostname === 'statusims.pctu.edu.vn';
+const statusRedirect = getStatusPageRedirect(window.location);
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 
-if (isStatusPagePort) {
+if (statusRedirect) {
+    window.location.replace(statusRedirect);
+} else if (isStatusPagePort) {
     // Port 3001: Chỉ render StatusPage standalone
     root.render(
         <React.StrictMode>
@@ -43,6 +48,7 @@ if (isStatusPagePort) {
     // Port khác (3000): Render App với routing đầy đủ
     root.render(
         <React.StrictMode>
+            <ServerAvailabilityGuard />
             <BrowserRouter>
                 <AuthProvider>
                     <App />

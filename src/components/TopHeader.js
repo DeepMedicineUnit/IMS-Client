@@ -1,3 +1,4 @@
+import { STATUS_PAGE_URL } from '../utils/systemStatus';
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -1202,8 +1203,8 @@ const TopHeader = () => {
             <div className="emergency-banner-icon">
               <i className="bi bi-exclamation-triangle-fill"></i>
             </div>
-            <Link
-              to="/status"
+            <a
+              href={STATUS_PAGE_URL}
               className="emergency-banner-text"
               style={{ textDecoration: 'none', color: 'inherit' }}
             >
@@ -1216,11 +1217,11 @@ const TopHeader = () => {
               {activeIncidents.length > 1 && (
                 <span className="mx-2">• Có thêm {activeIncidents.length - 1} sự cố khác</span>
               )}
-            </Link>
-            <Link to="/status" className="emergency-banner-view-all">
+            </a>
+            <a href={STATUS_PAGE_URL} className="emergency-banner-view-all">
               Xem trạng thái
               <i className="bi bi-arrow-right"></i>
-            </Link>
+            </a>
           </div>
         </div>
       )}

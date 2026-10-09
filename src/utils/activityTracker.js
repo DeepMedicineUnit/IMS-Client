@@ -888,7 +888,6 @@ class ActivityTracker {
       '/forgot-password': 'Quên mật khẩu',
       '/reset-password': 'Đặt lại mật khẩu',
       '/qr-login': 'Đăng nhập QR',
-      '/status': 'Trang trạng thái'
     };
 
     // Kiểm tra exact match trước

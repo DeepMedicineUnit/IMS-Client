@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import usePageTitle from '../../hooks/usePageTitle';
@@ -15,6 +16,8 @@ const statusApi = axios.create({
 });
 
 const StatusPage = () => {
+    const { i18n } = useTranslation();
+    const isEnglish = String(i18n.resolvedLanguage || i18n.language).startsWith('en');
     usePageTitle('Trạng thái hệ thống');
     const [status, setStatus] = useState(null);
     const [incidents, setIncidents] = useState([]);
@@ -223,11 +226,17 @@ const StatusPage = () => {
             <div className="status-container">
                 {/* Header */}
                 <header className="status-header">
-                    <h1>Trạng thái hệ thống PCTU IMS</h1>
+                    <h1>{isEnglish ? 'PCTU IMS service status' : 'Trạng thái hệ thống PCTU IMS'}</h1>
                     <p className="status-subtitle">
-                        Theo dõi trạng thái của tất cả các module và dịch vụ
+                        {isEnglish ? 'Service availability and the latest system updates, in one place.' : 'Theo dõi tình trạng dịch vụ và cập nhật mới nhất về hệ thống tại một nơi.'}
                     </p>
                 </header>
+                {status && status.status !== 'operational' && (
+                    <div className="status-team-message" role="status">
+                        <strong>{isEnglish ? 'Our technical team is working hard to restore service.' : 'Đội ngũ kỹ thuật đang khẩn trương khắc phục vấn đề.'}</strong>
+                        <p>{isEnglish ? 'We are investigating the cause and working to bring the system back as soon as possible. Thank you for your patience.' : 'Chúng tôi đang xác định nguyên nhân và nỗ lực đưa hệ thống hoạt động trở lại sớm nhất có thể. Cảm ơn bạn đã kiên nhẫn và thông cảm.'}</p>
+                    </div>
+                )}
 
                 {/* Skeleton khi đang tải - hiển thị layout ngay, không đợi vài giây trống */}
                 {loading && !status && (

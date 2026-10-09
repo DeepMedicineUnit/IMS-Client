@@ -1,3 +1,4 @@
+import { getStatusPageRedirect } from './utils/systemStatus';
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
@@ -17,7 +18,6 @@ import Register from './pages/auth/Register';
 import ForgotPassword from './pages/auth/ForgotPassword';
 import ResetPassword from './pages/auth/ResetPassword';
 import QRLogin from './pages/auth/QRLogin';
-import StatusPage from './pages/public/StatusPage';
 import SuperAdminDashboard from './pages/superadmin/SuperAdminDashboard';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import StaffDashboard from './pages/staff/StaffDashboard';
@@ -303,7 +303,10 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
 function App() {
     const { currentUser } = useAuth();
     const location = useLocation();
-    const isStatusPage = location.pathname === '/status';
+    useEffect(() => {
+        const redirect = getStatusPageRedirect(window.location);
+        if (redirect) window.location.replace(redirect);
+    }, [location.pathname]);
     const isAnnouncementPage = location.pathname === '/announcements' || location.pathname.startsWith('/announcements/');
     const isPublicBookingPage = location.pathname === '/dat-phong-cong-khai';
     const [isTakingExam, setIsTakingExam] = useState(false);
@@ -371,10 +374,10 @@ function App() {
             <AlertProvider>
                 <ConsoleWarning />
                 <PageTracker />
-                {!isTakingExam && !isStatusPage && !isAnnouncementPage && !isPublicBookingPage && <Navbar />}
-                {currentUser && !isTakingExam && !isStatusPage && <TopHeader />}
-                <div className={`${currentUser && !isStatusPage ? "main-content-with-header" : "main-content"} ${isAnnouncementPage ? "announcement-page-layout" : ""} ${isPublicBookingPage ? "public-booking-page-layout" : ""}`}>
-                <div className={isStatusPage || isPublicBookingPage ? "" : "container-fluid px-2"}>
+                {!isTakingExam && !isAnnouncementPage && !isPublicBookingPage && <Navbar />}
+                {currentUser && !isTakingExam && <TopHeader />}
+                <div className={`${currentUser ? "main-content-with-header" : "main-content"} ${isAnnouncementPage ? "announcement-page-layout" : ""} ${isPublicBookingPage ? "public-booking-page-layout" : ""}`}>
+                <div className={isPublicBookingPage ? "" : "container-fluid px-2"}>
                     <Routes>
                         {/* Public routes - redirect if already logged in */}
                         <Route 
@@ -391,8 +394,6 @@ function App() {
                         <Route path="/forgot-password" element={<ForgotPassword />} />
                         <Route path="/reset-password" element={<ResetPassword />} />
                         <Route path="/qr-login" element={<QRLogin />} />
-                        {/* Public Status Page - No authentication required */}
-                        <Route path="/status" element={<StatusPage />} />
                         {/* Lịch đặt phòng họp công khai - chỉ xem, không cần đăng nhập; đã login thì chuyển sang lịch nội bộ */}
                         <Route path="/dat-phong-cong-khai" element={currentUser ? <Navigate to="/receptionist/booking" replace /> : <MeetingRoomBooking isPublic />} />
 
